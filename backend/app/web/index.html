@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tradely — Private Quant Research</title>
+  <style>
+    :root { color-scheme: dark; --bg:#101319; --panel:#181e28; --line:#2a3342; --text:#e8edf5; --muted:#99a5b6; --accent:#93a5ff; --green:#41c98a; --red:#ff7777; }
+    * { box-sizing:border-box } body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 Inter,ui-sans-serif,system-ui,sans-serif }
+    header { padding:22px 28px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; gap:20px }
+    h1 { font-size:21px; margin:0; letter-spacing:.2px } .sub { color:var(--muted); font-size:12px }
+    main { max-width:1320px; margin:24px auto; padding:0 22px 40px }
+    .toolbar,.panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; }
+    .toolbar { display:flex; flex-wrap:wrap; align-items:end; gap:12px; margin-bottom:16px }
+    label { display:block; color:var(--muted); font-size:11px; margin-bottom:5px; text-transform:uppercase; letter-spacing:.07em }
+    input,select,button { background:#111722; color:var(--text); border:1px solid var(--line); border-radius:7px; padding:10px 12px; font:inherit }
+    input { min-width:165px } button { cursor:pointer; background:#293653; border-color:#425780 } button:hover { filter:brightness(1.15) }
+    .grid { display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:14px }
+    .panel { min-width:0 } .span-8 { grid-column:span 8 } .span-4 { grid-column:span 4 } .span-6 { grid-column:span 6 } .span-12 { grid-column:span 12 }
+    h2 { font-size:14px; margin:0 0 12px } .price { font-size:28px; font-weight:650; letter-spacing:-.7px }
+    .muted { color:var(--muted) } .badge { display:inline-block; border:1px solid var(--line); border-radius:30px; padding:3px 9px; font-size:11px; color:var(--muted) }
+    .buy { color:var(--green); border-color:#276b50 } .wait { color:#e5bc68 } .error { color:var(--red) }
+    table { width:100%; border-collapse:collapse; font-size:12px } th,td { text-align:left; padding:8px 7px; border-bottom:1px solid var(--line) } th { color:var(--muted); font-weight:500 }
+    .list { display:grid; gap:10px } .item { padding:10px 0; border-bottom:1px solid var(--line) } .item:last-child { border:0 }
+    a { color:var(--accent); text-decoration:none } a:hover { text-decoration:underline }
+    pre { overflow:auto; color:#cbd5e1; font-size:11px; background:#101722; padding:12px; border-radius:8px }
+    .notice { margin-top:12px; color:var(--muted); font-size:11px } .error-text { color:var(--red); white-space:pre-wrap }
+    @media(max-width:850px) { .span-8,.span-4,.span-6 { grid-column:span 12 } header { padding:18px } main { padding:0 12px } }
+  </style>
+</head>
+<body>
+<header>
+  <div><h1>Tradely <span class="badge">Private · Local</span></h1><div class="sub">Rule-based market research · No AI · No order execution · No paper trading</div></div>
+  <div id="health" class="sub">Checking local API…</div>
+</header>
+<main>
+  <section class="toolbar">
+    <div><label for="symbol">Symbol</label><input id="symbol" value="RELIANCE" autocomplete="off" /></div>
+    <div><label for="companyName">Company / asset name (optional)</label><input id="companyName" placeholder="Reliance Industries" autocomplete="off" /></div>
+    <div><label for="market">Market</label><select id="market"><option value="india">Indian equities</option><option value="global">International equities</option><option value="crypto">Crypto spot</option></select></div>
+    <div><label for="exchange">Exchange</label><select id="exchange"><option value="NSE">NSE</option><option value="BSE">BSE</option><option value="NASDAQ">NASDAQ / US</option></select></div>
+    <div><label for="interval">Interval</label><select id="interval"><option value="1d">1 Day</option><option value="1h">1 Hour</option><option value="15m">15 Minutes</option><option value="1wk">1 Week</option></select></div>
+    <div><label for="days">History (days)</label><select id="days"><option>365</option><option selected>500</option><option>1000</option><option>1825</option></select></div>
+    <button id="analyze">Load analysis</button>
+    <button id="addWatch">Add to watchlist</button>
+  </section>
+  <div id="error" class="error-text"></div>
+  <section class="grid">
+    <div class="panel span-8">
+      <h2>Instrument snapshot <span id="source" class="badge">No data loaded</span></h2>
+      <div id="price" class="price">—</div><div id="asof" class="sub">Load a symbol to begin.</div>
+      <div class="notice" id="quality"></div>
+    </div>
+    <div class="panel span-4">
+      <h2>Strategy state</h2><div id="signal" class="badge">Not evaluated</div><p id="signalText" class="muted">The strategy requires completed historical candles.</p>
+      <div id="signalChecks" class="list"></div>
+    </div>
+    <div class="panel span-8">
+      <h2>Recent candles</h2><div style="overflow:auto"><table><thead><tr><th>Time</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>Volume</th></tr></thead><tbody id="candles"><tr><td colspan="6" class="muted">No data.</td></tr></tbody></table></div>
+    </div>
+    <div class="panel span-4">
+      <h2>Indicator values</h2><div style="overflow:auto"><table><thead><tr><th>Indicator</th><th>Value</th></tr></thead><tbody id="indicators"><tr><td colspan="2" class="muted">No data.</td></tr></tbody></table></div>
+    </div>
+    <div class="panel span-6">
+      <h2>Company / asset news</h2><div id="news" class="list muted">No news loaded.</div>
+    </div>
+    <div class="panel span-6">
+      <h2>Company events & filings</h2><div id="events" class="list muted">No events loaded.</div>
+    </div>
+    <div class="panel span-6">
+      <h2>Watchlist</h2><div id="watchlist" class="list muted">No watchlist items.</div>
+    </div>
+    <div class="panel span-6">
+      <h2>Provider configuration</h2><div id="providers" class="list muted">Loading…</div>
+    </div>
+  </section>
+  <p class="notice">Research tool only. Signals are deterministic but are not proof of future performance. Data providers can be delayed, incomplete or unavailable. Verify prices, corporate actions and event details at the original source. Tradely does not place orders.</p>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+const safeUrl = (value) => { try { const url = new URL(value); return ['http:','https:'].includes(url.protocol) ? url.href : '#'; } catch { return '#'; } };
+const n = (v) => v === null || v === undefined || Number.isNaN(Number(v)) ? "—" : Number(v).toLocaleString(undefined,{maximumFractionDigits:4});
+const marketState = () => ({symbol:$('symbol').value.trim().toUpperCase(),market:$('market').value,exchange:$('exchange').value,interval:$('interval').value,days:$('days').value});
+async function api(path, options={}) { const r=await fetch(path,{headers:{'Content-Type':'application/json'},...options}); const data=await r.json().catch(()=>({detail:r.statusText})); if(!r.ok) throw new Error(data.detail || `HTTP ${r.status}`); return data; }
+function setError(message='') { $('error').textContent=message; }
+async function loadAnalysis() {
+  const s=marketState(); if(!s.symbol) return setError('Enter a symbol.'); setError('Loading market data…');
+  try {
+    const q=new URLSearchParams({market:s.market,interval:s.interval,days:s.days}); if(s.exchange) q.set('exchange',s.exchange);
+    const a=await api(`/api/instruments/${encodeURIComponent(s.symbol)}/analysis?${q}`);
+    $('price').textContent=n(a.latest.close)+(s.market==='india'?' INR':''); $('source').textContent=a.source; $('asof').textContent=`Last candle: ${new Date(a.as_of).toLocaleString()} · ${a.interval}`;
+    $('quality').textContent=`Corporate-action adjusted: ${a.is_adjusted?'Yes':'No / unconfirmed'}${a.warnings.length?' · '+a.warnings.join(' '):''}`;
+    $('signal').textContent=a.strategy.state; $('signal').className='badge '+(a.strategy.state==='BUY'?'buy':a.strategy.state==='SELL'?'error':a.strategy.state==='WAIT'?'wait':''); $('signalText').textContent=a.strategy.explanation;
+    $('signalChecks').innerHTML=a.strategy.conditions.map(c=>`<div class="item"><strong>${c.passed?'✓':'–'} ${c.name}</strong><div class="sub">${c.explanation} · observed ${n(c.observed)} · threshold ${n(c.threshold)}</div></div>`).join('') || '<div class="muted">No conditions evaluated.</div>';
+    $('indicators').innerHTML=Object.entries(a.indicators).map(([k,v])=>`<tr><td>${k}</td><td>${n(v)}</td></tr>`).join('');
+    $('candles').innerHTML=a.candles.slice(-30).reverse().map(c=>`<tr><td>${new Date(c.timestamp).toLocaleDateString()}</td><td>${n(c.open)}</td><td>${n(c.high)}</td><td>${n(c.low)}</td><td>${n(c.close)}</td><td>${n(c.volume)}</td></tr>`).join('');
+    setError(''); await Promise.all([loadNews(s),loadEvents(s),loadWatchlist()]);
+  } catch(e) { setError(e.message); }
+}
+async function loadNews(s=marketState()) {
+  $('news').textContent='Loading…';
+  try {
+    const q=new URLSearchParams({market:s.market});
+    if($('companyName').value.trim()) q.set('company_name',$('companyName').value.trim());
+    const d=await api(`/api/instruments/${encodeURIComponent(s.symbol)}/news?${q}`);
+    $('news').innerHTML=d.items.length?d.items.map(x=>`<div class="item"><a href="${safeUrl(x.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(x.title)}</a><div class="sub">${escapeHtml(x.publisher||x.source)} · ${x.published_at?new Date(x.published_at).toLocaleString():'Publication time unavailable'}</div></div>`).join(''):'No news items returned by configured sources.';
+  } catch(e) {$('news').textContent=e.message;}
+}
+async function loadEvents(s=marketState()) {
+  $('events').textContent='Loading…'; try { const d=await api(`/api/instruments/${encodeURIComponent(s.symbol)}/events?market=${s.market}`); const eventHtml=d.events.map(x=>`<div class="item"><strong>${escapeHtml(x.event_type)}</strong><div>${escapeHtml(x.description)}</div><div class="sub">${escapeHtml(x.event_date||'Date unavailable')} · ${escapeHtml(x.status)} · ${escapeHtml(x.source)}</div></div>`).join(''); const linkHtml=d.official_source_links.map(x=>`<div class="item"><a href="${safeUrl(x.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(x.label)}</a></div>`).join(''); $('events').innerHTML=(eventHtml||'<div class="muted">No verified structured event data returned.</div>')+linkHtml; } catch(e) {$('events').textContent=e.message;}
+}
+async function loadWatchlist() { try { const d=await api('/api/watchlist'); $('watchlist').innerHTML=d.items.length?d.items.map(x=>`<div class="item"><strong>${escapeHtml(x.symbol)}</strong> <span class="badge">${escapeHtml(x.market)}</span> <button data-remove="${escapeHtml(x.symbol)}" data-market="${escapeHtml(x.market)}" data-exchange="${escapeHtml(x.exchange||'')}">Remove</button></div>`).join(''):'No watchlist items.'; } catch(e) {$('watchlist').textContent=e.message;} }
+async function loadProviders() { try {const d=await api('/api/providers/status'); $('providers').innerHTML=d.providers.map(x=>`<div class="item"><strong>${escapeHtml(x.name)}</strong> <span class="badge">${x.configured?'configured':'not configured'}</span><div class="sub">${escapeHtml(x.note)}</div></div>`).join('');}catch(e){$('providers').textContent=e.message;} }
+$('analyze').addEventListener('click',loadAnalysis);
+$('symbol').addEventListener('keydown',e=>{if(e.key==='Enter')loadAnalysis();});
+$('market').addEventListener('change',()=>{const m=$('market').value; $('exchange').disabled=m==='crypto'; if(m==='india'){$('exchange').value='NSE';} else if(m==='global'){$('exchange').value='NASDAQ';}});
+$('addWatch').addEventListener('click',async()=>{try{const s=marketState();await api('/api/watchlist',{method:'POST',body:JSON.stringify({symbol:s.symbol,market:s.market,exchange:s.exchange})});await loadWatchlist();setError('');}catch(e){setError(e.message);}});
+$('watchlist').addEventListener('click',async e=>{const b=e.target.closest('button[data-remove]');if(!b)return;try{await api(`/api/watchlist/${b.dataset.market}/${b.dataset.remove}?exchange=${b.dataset.exchange}`,{method:'DELETE'});await loadWatchlist();}catch(err){setError(err.message);}});
+api('/api/health').then(d=>$('health').textContent=`API ${d.status} · ${d.mode}`).catch(e=>$('health').textContent=`API unavailable: ${e.message}`);
+loadProviders(); loadWatchlist();
+</script>
+</body>
+</html>
