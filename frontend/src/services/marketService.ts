@@ -8,8 +8,9 @@ import type {
 } from '../types/api';
 
 export interface CandleQuery {
-  symbol: string;
-  market: Market;
+  instrumentId?: string | null;
+  symbol?: string;
+  market?: Market;
   exchange?: string | null;
   interval?: string;
   days?: number;
@@ -30,8 +31,9 @@ export const marketService = {
   getCandles(query: CandleQuery, signal?: AbortSignal): Promise<CandlesResponse> {
     return apiRequest<CandlesResponse>('/api/market/candles', {
       query: {
-        symbol: query.symbol,
-        market: query.market,
+        instrument_id: query.instrumentId ?? undefined,
+        symbol: query.symbol ?? undefined,
+        market: query.market ?? undefined,
         exchange: query.exchange ?? undefined,
         interval: query.interval ?? '1d',
         days: query.days ?? 365,

@@ -41,6 +41,44 @@ export function timeframesFor(market: Market): TimeframeOption[] {
   return market === 'crypto' ? CRYPTO_TIMEFRAMES : EQUITY_TIMEFRAMES;
 }
 
+const ALL_TIMEFRAMES: TimeframeOption[] = [
+  ...EQUITY_TIMEFRAMES,
+  ...CRYPTO_TIMEFRAMES.filter(
+    (option) => !EQUITY_TIMEFRAMES.some((existing) => existing.id === option.id),
+  ),
+];
+
+/** Timeframes exposed by the verified provider for one resolved instrument. */
+export function timeframesForIntervals(intervals: string[] | null | undefined): TimeframeOption[] {
+  if (!intervals || intervals.length === 0) {
+    return [];
+  }
+  const supported = new Set(intervals);
+  return ALL_TIMEFRAMES.filter((option) => supported.has(option.id));
+}
+
+export function normalizeIntervalForIntervals(
+  intervals: string[] | null | undefined,
+  interval: string,
+): string {
+  if (!intervals || intervals.length === 0) {
+    return interval;
+  }
+  const supported = new Set(intervals);
+  let normalized = interval;
+  if (supported.has('1w') && interval === '1wk') normalized = '1w';
+  else if (supported.has('1wk') && interval === '1w') normalized = '1wk';
+  else if (supported.has('1M') && interval === '1mo') normalized = '1M';
+  else if (supported.has('1mo') && interval === '1M') normalized = '1mo';
+  if (supported.has(normalized)) {
+    return normalized;
+  }
+  if (supported.has('1d')) {
+    return '1d';
+  }
+  return intervals[0];
+}
+
 export function normalizeIntervalForMarket(market: Market, interval: string): string {
   const supported = timeframesFor(market);
   let normalized = interval;

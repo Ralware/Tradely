@@ -1,14 +1,16 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
 import { useSelectedInstrument } from '../../contexts/SelectedInstrumentContext';
 import { analysisService } from '../../services/analysisService';
 import { newsService } from '../../services/newsService';
 import { portfolioService } from '../../services/portfolioService';
+import type { Instrument } from '../../types/api';
 import { changeDigits, cn, formatDate, formatNumber, formatPercent, formatSignedFixed, toneForNumber } from '../../utils/format';
-import { defaultDaysFor, intervalLabel, isIntradayInterval, timeframesFor } from '../../utils/timeframes';
+import { defaultDaysFor, intervalLabel, isIntradayInterval } from '../../utils/timeframes';
 import { notifyWatchlistChanged } from '../../utils/events';
+import { instrumentPath } from '../../utils/navigation';
 import { Badge } from '../common/Badge';
 import { Button } from '../common/Button';
 import { Card } from '../common/Card';
@@ -18,13 +20,12 @@ import { Tabs } from '../common/Tabs';
 import { PriceChart } from '../charts/PriceChart';
 import type { OverlayToggles } from '../charts/PriceChart';
 import { IndicatorPanel } from '../charts/IndicatorPanel';
+import { InstrumentSearch } from '../instruments/InstrumentSearch';
 import { SignalCard } from '../signals/SignalCard';
 import { RiskCalculator } from '../signals/RiskCalculator';
 import { CandleTable } from '../tables/CandleTable';
 import { IndicatorTable } from '../tables/IndicatorTable';
 import { NewsList } from '../tables/NewsList';
-import { InstrumentForm } from './InstrumentForm';
-import type { InstrumentQuery } from './InstrumentForm';
 import { TechnicalGauge } from './TechnicalGauge';
 import { TechnicalTable } from './TechnicalTable';
 import { TimeframeSelector } from './TimeframeSelector';
@@ -66,13 +67,17 @@ function priceDigits(value: number | null): number {
   return 6;
 }
 
+function marketLabel(market: string, assetType: string | undefined): string {
+  if (assetType === 'crypto') return 'Crypto';
+  return market === 'india' ? 'India' : 'Global';
+}
+
 export function AnalysisWorkspace({ variant }: AnalysisWorkspaceProps) {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const selected = useSelectedInstrument();
-  const defaultSymbol = variant === 'crypto' ? 'BTCUSDT' : 'RELIANCE';
 
-  const { symbol, market, exchange, interval, days } = selected;
-  const companyName = searchParams.get('company') ?? '';
+  const { symbol, name, market, exchange, interval, days, instrumentId, capabilities } = selected;
   const enabled = selected.enabled;
 
   const [overlays, setOverlays] = useState<OverlayToggles>({
@@ -90,37 +95,34 @@ export function AnalysisWorkspace({ variant }: AnalysisWorkspaceProps) {
   }>({ loading: false, message: null, error: null });
 
   const analysis = useApi(
-    (signal) =>
-      analysisService.getAnalysis({ symbol, market, exchange, interval, days }, signal),
-    [symbol, market, exchange, interval, days],
+    (signal) => analysisService.getAnalysis({ instrumentId, interval, days }, signal),
+    [instrumentId, interval, days],
     { enabled },
   );
 
   const indicatorSeries = useApi(
     (signal) =>
       analysisService.getIndicatorSeries(
-        { symbol, market, exchange, interval, days, limit: 300 },
+        { instrumentId, interval, days, limit: 300 },
         signal,
       ),
-    [symbol, market, exchange, interval, days],
+    [instrumentId, interval, days],
     { enabled },
   );
 
   const technicals = useApi(
-    (signal) =>
-      analysisService.getTechnicals({ symbol, market, exchange, interval, days }, signal),
-    [symbol, market, exchange, interval, days],
+    (signal) => analysisService.getTechnicals({ instrumentId, interval, days }, signal),
+    [instrumentId, interval, days],
     { enabled },
   );
 
   const news = useApi(
-    (signal) =>
-      newsService.getNews({ symbol, market, companyName: companyName || null }, signal),
-    [symbol, market, companyName],
+    (signal) => newsService.getNews({ instrumentId }, signal),
+    [instrumentId],
     { enabled },
   );
 
-  const currency = market === 'india' ? 'INR' : market === 'crypto' ? 'USDT' : 'USD';
+  const currency = selected.currency || (market === 'india' ? 'INR' : market === 'crypto' ? 'USDT' : 'USD');
   const intraday = isIntradayInterval(interval);
   const data = analysis.data;
   const quote = selected.quote;
@@ -136,29 +138,9 @@ export function AnalysisWorkspace({ variant }: AnalysisWorkspaceProps) {
     (change !== null && previousClose ? (change / previousClose) * 100 : null);
   const changeTone = toneForNumber(change);
 
-  const initialQuery: InstrumentQuery = {
-    symbol: symbol || defaultSymbol,
-    market,
-    exchange,
-    interval,
-    days,
-    companyName,
-  };
-
-  function handleSubmit(query: InstrumentQuery) {
-    const next = new URLSearchParams();
-    next.set('symbol', query.symbol);
-    next.set('market', query.market);
-    if (query.exchange) {
-      next.set('exchange', query.exchange);
-    }
-    next.set('interval', interval);
-    next.set('days', String(defaultDaysFor(interval)));
-    if (query.companyName) {
-      next.set('company', query.companyName);
-    }
+  function selectInstrument(instrument: Instrument) {
     setWatchState({ loading: false, message: null, error: null });
-    setSearchParams(next);
+    navigate(instrumentPath(instrument, { interval, days }));
   }
 
   function changeTimeframe(nextInterval: string) {
@@ -177,12 +159,12 @@ export function AnalysisWorkspace({ variant }: AnalysisWorkspaceProps) {
   }
 
   async function addToWatchlist() {
-    if (!symbol) {
+    if (!instrumentId) {
       return;
     }
     setWatchState({ loading: true, message: null, error: null });
     try {
-      await portfolioService.addWatchlist({ symbol, market, exchange });
+      await portfolioService.addWatchlist({ instrument_id: instrumentId });
       notifyWatchlistChanged();
       setWatchState({ loading: false, message: `${symbol} Added to Watchlist`, error: null });
     } catch (caught) {
@@ -206,12 +188,10 @@ export function AnalysisWorkspace({ variant }: AnalysisWorkspaceProps) {
   return (
     <div className="space-y-3">
       <div className="panel-surface flex flex-wrap items-center justify-between gap-2 px-2 py-1.5">
-        <InstrumentForm
-          initial={initialQuery}
-          allowMarket={variant !== 'crypto'}
-          allowCompanyName={variant !== 'crypto'}
-          busy={analysis.loading}
-          onSubmit={handleSubmit}
+        <InstrumentSearch
+          className="w-56 sm:w-64"
+          placeholder="Search Ticker Or Name"
+          onSelect={selectInstrument}
         />
         <div className="flex flex-wrap items-center gap-1.5">
           {watchState.message ? (
@@ -228,7 +208,7 @@ export function AnalysisWorkspace({ variant }: AnalysisWorkspaceProps) {
             variant="primary"
             icon="plus"
             loading={watchState.loading}
-            disabled={!symbol}
+            disabled={!instrumentId}
             onClick={addToWatchlist}
           >
             Watchlist
@@ -236,10 +216,14 @@ export function AnalysisWorkspace({ variant }: AnalysisWorkspaceProps) {
         </div>
       </div>
 
-      {!symbol ? (
+      {!instrumentId ? (
         <EmptyState
           title="No Instrument Selected"
-          description="Search a symbol in the top bar or load one above."
+          description={
+            variant === 'crypto'
+              ? 'Search a crypto pair or asset name above.'
+              : 'Search a ticker or company name above.'
+          }
           icon="search"
         />
       ) : analysis.loading && !data ? (
@@ -264,11 +248,10 @@ export function AnalysisWorkspace({ variant }: AnalysisWorkspaceProps) {
                 <h1 className="text-lg font-semibold leading-none tracking-tight text-terminal-text">
                   {symbol}
                 </h1>
-                {companyName ? (
-                  <span className="truncate text-xs text-terminal-muted">{companyName}</span>
-                ) : null}
+                <span className="truncate text-xs text-terminal-muted">{name}</span>
                 <Badge tone="accent">{exchange}</Badge>
-                <Badge>{market === 'india' ? 'India' : market === 'crypto' ? 'Crypto' : 'Global'}</Badge>
+                <Badge>{marketLabel(market, selected.instrument?.asset_type)}</Badge>
+                {capabilities ? <Badge>{capabilities.provider_key}</Badge> : null}
                 <Badge tone={data.is_adjusted ? 'positive' : 'warning'}>
                   {data.is_adjusted ? 'Adjusted' : 'Unadjusted'}
                 </Badge>
@@ -300,7 +283,7 @@ export function AnalysisWorkspace({ variant }: AnalysisWorkspaceProps) {
             </div>
 
             <TimeframeSelector
-              options={timeframesFor(market)}
+              options={selected.timeframes}
               value={interval}
               onChange={changeTimeframe}
             />

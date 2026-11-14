@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useApi } from './useApi';
-import { marketService } from '../services/marketService';
+import { useQuotes } from './useQuotes';
 import { portfolioService } from '../services/portfolioService';
-import type { WatchlistItem } from '../types/api';
+import type { Quote, WatchlistItem } from '../types/api';
 import { WATCHLIST_CHANGED_EVENT } from '../utils/events';
+import { quoteRefFromWatchlist } from '../utils/quotes';
 
 export interface WatchlistQuote {
   key: string;
@@ -12,21 +13,23 @@ export interface WatchlistQuote {
   change: number | null;
   changePct: number | null;
   error: string | null;
+  quote: Quote | null;
 }
 
 function quoteKey(item: WatchlistItem): string {
-  return `${item.market}:${item.symbol}:${item.exchange}`;
+  return item.instrument_id ?? `${item.market}:${item.exchange}:${item.symbol}`;
 }
 
 /**
- * Watchlist rows plus the latest two daily closes for each row. Both closes are
- * provider values; only their difference is computed for display.
+ * Watchlist rows plus the latest centralised quote for each row. Prices and
+ * timestamps come from the same quote service used by the portfolio and
+ * analysis views, so a watchlist row and a held position never disagree.
  */
 export function useWatchlistQuotes() {
   const watchlist = useApi((signal) => portfolioService.getWatchlist(signal), []);
-  const [quotes, setQuotes] = useState<WatchlistQuote[]>([]);
-  const [quotesLoading, setQuotesLoading] = useState(false);
-  const [quotesError, setQuotesError] = useState<string | null>(null);
+  const items = watchlist.data?.items ?? [];
+  const refs = useMemo(() => items.map(quoteRefFromWatchlist), [items]);
+  const { quotes, loading: quotesLoading, refresh } = useQuotes(refs);
 
   useEffect(() => {
     const handleChange = () => watchlist.reload();
@@ -34,73 +37,31 @@ export function useWatchlistQuotes() {
     return () => window.removeEventListener(WATCHLIST_CHANGED_EVENT, handleChange);
   }, [watchlist.reload]);
 
-  useEffect(() => {
-    const items = watchlist.data?.items ?? [];
-    if (items.length === 0) {
-      setQuotes([]);
-      setQuotesLoading(false);
-      setQuotesError(null);
-      return;
-    }
-
-    let active = true;
-    const controller = new AbortController();
-    setQuotesLoading(true);
-    setQuotesError(null);
-
-    Promise.allSettled(
-      items.map(async (item): Promise<WatchlistQuote> => {
-        const response = await marketService.getCandles(
-          {
-            symbol: item.symbol,
-            market: item.market,
-            exchange: item.exchange,
-            interval: '1d',
-            days: 7,
-          },
-          controller.signal,
-        );
-        const candles = response.candles;
-        const last = candles.length > 0 ? candles[candles.length - 1].close : null;
-        const previous = candles.length > 1 ? candles[candles.length - 2].close : null;
-        const change = last !== null && previous !== null ? last - previous : null;
-        const changePct =
-          change !== null && previous !== null && previous !== 0 ? (change / previous) * 100 : null;
-        return { key: quoteKey(item), item, last, change, changePct, error: null };
-      }),
-    ).then((results) => {
-      if (!active) {
-        return;
-      }
-      const next = results.map((result, index): WatchlistQuote => {
-        if (result.status === 'fulfilled') {
-          return result.value;
-        }
-        const item = items[index];
+  const rows = useMemo(
+    () =>
+      items.map((item): WatchlistQuote => {
+        const quote = quotes.get(quoteKey(item)) ?? null;
         return {
           key: quoteKey(item),
           item,
-          last: null,
-          change: null,
-          changePct: null,
-          error: 'Unavailable',
+          last: quote?.price ?? null,
+          change: quote?.day_change ?? null,
+          changePct: quote?.day_change_pct ?? null,
+          error: quote?.price === null ? quote?.error ?? 'Unavailable' : null,
+          quote,
         };
-      });
-      setQuotes(next);
-      setQuotesLoading(false);
-    });
-
-    return () => {
-      active = false;
-      controller.abort();
-    };
-  }, [watchlist.data]);
+      }),
+    [items, quotes],
+  );
 
   return {
-    items: watchlist.data?.items ?? [],
-    quotes,
+    items,
+    quotes: rows,
     loading: watchlist.loading || quotesLoading,
-    error: watchlist.error ?? quotesError,
-    reload: watchlist.reload,
+    error: watchlist.error,
+    reload: () => {
+      watchlist.reload();
+      refresh();
+    },
   };
 }

@@ -1,44 +1,23 @@
 import { useState } from 'react';
-import type { FormEvent } from 'react';
 import { useApi } from '../hooks/useApi';
+import { useQuotes } from '../hooks/useQuotes';
 import { marketService } from '../services/marketService';
 import { portfolioService } from '../services/portfolioService';
-import type { Market, WatchlistItem } from '../types/api';
+import type { Instrument, WatchlistItem } from '../types/api';
 import { Card } from '../components/common/Card';
 import { PageHeader } from '../components/common/PageHeader';
 import { Button } from '../components/common/Button';
-import { Input, Select } from '../components/common/Field';
-import { Tabs } from '../components/common/Tabs';
 import { ErrorState, LoadingPanel, Notice } from '../components/common/States';
+import { InstrumentSearch } from '../components/instruments/InstrumentSearch';
 import { ScannerTable } from '../components/tables/ScannerTable';
 import { WatchlistTable } from '../components/tables/WatchlistTable';
 import { ProviderList } from '../components/tables/ProviderList';
 import { useApiStatus } from '../contexts/ApiStatusContext';
 import { notifyWatchlistChanged } from '../utils/events';
-
-const marketLabels: Record<Market, string> = {
-  india: 'Indian Equities',
-  global: 'International Equities',
-  crypto: 'Crypto',
-};
-
-const exchangeOptions: Record<Market, Array<{ value: string; label: string }>> = {
-  india: [
-    { value: 'NSE', label: 'NSE' },
-    { value: 'BSE', label: 'BSE' },
-  ],
-  global: [
-    { value: 'NASDAQ', label: 'NASDAQ / US' },
-    { value: 'NYSE', label: 'NYSE' },
-  ],
-  crypto: [{ value: 'BINANCE', label: 'Binance Spot' }],
-};
+import { quoteRefFromWatchlist } from '../utils/quotes';
 
 export function MarketsPage() {
-  const [tab, setTab] = useState<Market>('india');
-  const [symbol, setSymbol] = useState('');
-  const [exchange, setExchange] = useState('NSE');
-  const [displayName, setDisplayName] = useState('');
+  const [pending, setPending] = useState<Instrument | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [formMessage, setFormMessage] = useState<string | null>(null);
@@ -49,37 +28,21 @@ export function MarketsPage() {
   const scanner = useApi((signal) => marketService.getScanner(signal), []);
 
   const allItems = watchlist.data?.items ?? [];
-  const filteredWatchlist = allItems.filter((item) => item.market === tab);
-  const filteredScanner = (scanner.data?.items ?? []).filter((item) => item.market === tab);
+  const watchlistRefs = allItems.map(quoteRefFromWatchlist);
+  const { quotes: watchlistQuotes, refresh: refreshQuotes } = useQuotes(watchlistRefs);
 
-  function changeTab(next: string) {
-    const market = next as Market;
-    setTab(market);
-    setExchange(exchangeOptions[market][0].value);
-    setFormError(null);
-    setFormMessage(null);
-  }
-
-  async function addInstrument(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setFormError(null);
-    setFormMessage(null);
-    const clean = symbol.trim().toUpperCase();
-    if (!clean) {
-      setFormError('Enter a Symbol');
+  async function addInstrument() {
+    if (!pending) {
+      setFormError('Select an Instrument');
       return;
     }
+    setFormError(null);
+    setFormMessage(null);
     setSaving(true);
     try {
-      await portfolioService.addWatchlist({
-        symbol: clean,
-        market: tab,
-        exchange: tab === 'crypto' ? 'BINANCE' : exchange,
-        display_name: displayName.trim() || null,
-      });
-      setFormMessage(`${clean} Added to Watchlist`);
-      setSymbol('');
-      setDisplayName('');
+      await portfolioService.addWatchlist({ instrument_id: pending.instrument_id });
+      setFormMessage(`${pending.symbol} Added to Watchlist`);
+      setPending(null);
       notifyWatchlistChanged();
       watchlist.reload();
       scanner.reload();
@@ -93,9 +56,11 @@ export function MarketsPage() {
   async function removeItem(item: WatchlistItem) {
     setFormError(null);
     setFormMessage(null);
-    setRemoving(`${item.market}:${item.symbol}:${item.exchange}`);
+    const key = item.instrument_id ?? `${item.market}:${item.symbol}:${item.exchange}`;
+    setRemoving(key);
     try {
       await portfolioService.removeWatchlist({
+        instrumentId: item.instrument_id,
         symbol: item.symbol,
         market: item.market,
         exchange: item.exchange,
@@ -123,6 +88,7 @@ export function MarketsPage() {
               watchlist.reload();
               scanner.reload();
               refresh();
+              refreshQuotes();
             }}
           >
             Refresh
@@ -130,47 +96,35 @@ export function MarketsPage() {
         }
       />
 
-      <Tabs
-        className="mb-3"
-        active={tab}
-        onChange={changeTab}
-        items={[
-          { id: 'india', label: 'Indian Equities', count: allItems.filter((i) => i.market === 'india').length },
-          { id: 'global', label: 'International', count: allItems.filter((i) => i.market === 'global').length },
-          { id: 'crypto', label: 'Crypto', count: allItems.filter((i) => i.market === 'crypto').length },
-        ]}
-      />
-
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-12">
         <Card className="xl:col-span-5" title="Add Instrument">
-          <form onSubmit={addInstrument} className="space-y-2">
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Input
-                label="Symbol"
-                value={symbol}
-                onChange={(event) => setSymbol(event.target.value)}
-                placeholder={tab === 'crypto' ? 'BTCUSDT' : tab === 'global' ? 'AAPL' : 'RELIANCE'}
-                autoComplete="off"
-              />
-              <Select
-                label="Exchange"
-                value={exchange}
-                onChange={(event) => setExchange(event.target.value)}
-                options={exchangeOptions[tab]}
-                disabled={tab === 'crypto'}
-              />
-            </div>
-            <Input
-              label="Display Name (Optional)"
-              value={displayName}
-              onChange={(event) => setDisplayName(event.target.value)}
-              placeholder="Reliance Industries"
-              autoComplete="off"
+          <div className="space-y-2">
+            <InstrumentSearch
+              value={pending?.symbol ?? ''}
+              placeholder="Search Ticker Or Name"
+              onSelect={(instrument) => {
+                setPending(instrument);
+                setFormError(null);
+                setFormMessage(null);
+              }}
             />
-            <Button type="submit" variant="primary" icon="plus" loading={saving}>
-              Add to Watchlist
-            </Button>
-          </form>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="primary"
+                icon="plus"
+                loading={saving}
+                disabled={!pending}
+                onClick={addInstrument}
+              >
+                Add to Watchlist
+              </Button>
+              {pending ? (
+                <span className="min-w-0 truncate text-2xs text-terminal-muted">
+                  {pending.name} · {pending.exchange} · {pending.currency}
+                </span>
+              ) : null}
+            </div>
+          </div>
 
           {formMessage ? (
             <Notice tone="positive" className="mt-2">
@@ -184,14 +138,15 @@ export function MarketsPage() {
           ) : null}
         </Card>
 
-        <Card className="xl:col-span-7" title={`${marketLabels[tab]} Watchlist`}>
+        <Card className="xl:col-span-7" title="Watchlist">
           {watchlist.loading && !watchlist.data ? (
             <LoadingPanel label="Loading Watchlist" rows={4} />
           ) : watchlist.error ? (
             <ErrorState message={watchlist.error} onRetry={watchlist.reload} />
           ) : (
             <WatchlistTable
-              items={filteredWatchlist}
+              items={allItems}
+              quotes={watchlistQuotes}
               removing={removing}
               onRemove={(item) => {
                 void removeItem(item);
@@ -208,7 +163,7 @@ export function MarketsPage() {
           ) : scanner.error ? (
             <ErrorState message={scanner.error} onRetry={scanner.reload} />
           ) : (
-            <ScannerTable items={filteredScanner} />
+            <ScannerTable items={scanner.data?.items ?? []} />
           )}
         </Card>
 

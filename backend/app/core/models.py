@@ -7,6 +7,14 @@ from pydantic import BaseModel, Field, field_validator
 
 Market = Literal["india", "global", "crypto"]
 Side = Literal["BUY", "SELL"]
+AssetType = Literal["equity", "crypto"]
+QuoteFreshness = Literal[
+    "live", "delayed", "eod", "historical", "cached", "stale", "unavailable",
+]
+QuoteType = Literal[
+    "real_time", "delayed", "last_available", "previous_close",
+    "end_of_day", "historical", "cached", "stale", "unavailable",
+]
 
 
 def utc_now() -> datetime:
@@ -108,14 +116,61 @@ class RiskResult(BaseModel):
     capital_limited: bool
 
 
-class WatchlistItem(BaseModel):
+class Instrument(BaseModel):
+    """Canonical instrument identity shared by every Tradely module.
+
+    A ticker alone is never treated as an identity. The provider-specific
+    symbol, exchange, currency and asset type are retained so quotes are always
+    requested for the exact instrument the owner recorded. Catalogue metadata
+    extends the original ledger identity additively.
+    """
+
+    instrument_id: str
     symbol: str
+    name: str
     market: Market
+    exchange: str
+    currency: str
+    asset_type: AssetType
+    provider: str
+    provider_symbol: str
+    display_name: str | None = None
+    base_currency: str | None = None
+    quote_currency: str | None = None
+    settlement_currency: str | None = None
+    trading_pair: str | None = None
+    provider_instrument_id: str | None = None
+    supported_intervals: list[str] = Field(default_factory=list)
+    status: str = "active"
+    catalogue_source: str | None = None
+    catalogue_updated_at: datetime | None = None
+    is_catalogue: bool = False
+    aliases: list[str] = Field(default_factory=list)
+
+
+class WatchlistItem(BaseModel):
+    """Watchlist entry.
+
+    New entries may supply only ``instrument_id``. The legacy ``symbol``,
+    ``market`` and ``exchange`` fields remain optional so existing records and
+    older clients continue to work.
+    """
+
+    symbol: str = ""
+    market: Market | None = None
     exchange: str | None = None
     display_name: str | None = None
+    instrument_id: str | None = None
 
 
 class HoldingTransaction(BaseModel):
+    """Internal ledger row.
+
+    Quantity and price remain persisted because FIFO, cost basis and realised
+    P&L require them. They are derived by the backend from a monetary amount
+    and a validated quote for amount-based transaction entry.
+    """
+
     symbol: str
     market: Market
     side: Side
@@ -125,6 +180,22 @@ class HoldingTransaction(BaseModel):
     currency: str = "INR"
     fees: float = Field(default=0, ge=0)
     notes: str | None = None
+    # Canonical identity supplied by instrument resolution. Optional for
+    # backwards compatibility with previously recorded ledger rows.
+    instrument_id: str | None = None
+    name: str | None = None
+    exchange: str | None = None
+    asset_type: AssetType | None = None
+    provider: str | None = None
+    provider_symbol: str | None = None
+    amount: float | None = Field(default=None, ge=0)
+    actual_amount: float | None = Field(default=None, ge=0)
+    quote_provider: str | None = None
+    quote_time: datetime | None = None
+    quote_type: str | None = None
+    quote_status: str | None = None
+    quote_currency: str | None = None
+    idempotency_key: str | None = None
 
     @field_validator("trade_time")
     @classmethod
@@ -133,11 +204,65 @@ class HoldingTransaction(BaseModel):
             return value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc)
 
+    @field_validator("quote_time")
+    @classmethod
+    def quote_time_utc(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+
+class AmountTransactionRequest(BaseModel):
+    """Amount-based transaction entry request.
+
+    The client never supplies the accounting quantity or unit price. The
+    backend resolves the instrument, acquires a valid quote and derives both.
+    """
+
+    instrument_id: str = Field(min_length=3, max_length=120)
+    side: Side
+    amount: float = Field(gt=0)
+    currency: str | None = None
+    fees: float = Field(default=0, ge=0)
+    trade_time: datetime
+    notes: str | None = Field(default=None, max_length=2000)
+    idempotency_key: str | None = Field(default=None, max_length=120)
+
+    @field_validator("trade_time")
+    @classmethod
+    def make_utc(cls, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    @field_validator("instrument_id")
+    @classmethod
+    def clean_instrument_id(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("currency")
+    @classmethod
+    def clean_currency(cls, value: str | None) -> str | None:
+        return value.strip().upper() if value and value.strip() else None
+
+
+class TradingRules(BaseModel):
+    quantity_step: float
+    min_quantity: float
+    max_quantity: float | None = None
+    min_notional: float
+    fractional: bool
+    source: str
+    is_fallback: bool = False
+
 
 class BacktestRequest(BaseModel):
-    symbol: str
-    market: Market
+    symbol: str = ""
+    market: Market | None = None
     exchange: str | None = None
+    instrument_id: str | None = None
     interval: str = "1d"
     days: int = Field(default=1825, ge=240, le=3650)
     provider: str = "auto"

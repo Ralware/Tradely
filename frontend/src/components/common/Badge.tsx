@@ -17,11 +17,13 @@ interface BadgeProps {
   children: ReactNode;
   className?: string;
   dot?: boolean;
+  title?: string;
 }
 
-export function Badge({ tone = 'neutral', children, className, dot = false }: BadgeProps) {
+export function Badge({ tone = 'neutral', children, className, dot = false, title }: BadgeProps) {
   return (
     <span
+      title={title}
       className={cn(
         'inline-flex items-center gap-1 rounded-sm border px-1.5 text-2xs font-medium leading-4',
         tones[tone],

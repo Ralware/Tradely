@@ -7,9 +7,14 @@ import type {
   TechnicalSummaryResponse,
 } from '../types/api';
 
+/**
+ * A market-data request is identified by one canonical instrument id. Legacy
+ * symbol/market/exchange fields remain for previously recorded identifiers.
+ */
 export interface AnalysisQuery {
-  symbol: string;
-  market: Market;
+  instrumentId?: string | null;
+  symbol?: string;
+  market?: Market;
   exchange?: string | null;
   interval?: string;
   days?: number;
@@ -18,10 +23,19 @@ export interface AnalysisQuery {
 
 const LONG_TIMEOUT = 120_000;
 
-function analysisQuery(query: AnalysisQuery) {
+function identityPath(query: AnalysisQuery): string {
+  const value = query.instrumentId || query.symbol;
+  if (!value) {
+    throw new Error('No instrument selected');
+  }
+  return encodeURIComponent(value);
+}
+
+function identityQuery(query: AnalysisQuery) {
   return {
-    symbol: query.symbol,
-    market: query.market,
+    instrument_id: query.instrumentId ?? undefined,
+    symbol: query.symbol ?? undefined,
+    market: query.market ?? undefined,
     exchange: query.exchange ?? undefined,
     interval: query.interval ?? '1d',
     days: query.days ?? 500,
@@ -32,8 +46,8 @@ function analysisQuery(query: AnalysisQuery) {
 export const analysisService = {
   getAnalysis(query: AnalysisQuery, signal?: AbortSignal): Promise<AnalysisResponse> {
     return apiRequest<AnalysisResponse>(
-      `/api/instruments/${encodeURIComponent(query.symbol)}/analysis`,
-      { query: analysisQuery(query), signal, timeoutMs: LONG_TIMEOUT },
+      `/api/instruments/${identityPath(query)}/analysis`,
+      { query: identityQuery(query), signal, timeoutMs: LONG_TIMEOUT },
     );
   },
 
@@ -42,9 +56,9 @@ export const analysisService = {
     signal?: AbortSignal,
   ): Promise<IndicatorSeriesResponse> {
     return apiRequest<IndicatorSeriesResponse>(
-      `/api/instruments/${encodeURIComponent(query.symbol)}/indicators`,
+      `/api/instruments/${identityPath(query)}/indicators`,
       {
-        query: { ...analysisQuery(query), limit: query.limit ?? 300 },
+        query: { ...identityQuery(query), limit: query.limit ?? 300 },
         signal,
         timeoutMs: LONG_TIMEOUT,
       },
@@ -61,9 +75,9 @@ export const analysisService = {
 
   getTechnicals(query: AnalysisQuery, signal?: AbortSignal): Promise<TechnicalSummaryResponse> {
     return apiRequest<TechnicalSummaryResponse>(
-      `/api/instruments/${encodeURIComponent(query.symbol)}/technicals`,
+      `/api/instruments/${identityPath(query)}/technicals`,
       {
-        query: analysisQuery(query),
+        query: identityQuery(query),
         signal,
         timeoutMs: LONG_TIMEOUT,
       },

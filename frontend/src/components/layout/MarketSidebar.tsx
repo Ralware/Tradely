@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react';
-import type { FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
 import { useWatchlistQuotes } from '../../hooks/useWatchlistQuotes';
 import { useSelectedInstrument } from '../../contexts/SelectedInstrumentContext';
 import { analysisService } from '../../services/analysisService';
+import { instrumentService } from '../../services/instrumentService';
 import { marketService } from '../../services/marketService';
 import { portfolioService } from '../../services/portfolioService';
-import type { Candle, Market, WatchlistItem } from '../../types/api';
+import type { Candle, Instrument, Market, WatchlistItem } from '../../types/api';
 import {
   cn,
   formatCompact,
@@ -17,12 +17,12 @@ import {
   formatSignedFixed,
   toneForNumber,
 } from '../../utils/format';
-import { analysisPath } from '../../utils/navigation';
-import { exchangeForMarket } from '../../utils/timeframes';
+import { instrumentPath } from '../../utils/navigation';
 import { notifyWatchlistChanged } from '../../utils/events';
 import { Icon } from '../common/Icon';
 import { EmptyState, ErrorState, LoadingPanel } from '../common/States';
 import { KeyValue } from '../common/Stat';
+import { InstrumentSearch } from '../instruments/InstrumentSearch';
 import { Sparkline } from '../charts/Sparkline';
 
 const marketLabel: Record<Market, string> = {
@@ -92,27 +92,24 @@ export function MarketSidebar() {
   const selected = useSelectedInstrument();
   const { items, quotes, loading, error, reload } = useWatchlistQuotes();
   const [addOpen, setAddOpen] = useState(false);
-  const [symbol, setSymbol] = useState('');
-  const [market, setMarket] = useState<Market>('india');
+  const [selectedInstrument, setSelectedInstrument] = useState<Instrument | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
 
-  const selectedKey = `${selected.market}:${selected.symbol}:${selected.exchange}`;
+  const selectedKey = selected.instrumentId;
 
   const analysis = useApi(
     (signal) =>
       analysisService.getAnalysis(
         {
-          symbol: selected.symbol,
-          market: selected.market,
-          exchange: selected.exchange,
+          instrumentId: selected.instrumentId,
           interval: selected.interval,
           days: selected.days,
         },
         signal,
       ),
-    [selected.symbol, selected.market, selected.exchange, selected.interval, selected.days],
+    [selected.instrumentId, selected.interval, selected.days],
     { enabled: selected.enabled },
   );
 
@@ -120,15 +117,13 @@ export function MarketSidebar() {
     (signal) =>
       marketService.getCandles(
         {
-          symbol: selected.symbol,
-          market: selected.market,
-          exchange: selected.exchange,
+          instrumentId: selected.instrumentId,
           interval: '1d',
           days: 365,
         },
         signal,
       ),
-    [selected.symbol, selected.market, selected.exchange],
+    [selected.instrumentId],
     { enabled: selected.enabled },
   );
 
@@ -149,28 +144,31 @@ export function MarketSidebar() {
     [daily.data],
   );
 
-  function selectInstrument(item: WatchlistItem) {
-    navigate(
-      analysisPath(item.symbol, item.market, item.exchange, { interval: '1d', days: 500 }),
-    );
-  }
-
-  async function addInstrument(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const clean = symbol.trim().toUpperCase();
-    if (!clean) {
-      setFormError('Enter a symbol');
+  async function selectInstrument(item: WatchlistItem) {
+    if (item.instrument_id) {
+      navigate(instrumentPath({ instrument_id: item.instrument_id, market: item.market }, { interval: '1d', days: 500 }));
       return;
     }
+
+    try {
+      const response = await instrumentService.resolve(item.symbol);
+      const instrument = response.instrument;
+      if (!instrument) {
+        setFormError(`Could not resolve legacy watchlist instrument: ${item.symbol}`);
+        return;
+      }
+      navigate(instrumentPath(instrument, { interval: '1d', days: 500 }));
+    } catch (caught) {
+      setFormError(caught instanceof Error ? caught.message : 'Could Not Resolve Instrument');
+    }
+  }
+
+  async function addInstrument(instrument: Instrument) {
     setSaving(true);
     setFormError(null);
     try {
-      await portfolioService.addWatchlist({
-        symbol: clean,
-        market,
-        exchange: exchangeForMarket(market),
-      });
-      setSymbol('');
+      await portfolioService.addWatchlist({ instrument_id: instrument.instrument_id });
+      setSelectedInstrument(null);
       setAddOpen(false);
       notifyWatchlistChanged();
       reload();
@@ -182,9 +180,11 @@ export function MarketSidebar() {
   }
 
   async function removeInstrument(item: WatchlistItem) {
-    setRemoving(`${item.market}:${item.symbol}:${item.exchange}`);
+    const key = item.instrument_id ?? `${item.market}:${item.symbol}:${item.exchange}`;
+    setRemoving(key);
     try {
       await portfolioService.removeWatchlist({
+        instrumentId: item.instrument_id,
         symbol: item.symbol,
         market: item.market,
         exchange: item.exchange,
@@ -232,32 +232,42 @@ export function MarketSidebar() {
       </div>
 
       {addOpen ? (
-        <form onSubmit={addInstrument} className="space-y-1.5 border-b border-terminal-border px-3 py-2">
-          <input
-            value={symbol}
-            onChange={(event) => setSymbol(event.target.value)}
-            placeholder="Symbol"
-            aria-label="Symbol"
-            autoComplete="off"
-            className="h-7 w-full rounded-sm border border-terminal-border bg-terminal-panelAlt px-2 text-xs text-terminal-text placeholder:text-terminal-muted/70 focus:border-terminal-accent focus:outline-none"
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (selectedInstrument) {
+              void addInstrument(selectedInstrument);
+            } else {
+              setFormError('Select a supported instrument before adding it to the watchlist.');
+            }
+          }}
+          className="space-y-1.5 border-b border-terminal-border px-3 py-2"
+        >
+          <InstrumentSearch
+            value={selectedInstrument?.symbol ?? ''}
+            onSelect={(instrument) => {
+              setSelectedInstrument(instrument);
+              setFormError(null);
+            }}
+            placeholder="Search symbol or company"
+            className="w-full"
+            inputClassName="h-8"
           />
-          <div className="flex gap-1.5">
-            <select
-              value={market}
-              onChange={(event) => setMarket(event.target.value as Market)}
-              aria-label="Market"
-              className="h-7 min-w-0 flex-1 rounded-sm border border-terminal-border bg-terminal-panelAlt px-1.5 text-2xs text-terminal-text focus:border-terminal-accent focus:outline-none"
-            >
-              <option value="india">India</option>
-              <option value="global">Global</option>
-              <option value="crypto">Crypto</option>
-            </select>
+          {selectedInstrument ? (
+            <div className="space-y-0.5 rounded-sm border border-terminal-border bg-terminal-panelAlt px-2 py-1.5 text-2xs text-terminal-muted">
+              <p className="font-medium text-terminal-text">{selectedInstrument.name}</p>
+              <p>
+                {selectedInstrument.symbol} · {selectedInstrument.exchange} · {selectedInstrument.currency}
+              </p>
+            </div>
+          ) : null}
+          <div className="flex justify-end">
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || !selectedInstrument}
               className="h-7 rounded-sm bg-terminal-accent px-2.5 text-2xs font-medium text-white hover:brightness-110 disabled:opacity-60"
             >
-              {saving ? 'Adding…' : 'Add'}
+              {saving ? 'Adding…' : 'Add to Watchlist'}
             </button>
           </div>
           {formError ? <p className="text-2xs text-terminal-red">{formError}</p> : null}

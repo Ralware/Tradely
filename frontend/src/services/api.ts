@@ -18,7 +18,7 @@ export class ApiError extends Error {
   }
 }
 
-export type QueryValue = string | number | boolean | null | undefined;
+export type QueryValue = string | number | boolean | Array<string | number> | null | undefined;
 export type QueryParams = Record<string, QueryValue>;
 
 interface RequestOptions {
@@ -29,7 +29,7 @@ interface RequestOptions {
   timeoutMs?: number;
 }
 
-function buildUrl(path: string, query?: QueryParams): string {
+export function buildApiUrl(path: string, query?: QueryParams): string {
   const url = `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
   if (!query) {
     return url;
@@ -37,6 +37,12 @@ function buildUrl(path: string, query?: QueryParams): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
     if (value === undefined || value === null || value === '') {
+      continue;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        params.append(key, String(item));
+      }
       continue;
     }
     params.set(key, String(value));
@@ -71,7 +77,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   const hasBody = options.body !== undefined;
 
   try {
-    const response = await fetch(buildUrl(path, options.query), {
+    const response = await fetch(buildApiUrl(path, options.query), {
       method: options.method ?? 'GET',
       headers: hasBody
         ? { Accept: 'application/json', 'Content-Type': 'application/json' }

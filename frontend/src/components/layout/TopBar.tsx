@@ -1,11 +1,11 @@
-import { useState } from 'react';
-import type { FormEvent } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useApiStatus } from '../../contexts/ApiStatusContext';
 import { useSelectedInstrument } from '../../contexts/SelectedInstrumentContext';
-import type { Market } from '../../types/api';
+import type { Instrument } from '../../types/api';
 import { changeDigits, cn, formatNumber, formatPercent, formatSignedFixed, toneForNumber } from '../../utils/format';
+import { instrumentPath } from '../../utils/navigation';
 import { Icon } from '../common/Icon';
+import { InstrumentSearch } from '../instruments/InstrumentSearch';
 
 const navigation = [
   { to: '/', label: 'Dashboard', end: true },
@@ -15,12 +15,6 @@ const navigation = [
   { to: '/portfolio', label: 'Portfolio' },
   { to: '/backtesting', label: 'Backtesting' },
   { to: '/settings', label: 'Settings' },
-];
-
-const marketOptions: Array<{ value: Market; label: string }> = [
-  { value: 'india', label: 'India' },
-  { value: 'global', label: 'Global' },
-  { value: 'crypto', label: 'Crypto' },
 ];
 
 function priceDigits(value: number | null): number {
@@ -47,19 +41,9 @@ export function TopBar({
   const navigate = useNavigate();
   const { health, healthLoading, healthError, refresh } = useApiStatus();
   const selected = useSelectedInstrument();
-  const [symbol, setSymbol] = useState('');
-  const [market, setMarket] = useState<Market>('india');
 
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const value = symbol.trim().toUpperCase();
-    if (!value) {
-      return;
-    }
-    const exchange = market === 'india' ? 'NSE' : market === 'global' ? 'NASDAQ' : 'BINANCE';
-    const path = market === 'crypto' ? '/crypto' : '/stocks';
-    navigate(`${path}?symbol=${encodeURIComponent(value)}&market=${market}&exchange=${exchange}`);
-    setSymbol('');
+  function selectInstrument(instrument: Instrument) {
+    navigate(instrumentPath(instrument));
   }
 
   const quote = selected.quote;
@@ -136,40 +120,12 @@ export function TopBar({
           )}
         </div>
 
-        <form onSubmit={submit} className="flex min-w-0 items-center gap-1">
-          <div className="relative min-w-0 flex-1 sm:w-52">
-            <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-terminal-muted">
-              <Icon name="search" size={13} />
-            </span>
-            <input
-              value={symbol}
-              onChange={(event) => setSymbol(event.target.value)}
-              placeholder="Search Symbol"
-              aria-label="Instrument Symbol"
-              autoComplete="off"
-              className="h-7 w-full rounded-sm border border-terminal-border bg-terminal-panelAlt pl-7 pr-2 text-xs text-terminal-text placeholder:text-terminal-muted/70 focus:border-terminal-accent focus:outline-none"
-            />
-          </div>
-          <select
-            value={market}
-            onChange={(event) => setMarket(event.target.value as Market)}
-            aria-label="Search Market"
-            className="hidden h-7 rounded-sm border border-terminal-border bg-terminal-panelAlt px-1 text-2xs text-terminal-text focus:border-terminal-accent focus:outline-none sm:block"
-          >
-            {marketOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <button
-            type="submit"
-            aria-label="Load Instrument"
-            title="Load Instrument"
-            className="flex h-7 w-7 items-center justify-center rounded-sm border border-terminal-border text-terminal-muted hover:border-terminal-accent hover:text-terminal-text"
-          >
-            <Icon name="arrowUp" size={13} />
-          </button>
+        <form onSubmit={(event) => event.preventDefault()} className="flex min-w-0 items-center gap-1">
+          <InstrumentSearch
+            className="w-44 sm:w-56"
+            placeholder="Search Ticker Or Name"
+            onSelect={selectInstrument}
+          />
         </form>
 
         <button

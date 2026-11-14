@@ -1,261 +1,242 @@
-import { useState } from 'react';
-import type { FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useApi } from '../hooks/useApi';
+import { useQuotes } from '../hooks/useQuotes';
 import { portfolioService } from '../services/portfolioService';
-import type { Market, Side } from '../types/api';
-import { formatNumber } from '../utils/format';
+import type { AddTransactionResponse, Position, Transaction } from '../types/api';
+import { notifyWatchlistChanged } from '../utils/events';
 import { Button } from '../components/common/Button';
 import { Card } from '../components/common/Card';
-import { Input, Select, Textarea } from '../components/common/Field';
 import { PageHeader } from '../components/common/PageHeader';
 import { ErrorState, LoadingPanel, Notice } from '../components/common/States';
-import { Stat } from '../components/common/Stat';
 import { PositionsTable } from '../components/tables/PositionsTable';
 import { TransactionsTable } from '../components/tables/TransactionsTable';
+import { PortfolioSummaryCards } from '../components/portfolio/PortfolioSummaryCards';
+import { PositionDetailPanel } from '../components/portfolio/PositionDetailPanel';
+import { TransactionForm } from '../components/portfolio/TransactionForm';
 
-const marketOptions = [
-  { value: 'india', label: 'Indian Equities' },
-  { value: 'global', label: 'International Equities' },
-  { value: 'crypto', label: 'Crypto Spot' },
-];
-
-const sideOptions = [
-  { value: 'BUY', label: 'BUY' },
-  { value: 'SELL', label: 'SELL' },
-];
-
-const currencyFor: Record<Market, string> = {
-  india: 'INR',
-  global: 'USD',
-  crypto: 'USDT',
-};
-
-function localDateTimeValue(): string {
-  const now = new Date();
-  const offset = now.getTimezoneOffset();
-  const local = new Date(now.getTime() - offset * 60_000);
-  return local.toISOString().slice(0, 16);
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : 'Request failed';
 }
 
 export function PortfolioPage() {
-  const transactions = useApi((signal) => portfolioService.getTransactions(signal), []);
   const positions = useApi((signal) => portfolioService.getPositions(signal), []);
+  const summary = useApi((signal) => portfolioService.getSummary(signal), []);
+  const transactions = useApi((signal) => portfolioService.getTransactions(signal), []);
 
-  const [symbol, setSymbol] = useState('');
-  const [market, setMarket] = useState<Market>('india');
-  const [side, setSide] = useState<Side>('BUY');
-  const [quantity, setQuantity] = useState('');
-  const [price, setPrice] = useState('');
-  const [tradeTime, setTradeTime] = useState(localDateTimeValue());
-  const [fees, setFees] = useState('0');
-  const [notes, setNotes] = useState('');
-  const [saving, setSaving] = useState(false);
+  const positionRows = positions.data?.positions ?? [];
+  const positionRefs = useMemo(
+    () =>
+      positionRows.map((position) => ({
+        instrument_id: position.instrument_id,
+        symbol: position.symbol,
+        market: position.market,
+        exchange: position.exchange,
+        currency: position.currency,
+      })),
+    [positionRows],
+  );
+  const { quotes, refresh: refreshQuotes } = useQuotes(positionRefs);
+
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const detail = useApi(
+    (signal) => portfolioService.getPositionDetail(selectedId ?? '', signal),
+    [selectedId],
+    { enabled: Boolean(selectedId) },
+  );
+
+  const [deleting, setDeleting] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  function changeMarket(next: Market) {
-    setMarket(next);
-    setMessage(null);
-    setError(null);
+  // Refresh backend valuations when live crypto ticks arrive, at a throttled
+  // rate. React never recalculates FIFO or P&L itself.
+  const lastValuationRefresh = useRef(0);
+  const quoteSignature = [...quotes.values()]
+    .map((quote) => `${quote.instrument_id}:${quote.price}:${quote.retrieved_at}`)
+    .join('|');
+  useEffect(() => {
+    if (!quoteSignature) {
+      return;
+    }
+    const now = Date.now();
+    if (now - lastValuationRefresh.current < 8000) {
+      return;
+    }
+    lastValuationRefresh.current = now;
+    positions.reload();
+    summary.reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quoteSignature]);
+
+  useEffect(() => {
+    if (positionRows.length === 0) {
+      if (selectedId !== null) {
+        setSelectedId(null);
+      }
+      return;
+    }
+    if (!selectedId || !positionRows.some((row) => row.instrument_id === selectedId)) {
+      setSelectedId(positionRows[0].instrument_id);
+    }
+  }, [positionRows, selectedId]);
+
+  function reloadPortfolio() {
+    positions.reload();
+    summary.reload();
+    transactions.reload();
+    detail.reload();
+    refreshQuotes();
   }
 
-  async function recordTrade(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function handleRecorded(saved: AddTransactionResponse, savedMessage: string) {
+    setError(null);
+    setMessage(savedMessage);
+    const position = saved.position;
+    if (position) {
+      setSelectedId(position.instrument_id);
+    }
+    notifyWatchlistChanged();
+    reloadPortfolio();
+  }
+
+  async function deleteTransaction(transaction: Transaction) {
+    if (
+      !window.confirm(
+        `Delete the ${transaction.side} of ${transaction.symbol} recorded ${transaction.trade_time}? The ledger will be revalidated.`,
+      )
+    ) {
+      return;
+    }
+    setDeleting(transaction.id);
     setError(null);
     setMessage(null);
-
-    const cleanSymbol = symbol.trim().toUpperCase();
-    const parsedQuantity = Number(quantity);
-    const parsedPrice = Number(price);
-    const parsedFees = Number(fees || '0');
-    const parsedTime = new Date(tradeTime);
-
-    if (!cleanSymbol) {
-      setError('Enter a Symbol');
-      return;
-    }
-    if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) {
-      setError('Quantity Must Be Positive');
-      return;
-    }
-    if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) {
-      setError('Price Must Be Positive');
-      return;
-    }
-    if (Number.isNaN(parsedTime.getTime())) {
-      setError('Enter a Valid Trade Time');
-      return;
-    }
-    if (!Number.isFinite(parsedFees) || parsedFees < 0) {
-      setError('Fees Must Be Zero or Positive');
-      return;
-    }
-
-    setSaving(true);
     try {
-      await portfolioService.addTransaction({
-        symbol: cleanSymbol,
-        market,
-        side,
-        quantity: parsedQuantity,
-        price: parsedPrice,
-        trade_time: parsedTime.toISOString(),
-        currency: currencyFor[market],
-        fees: parsedFees,
-        notes: notes.trim() || null,
-      });
-      setMessage(`${side} ${cleanSymbol} Recorded`);
-      setSymbol('');
-      setQuantity('');
-      setPrice('');
-      setFees('0');
-      setNotes('');
-      transactions.reload();
-      positions.reload();
+      await portfolioService.deleteTransaction(transaction.id);
+      setMessage(`${transaction.side} ${transaction.symbol} deleted; remaining ledger revalidated`);
+      notifyWatchlistChanged();
+      reloadPortfolio();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could Not Record Transaction');
+      setError(messageOf(caught));
     } finally {
-      setSaving(false);
+      setDeleting(null);
     }
   }
 
-  const positionRows = positions.data?.positions ?? [];
-  const transactionRows = transactions.data?.transactions ?? [];
-  const totalRealised = positionRows.reduce((sum, position) => sum + position.realised_pnl, 0);
+  function selectPosition(position: Position) {
+    setSelectedId(position.instrument_id);
+  }
 
   return (
     <div>
       <PageHeader
         title="Portfolio"
-        subtitle="FIFO Ledger · Positions · Transactions"
+        subtitle="Amount-Based Entry · Live Valuation · FIFO Accounting"
         actions={
-          <Button
-            size="sm"
-            icon="refresh"
-            onClick={() => {
-              transactions.reload();
-              positions.reload();
-            }}
-          >
+          <Button size="sm" icon="refresh" onClick={reloadPortfolio}>
             Refresh
           </Button>
         }
       />
 
-      <div className="mb-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="Open Positions" value={String(positionRows.length)} hint="All Markets" />
-        <Stat label="Transactions" value={String(transactionRows.length)} hint="Ledger Rows" />
-        <Stat
-          label="Realised P&L"
-          value={formatNumber(totalRealised, 2)}
-          tone={totalRealised > 0 ? 'positive' : totalRealised < 0 ? 'negative' : 'neutral'}
-          hint="Not Currency Converted"
+      {message ? (
+        <Notice tone="positive" className="mb-2">
+          {message}
+        </Notice>
+      ) : null}
+      {error ? (
+        <Notice tone="negative" className="mb-2">
+          {error}
+        </Notice>
+      ) : null}
+
+      <Card
+        className="mb-3"
+        title="Portfolio Summary"
+        subtitle="Backend FIFO Values · No Cross-Currency Totals"
+        actions={
+          <span className="text-2xs text-terminal-muted">
+            {positionRows.length} Open · {transactions.data?.transactions.length ?? 0} Ledger Rows
+          </span>
+        }
+      >
+        <PortfolioSummaryCards
+          summary={summary.data}
+          loading={summary.loading}
+          error={summary.error}
         />
-        <Stat
-          label="Accounting"
-          value={positions.data?.accounting_method ?? 'FIFO'}
-          hint="Backend Method"
-        />
-      </div>
+      </Card>
 
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-12">
-        <Card className="xl:col-span-5" title="Record Transaction">
-          <form onSubmit={recordTrade} className="space-y-2">
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Input
-                label="Symbol"
-                value={symbol}
-                onChange={(event) => setSymbol(event.target.value)}
-                placeholder="RELIANCE"
-                autoComplete="off"
-              />
-              <Select
-                label="Market"
-                value={market}
-                onChange={(event) => changeMarket(event.target.value as Market)}
-                options={marketOptions}
-              />
-              <Select
-                label="Side"
-                value={side}
-                onChange={(event) => setSide(event.target.value as Side)}
-                options={sideOptions}
-              />
-              <Input label="Currency" value={currencyFor[market]} readOnly hint="From Market" />
-              <Input
-                label="Quantity"
-                type="number"
-                min={0}
-                step="any"
-                value={quantity}
-                onChange={(event) => setQuantity(event.target.value)}
-              />
-              <Input
-                label="Price per Unit"
-                type="number"
-                min={0}
-                step="any"
-                value={price}
-                onChange={(event) => setPrice(event.target.value)}
-              />
-              <Input
-                label="Trade Time"
-                type="datetime-local"
-                value={tradeTime}
-                onChange={(event) => setTradeTime(event.target.value)}
-              />
-              <Input
-                label="Fees"
-                type="number"
-                min={0}
-                step="any"
-                value={fees}
-                onChange={(event) => setFees(event.target.value)}
-              />
-            </div>
-            <Textarea
-              label="Notes (Optional)"
-              value={notes}
-              onChange={(event) => setNotes(event.target.value)}
-              placeholder="Broker reference, charges, partial fill"
-            />
-            <Button type="submit" variant="primary" icon="plus" loading={saving}>
-              Record Transaction
-            </Button>
-          </form>
-
-          {message ? (
-            <Notice tone="positive" className="mt-2">
-              {message}
-            </Notice>
-          ) : null}
-          {error ? (
-            <Notice tone="negative" className="mt-2">
-              {error}
-            </Notice>
-          ) : null}
-        </Card>
-
-        <Card className="xl:col-span-7" title="Open Positions">
-          {positions.loading && !positions.data ? (
-            <LoadingPanel label="Loading Positions" rows={4} />
-          ) : positions.error ? (
-            <ErrorState message={positions.error} onRetry={positions.reload} />
-          ) : (
-            <PositionsTable positions={positionRows} />
-          )}
-        </Card>
-      </div>
-
-      <Card className="mt-3" title="Transaction Ledger">
-        {transactions.loading && !transactions.data ? (
-          <LoadingPanel label="Loading Transactions" rows={5} />
-        ) : transactions.error ? (
-          <ErrorState message={transactions.error} onRetry={transactions.reload} />
+      <Card
+        className="mb-3"
+        title="Open Positions"
+        subtitle="Invested Value, Market Value and P&L Calculated by the Backend"
+        actions={
+          <span className="text-2xs text-terminal-muted">
+            {positions.data ? `${positionRows.length} Positions` : 'Loading'}
+          </span>
+        }
+      >
+        {positions.loading && !positions.data ? (
+          <LoadingPanel label="Loading Positions" rows={4} />
+        ) : positions.error ? (
+          <ErrorState message={positions.error} onRetry={positions.reload} />
         ) : (
-          <TransactionsTable transactions={transactionRows} />
+          <PositionsTable
+            positions={positionRows}
+            selectedId={selectedId}
+            onSelect={selectPosition}
+          />
         )}
       </Card>
+
+      <Card
+        className="mb-3"
+        title="Position Details"
+        subtitle="FIFO Lots · Trade History · Actual Candles"
+      >
+        <PositionDetailPanel
+          detail={detail.data}
+          loading={detail.loading}
+          error={detail.error}
+          onReload={detail.reload}
+          onClose={() => setSelectedId(null)}
+        />
+      </Card>
+
+      <div className="grid grid-cols-1 gap-3 xl:grid-cols-12">
+        <TransactionForm positions={positionRows} onRecorded={handleRecorded} />
+
+        <Card
+          className="xl:col-span-8"
+          title="Transaction Ledger"
+          subtitle="Immutable Trade History · Deletion Revalidates FIFO"
+          actions={
+            <span className="text-2xs text-terminal-muted">
+              {transactions.data ? `${transactions.data.transactions.length} Rows` : 'Loading'}
+            </span>
+          }
+        >
+          {transactions.loading && !transactions.data ? (
+            <LoadingPanel label="Loading Transactions" rows={5} />
+          ) : transactions.error ? (
+            <ErrorState message={transactions.error} onRetry={transactions.reload} />
+          ) : (
+            <TransactionsTable
+              transactions={transactions.data?.transactions ?? []}
+              onDelete={(transaction) => {
+                void deleteTransaction(transaction);
+              }}
+              deleting={deleting}
+            />
+          )}
+          <p className="mt-2 text-2xs leading-relaxed text-terminal-muted">
+            Realized P&amp;L uses FIFO: buy fees are added to lot cost basis and sell fees reduce
+            proceeds. Fully sold instruments disappear from Open Positions but remain in this ledger.
+            Transaction amounts are the gross asset notional entered at recording time; quantities
+            and reference prices are stored per row for accounting.
+          </p>
+        </Card>
+      </div>
     </div>
   );
 }

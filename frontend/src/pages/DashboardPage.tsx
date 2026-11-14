@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
+import { useQuotes } from '../hooks/useQuotes';
 import { useApiStatus } from '../contexts/ApiStatusContext';
 import { marketService } from '../services/marketService';
 import { portfolioService } from '../services/portfolioService';
@@ -8,6 +9,7 @@ import { analysisService } from '../services/analysisService';
 import type { WatchlistItem } from '../types/api';
 import { formatDateTime, formatNumber } from '../utils/format';
 import { analysisPath } from '../utils/navigation';
+import { quoteRefFromWatchlist } from '../utils/quotes';
 import { notifyWatchlistChanged } from '../utils/events';
 import { Badge } from '../components/common/Badge';
 import { Button } from '../components/common/Button';
@@ -25,14 +27,19 @@ export function DashboardPage() {
   const watchlist = useApi((signal) => portfolioService.getWatchlist(signal), []);
   const scanner = useApi((signal) => marketService.getScanner(signal), []);
   const positions = useApi((signal) => portfolioService.getPositions(signal), []);
+  const summary = useApi((signal) => portfolioService.getSummary(signal), []);
   const signals = useApi((signal) => analysisService.getSignalsHistory(8, signal), []);
   const [removing, setRemoving] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const watchlistItems = watchlist.data?.items ?? [];
+  const watchlistRefs = watchlistItems.map(quoteRefFromWatchlist);
+  const { quotes: watchlistQuotes, refresh: refreshWatchlistQuotes } = useQuotes(watchlistRefs);
   const positionCount = positions.data?.positions.length ?? 0;
   const buySignals = scanner.data?.items.filter((item) => item.strategy.state === 'BUY') ?? [];
-  const realised = positions.data?.positions.reduce((sum, position) => sum + position.realised_pnl, 0) ?? 0;
+  const realisedByCurrency = (summary.data?.currencies ?? [])
+    .map((bucket) => `${bucket.currency} ${formatNumber(bucket.realized_pnl, 2)}`)
+    .join(' · ');
 
   async function removeItem(item: WatchlistItem) {
     setActionError(null);
@@ -78,7 +85,9 @@ export function DashboardPage() {
               watchlist.reload();
               scanner.reload();
               positions.reload();
+              summary.reload();
               signals.reload();
+              refreshWatchlistQuotes();
             }}
           >
             Refresh All
@@ -109,9 +118,9 @@ export function DashboardPage() {
         <Stat label="Open Positions" value={positions.loading ? '…' : String(positionCount)} hint="FIFO Accounting" />
         <Stat
           label="Realised P&L"
-          value={formatNumber(realised, 2)}
-          tone={realised > 0 ? 'positive' : realised < 0 ? 'negative' : 'neutral'}
-          hint="Across All Currencies"
+          value={summary.loading ? '…' : realisedByCurrency || '—'}
+          tone="neutral"
+          hint="Per Currency · Not Converted"
         />
       </div>
 
@@ -150,6 +159,7 @@ export function DashboardPage() {
           ) : (
             <WatchlistTable
               items={watchlistItems}
+              quotes={watchlistQuotes}
               removing={removing}
               onRemove={(item) => {
                 void removeItem(item);

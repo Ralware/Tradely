@@ -13,15 +13,17 @@
 
 ---
 
-## Current implementation status — 11 November 2026
+## Current implementation status — 14 November 2026
 
-This repository now contains a **runnable local application foundation**, not just a product proposal. The first implementation intentionally prioritises the data model, provider boundaries, indicator arithmetic, explainable strategy logic and tests. The browser UI has been migrated to a React + TypeScript + Vite + Tailwind application in `frontend/`; the legacy plain-HTML workbench remains at `/` as a fallback. All financial calculations, API contracts and provider integrations remain in the Python backend.
+This repository now contains a **runnable local application foundation**, not just a product proposal. The first implementation intentionally prioritises the data model, provider boundaries, indicator arithmetic, explainable strategy logic, portfolio accounting and tests. The browser UI has been migrated to a React + TypeScript + Vite + Tailwind application in `frontend/`; the legacy plain-HTML workbench remains at `/` as a fallback. All financial calculations, API contracts and provider integrations remain in the Python backend.
 
 ### Implemented now
 
 - FastAPI backend bound to `127.0.0.1` by default, with a startup guard that rejects non-loopback hosts.
-- SQLite persistence for a single-owner watchlist, manual actual-holdings transactions and signal audit history.
-- Provider adapters for TejHQ daily Indian equity OHLCV, Yahoo Finance through `yfinance` for international equity prices, Binance public Spot candles (paged up to 20,000 bars per fetch, with a truncation flag), GDELT news, and optional Yahoo Finance News through `yfinance`.
+- SQLite persistence for a single-owner watchlist, manual actual-holdings transactions, canonical instrument identities, cached quote snapshots and signal audit history. Existing databases are upgraded through additive migrations; no table is dropped or recreated.
+- Provider adapters for TejHQ daily Indian equity OHLCV, Yahoo Finance through `yfinance` for international equity prices, Binance public Spot candles and ticker quotes, GDELT news, and optional Yahoo Finance News through `yfinance`.
+- Canonical instrument resolution using `market:EXCHANGE:SYMBOL` identities. Symbol, name, market, exchange, currency, asset type, provider and provider-specific symbol are retained through the ledger and quote paths. Exchanges are not guessed beyond documented market defaults, and crypto pairs must include a supported quote asset.
+- A centralised quote service with provider routing, caching, rate-limit-aware backoff, request deduplication and explicit freshness labels. Crypto uses Binance REST plus one shared public WebSocket; Indian equities remain daily end-of-day TejHQ data; international quotes come from Yahoo Finance with their actual last-available/delayed timestamps.
 - OHLCV normalisation and validation, with provider/source and adjustment metadata.
 - Best-effort Yahoo Finance company profiles, valuation/quality ratios and quarterly financial statements where the provider supplies them.
 - Deterministic SMA, EMA, Wilder-seeded RSI/ATR/ADX, MACD, Bollinger Bands, Donchian channels, relative volume, OBV, session VWAP (intraday bars only; deliberately unavailable on daily bars), MFI, CMF, CCI and Stochastic RSI calculations.
@@ -29,18 +31,21 @@ This repository now contains a **runnable local application foundation**, not ju
 - Signal suppression when daily strategy data is stale or Indian-equity history is not confirmed corporate-action-adjusted.
 - ATR-based position sizing, a single-instrument daily backtest with next-bar-open execution assumptions and configurable aggregate basis-point costs.
 - Stock/asset-specific news endpoint with GDELT discovery and optional Yahoo Finance News supplementation.
-- Manual actual-holdings transaction ledger with FIFO cost-basis and realised P&L calculations. No simulated trades, paper-trading account or order placement.
-- React + TypeScript frontend with dashboard, markets/watchlist, stock and crypto analysis, portfolio (FIFO), backtesting and settings pages; candlestick/volume charts via Lightweight Charts and backend-computed indicator series; machine-readable API at `/docs`; automated unit/API tests.
+- Manual actual-holdings ledger with amount-based BUY/SELL entry and FIFO lot accounting. The owner enters the monetary amount; the backend validates a provider quote, derives the quantity and stores the reference price. BUY fees are included in cost basis; SELL consumes the oldest lots, allocates buy fees, deducts sell fees and records realised P&L. Oversells and deletion that would create a historical oversell are rejected. There are no short positions, simulated trades, paper-trading accounts or order placement.
+- Backend-computed live portfolio valuation: invested value, current market value, day change, unrealised P&L and return, realised P&L, fees and total P&L. Monetary summary totals are grouped by transaction currency; no INR/USD/USDT conversion is performed or implied.
+- Position detail with canonical identity, holding quantity, average and remaining cost basis, latest quote, market value, total bought/sold, realised P&L, fees, purchase/sale history and a daily candle chart with buy/sell markers and cost/price references.
+- An SSE quote stream and shared frontend quote hub so watchlist, portfolio and analysis views use the same instrument identity, prices and timestamps without duplicate provider calls. Held instruments are added to the watchlist once, deduplicated by canonical identity.
+- React + TypeScript frontend with dashboard, markets/watchlist, stock and crypto analysis, live portfolio valuation, backtesting and settings pages; candlestick/volume charts via Lightweight Charts and backend-computed indicator series; machine-readable API at `/docs`; automated backend and frontend tests.
 
 ### Not implemented yet (do not assume these features exist)
 
 - A statistically approved or profitable strategy. The included backtest is an initial single-instrument research implementation, not a full portfolio simulator, survivorship-free universe test or completed walk-forward/PBO/DSR validation programme.
 - Multiple strategy families as executable engines. Momentum ranking, pullback, mean reversion and intraday ORB remain research specifications until implemented and tested.
 - Full point-in-time NSE/BSE constituent history, delisted-equity coverage, exchange-calendar integration, complete Indian transaction-tax calculation or a broker-specific fill model.
-- Fundamental statements, filing feeds, corporate-action/event feeds, ticker search/discovery and automatic issuer mapping.
-- Crypto project-event discovery, smart-contract/token unlock calendar or derivatives/funding data. Crypto candles are exchange-specific Binance Spot data.
-- Unrealised P&L from live market marks, currency conversion or broker account synchronisation. The holdings API reports recorded positions and FIFO realised P&L; it does not pretend to know a live mark when no market mark has been fetched.
-- Automated notifications or remote access. Unrealised P&L from live marks, currency conversion and broker synchronisation remain out of scope.
+- Fundamental statements, filing feeds, corporate-action/event feeds and automatic issuer mapping. Symbol search uses locally known instruments; it is not a complete global security master.
+- Crypto project-event discovery, smart-contract/token unlock calendar or derivatives/funding data. Crypto candles and quotes are exchange-specific Binance Spot data.
+- Currency conversion, cross-currency portfolio totals, broker account synchronisation or tax reporting. Portfolio summary values are reported separately per transaction currency.
+- Automated notifications or remote access. Provider feeds are not redistributed, and the app is not a public service.
 
 The implementation is deliberately honest about unavailable data: provider failures are surfaced, missing event data is not filled with guesses, and a data source is not silently treated as live or adjusted. Provider adapters are replaceable; the strategy engine never imports a vendor SDK.
 
@@ -111,15 +116,16 @@ Run the backend tests (from the repository root):
 python -m pytest
 ```
 
-Type-check and build the frontend:
+Run the frontend tests, type-check and build:
 
 ```bash
 cd frontend
+npm test
 npm run typecheck
 npm run build
 ```
 
-The production bundle is written to `frontend/dist/`.
+The production bundle is written to `frontend/dist/`. On Windows PowerShell, if script execution policy blocks `npm.ps1`, use `cmd /c "cd frontend && npm test"` and the equivalent for the other commands.
 
 ### Implemented API routes
 
@@ -128,6 +134,8 @@ The production bundle is written to `frontend/dist/`.
 | `GET` | `/api/health` | Local app status and scope flags |
 | `GET` | `/api/providers/status` | Provider configuration and known limits |
 | `GET` | `/api/market/candles` | Normalised OHLCV candles |
+| `GET` | `/api/instruments/search` | Search locally known canonical instruments |
+| `GET` | `/api/instruments/resolve` | Resolve a symbol and market to a canonical instrument identity |
 | `GET` | `/api/instruments/{symbol}/analysis` | Latest indicators and strategy explanation |
 | `GET` | `/api/instruments/{symbol}/indicators` | Per-bar OHLCV plus every backend-computed indicator (additive; used for chart panes) |
 | `GET` | `/api/instruments/{symbol}/technicals` | Conventional Buy/Sell/Neutral labels for existing backend indicators (additive; drives the gauges and tables) |
@@ -137,9 +145,18 @@ The production bundle is written to `frontend/dist/`.
 | `POST` | `/api/risk/position-size` | Risk-budget position sizing |
 | `GET/POST` | `/api/watchlist` | Read/add watchlist entries |
 | `DELETE` | `/api/watchlist/{market}/{symbol}` | Remove a watchlist entry |
-| `GET/POST` | `/api/portfolio/transactions` | Read/add actual trade transactions |
-| `GET` | `/api/portfolio/positions` | FIFO open positions and realised P&L |
+| `GET` | `/api/watchlist/quotes` | Latest quotes for every watchlist instrument |
+| `GET` | `/api/market/quotes` | Deduplicated latest quotes by `instrument_id`, `symbol` or whole watchlist |
+| `GET` | `/api/market/quotes/stream` | Server-Sent Events quote stream backed by the shared quote cache and Binance WebSocket |
+| `GET/POST` | `/api/portfolio/transactions` | Read/add amount-based BUY/SELL transactions; the backend derives quantity from a validated quote |
+| `POST` | `/api/portfolio/transactions/preview` | Server-authoritative amount-to-quantity preview with precision, remainder and SELL availability |
+| `DELETE` | `/api/portfolio/transactions/{transaction_id}` | Delete a transaction if the remaining ledger stays valid |
+| `GET` | `/api/portfolio/summary` | Currency-separated invested, market value, realised/unrealised and total P&L |
+| `GET` | `/api/portfolio/positions` | Open positions with backend-computed valuation and P&L |
+| `GET` | `/api/portfolio/positions/{instrument_id}` | Full position detail, ledger history and candles |
 | `GET` | `/api/signals/history` | Audit history of generated strategy signals |
+
+New amount-based transactions are blocked before any ledger write when a usable quote cannot be verified. Existing ledger rows are unaffected by later quote failures: portfolio responses keep the position visible and report `quote_error`/valuation unavailability instead of inventing a mark. `GET /api/portfolio/*` and quote routes accept `force=true` for an explicit manual refresh; normal refreshes respect provider caches and backoff.
 
 ### React frontend
 
@@ -158,22 +175,40 @@ frontend/
       charts/       # Lightweight Charts price/RSI/MACD panes, SVG time-series chart, sparkline
       common/       # buttons, cards, fields, tabs, states, page headers
       layout/       # top bar, market sidebar, mobile navigation drawer, app shell
+      portfolio/    # summary cards, quote badge, position detail and position chart
       signals/      # signal badge, condition list, signal card, risk calculator
       tables/       # candles, indicators, watchlist, scanner, positions, trades, news, events
     contexts/       # API status and URL-driven selected-instrument providers
-    hooks/          # typed useApi hook with cancellation, watchlist quote loader
+    hooks/          # typed useApi hook with cancellation, shared quote subscription
     pages/          # dashboard, markets, stock/crypto analysis, portfolio, backtesting, settings
-    services/       # centralised typed API layer
+    services/       # typed API layer and centralised quote hub (REST + SSE)
     types/          # backend response interfaces
-    utils/          # formatting, navigation, supported timeframes, watchlist events
+    utils/          # formatting, quote freshness, navigation, supported timeframes
 ```
 
 - The layout is a slim top bar plus a persistent right-hand market rail on desktop. Below `xl`, navigation and the watchlist move into drawers. The rail reports watchlist quotes and session statistics from backend candles; it does not calculate indicators.
+- `src/services/quoteHub.ts` is the only frontend owner of live quotes. It ref-counts subscribers, keeps one REST batch and one SSE subscription, falls back to polling when streaming is unavailable, deduplicates instruments by canonical identity, ignores stale ticks that would overwrite newer quotes, and pauses when the page is hidden. Components render the returned quote metadata; they do not invent prices.
+- The portfolio page orders the view as summary, open positions, position detail, then the amount-based transaction form and ledger. The form contains Instrument, Market, Exchange, Side, Currency, Amount, Latest Price (read-only), Fees, Transaction Time and Notes; Quantity and Price Per Unit are not user inputs. Quote ticks trigger a throttled backend re-fetch of positions and summary, so FIFO, invested value, market value and P&L remain backend calculations.
 - The technical gauges and tables render `/api/instruments/{symbol}/technicals`. That endpoint only labels values already produced by `compute_indicators` with documented conventional thresholds. It is not the trend-breakout strategy and does not introduce a second trading algorithm.
 - All HTTP calls go through `src/services/api.ts`. `VITE_API_BASE_URL` is empty by default, so the browser calls `/api/...` on the same origin and Vite proxies it to `http://127.0.0.1:8000`. Set the variable only for a separately hosted build; that requires CORS on the FastAPI side.
-- The frontend never calculates indicators, signals, risk or backtest metrics. It renders values returned by the backend and shows the backend's `detail` message when a request fails. There is no mock or fallback market data.
-- Charts use Lightweight Charts for candlesticks, volume, RSI and MACD, plus a small SVG component for equity and drawdown curves. Indicator overlay values come from `/analysis`; RSI/MACD series come from the additive `/indicators` endpoint, which reuses the existing `compute_indicators` function.
+- The frontend never calculates indicators, signals, risk, FIFO or portfolio valuation. It renders values returned by the backend and shows the backend's `detail` message when a request fails. There is no mock or fallback market data.
+- Charts use Lightweight Charts for candlesticks, volume, RSI and MACD, plus a small SVG component for equity and drawdown curves. Indicator overlay values come from `/analysis`; RSI/MACD series come from the additive `/indicators` endpoint, which reuses the existing `compute_indicators` function. Position detail charts add buy/sell markers and average-cost/current-price reference lines from backend ledger and quote data.
 - For production, run `npm run build` and serve `frontend/dist/` from any static host, reverse-proxying `/api` to FastAPI. `npm run preview` serves the built bundle on port 4173 with the same `/api` proxy for a quick local check.
+
+### Portfolio valuation and quote freshness
+
+- A canonical `instrument_id` has the form `market:EXCHANGE:SYMBOL` (for example `india:NSE:RELIANCE`, `global:NASDAQ:AAPL` or `crypto:BINANCE:BTCUSDT`). The ledger stores this identity alongside symbol, name, market, exchange, currency, asset type, provider and provider symbol.
+- FIFO is calculated in the backend with decimal arithmetic. BUY adds a lot and allocates its fees into per-unit cost. SELL validates available quantity, rejects oversell, consumes the oldest lots, allocates their buy fees, deducts sell fees and records realised P&L. A partial sale leaves the position open; a full sale removes it from open positions but preserves the ledger. Short positions are not supported.
+- Transaction entry is amount-based. The client sends `instrument_id`, `side`, `amount`, `currency`, `fees`, `trade_time`, `notes` and an `idempotency_key`. It never sends the accounting quantity or unit price. The backend resolves the instrument, fetches and validates its own quote, derives the quantity, reconciles the actual notional and persists both quantity and reference price for FIFO, cost basis and realised P&L.
+- `POST /api/portfolio/transactions/preview` returns the quantity, actual transaction amount, remainder, total cash cost (BUY) or net proceeds (SELL), available holdings, maximum sellable value and the trading-rule source. The React form debounces requests and renders this response; it does not implement accounting precision itself.
+- Derived quantity is always floored to the instrument quantity step, so a BUY never spends more than the requested amount. Binance Spot rules are read from the pair's `exchangeInfo`; crypto recording is rejected when those rules cannot be verified rather than guessing precision. Indian equities default to whole shares and the global-equity fallback is labelled as a fractional-share default.
+- Entries within the last ten minutes use a freshly refreshed provider quote. Older entries use provider candles at or before the selected transaction time and are stored as `historical`; the current price is never substituted for a backdated transaction. `stale`, `cached` and `unavailable` quotes are rejected, and recording is disabled while no usable quote exists.
+- Each row stores an immutable quote snapshot (`quote_provider`, `quote_time`, `quote_type`, `quote_status`, `quote_currency`) plus the requested and actual amounts. A unique partial index on non-empty `idempotency_key` makes retried submissions return the original row instead of duplicating it.
+- Existing `quantity` and `price` columns and all historical rows are preserved. Migrations are additive and backfill the new amount fields from `quantity × price`; no ledger table is recreated.
+- Open-position values are computed by the backend from remaining FIFO cost basis and the latest quote. If no usable quote exists, the position remains visible with null market value/unrealised P&L and an explicit quote error; no price is fabricated.
+- Summary values are grouped by transaction currency. There is no verified INR/USD/USDT conversion, so the app never adds different currencies into one total.
+- Quote labels distinguish provider states: Binance crypto ticks can be `real_time`/`live`, older crypto quotes become `delayed`, then `stale`; Indian equity closes are `end_of_day` (`eod`); Yahoo international quotes are `last_available`/`delayed`; cached fallbacks are `cached` or `stale`; failures are `unavailable`. Each quote carries provider, provider timestamp, retrieval time, age, market status and freshness.
+- Crypto quotes use the shared Binance public WebSocket with reconnect, plus REST fallback. Indian equity data is daily end-of-day and is never labelled real-time. Provider failures use exponential backoff (including a longer pause on rate limits), and manual `force=true` refreshes remain available.
 
 ### Data and execution semantics
 
