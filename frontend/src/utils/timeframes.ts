@@ -37,11 +37,12 @@ const CRYPTO_TIMEFRAMES: TimeframeOption[] = [
  * provide 2-hour or 4-hour bars, so they are not offered for equities.
  */
 export function timeframesFor(market: Market): TimeframeOption[] {
+  if (market === 'india') return EQUITY_TIMEFRAMES.filter((option) => option.id === '1d');
   return market === 'crypto' ? CRYPTO_TIMEFRAMES : EQUITY_TIMEFRAMES;
 }
 
 export function normalizeIntervalForMarket(market: Market, interval: string): string {
-  const supported = market === 'crypto' ? CRYPTO_TIMEFRAMES : EQUITY_TIMEFRAMES;
+  const supported = timeframesFor(market);
   let normalized = interval;
   if (market === 'crypto') {
     if (interval === '1wk') normalized = '1w';

@@ -93,8 +93,10 @@ class Database:
             if transaction.side == "SELL":
                 row = connection.execute(
                     """SELECT COALESCE(SUM(CASE WHEN side='BUY' THEN quantity ELSE -quantity END), 0) AS quantity
-                       FROM holding_transactions WHERE symbol=? AND market=?""",
-                    (transaction.symbol.upper(), transaction.market),
+                       FROM holding_transactions
+                       WHERE symbol=? AND market=? AND currency=? AND trade_time<=?""",
+                    (transaction.symbol.upper(), transaction.market, transaction.currency.upper(),
+                     transaction.trade_time.isoformat()),
                 ).fetchone()
                 available = float(row["quantity"] or 0)
                 if transaction.quantity > available + 1e-9:

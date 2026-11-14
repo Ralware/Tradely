@@ -329,6 +329,7 @@ def backtest_trend_breakout(request: Request, payload: BacktestRequest) -> dict[
             frame, initial_capital=payload.initial_capital, risk_fraction=payload.risk_fraction,
             cost_bps_per_side=payload.cost_bps_per_side,
             max_position_fraction=payload.max_position_fraction,
+            market=payload.market,
         )
     except HTTPException:
         raise

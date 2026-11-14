@@ -26,3 +26,21 @@ def test_actual_holdings_ledger_prevents_overselling(tmp_path):
             symbol="ABC", market="global", side="SELL", quantity=11, price=110,
             trade_time=datetime(2026, 1, 2, tzinfo=timezone.utc), currency="USD", fees=1,
         ))
+
+
+def test_sell_cannot_use_future_or_different_currency_buys(tmp_path):
+    db = Database(tmp_path / "test.sqlite3")
+    db.add_transaction(HoldingTransaction(
+        symbol="ABC", market="global", side="BUY", quantity=10, price=100,
+        trade_time=datetime(2026, 2, 1, tzinfo=timezone.utc), currency="USD",
+    ))
+    with pytest.raises(ValueError, match="exceeds recorded holdings"):
+        db.add_transaction(HoldingTransaction(
+            symbol="ABC", market="global", side="SELL", quantity=1, price=100,
+            trade_time=datetime(2026, 1, 1, tzinfo=timezone.utc), currency="USD",
+        ))
+    with pytest.raises(ValueError, match="exceeds recorded holdings"):
+        db.add_transaction(HoldingTransaction(
+            symbol="ABC", market="global", side="SELL", quantity=1, price=100,
+            trade_time=datetime(2026, 2, 2, tzinfo=timezone.utc), currency="INR",
+        ))

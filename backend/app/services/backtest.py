@@ -17,6 +17,7 @@ def run_trend_breakout_backtest(
     max_position_fraction: float = 0.95,
     initial_stop_atr: float = 2.0,
     trailing_stop_atr: float = 3.0,
+    market: str = "global",
 ) -> dict:
     """Single-instrument long-only research backtest.
 
@@ -54,9 +55,9 @@ def run_trend_breakout_backtest(
             exit_price = min(open_price, stop) if open_price < stop else stop
             gross = (exit_price - position["entry"]) * position["quantity"]
             fees = (position["entry"] + exit_price) * position["quantity"] * entry_cost_fraction
-            net = gross - fees - position["entry_fees"]
+            net = gross - fees
             equity += net
-            trades.append(_trade_record(position, ts, exit_price, gross, fees + position["entry_fees"], net, "protective_stop"))
+            trades.append(_trade_record(position, ts, exit_price, gross, fees, net, "protective_stop"))
             position = None
             pending_exit = False
             exited_this_bar = True
@@ -66,9 +67,9 @@ def run_trend_breakout_backtest(
             exit_price = open_price
             gross = (exit_price - position["entry"]) * position["quantity"]
             fees = (position["entry"] + exit_price) * position["quantity"] * entry_cost_fraction
-            net = gross - fees - position["entry_fees"]
+            net = gross - fees
             equity += net
-            trades.append(_trade_record(position, ts, exit_price, gross, fees + position["entry_fees"], net, "donchian_10_exit"))
+            trades.append(_trade_record(position, ts, exit_price, gross, fees, net, "donchian_10_exit"))
             position = None
             pending_exit = False
             exited_this_bar = True
@@ -95,10 +96,9 @@ def run_trend_breakout_backtest(
                     quantity_by_capital = math.floor((equity * max_position_fraction) / open_price)
                     quantity = max(0, min(quantity_by_risk, quantity_by_capital))
                     if quantity > 0:
-                        entry_fees = open_price * quantity * entry_cost_fraction
                         position = {
                             "entry_time": ts.isoformat(), "entry": open_price, "quantity": quantity,
-                            "stop": stop, "entry_fees": entry_fees,
+                            "stop": stop,
                             "signal_time": data.index[i - 1].isoformat(),
                         }
 
@@ -107,9 +107,9 @@ def run_trend_breakout_backtest(
             exit_price = min(open_price, float(position["stop"]))
             gross = (exit_price - position["entry"]) * position["quantity"]
             fees = (position["entry"] + exit_price) * position["quantity"] * entry_cost_fraction
-            net = gross - fees - position["entry_fees"]
+            net = gross - fees
             equity += net
-            trades.append(_trade_record(position, ts, exit_price, gross, fees + position["entry_fees"], net, "same_bar_protective_stop"))
+            trades.append(_trade_record(position, ts, exit_price, gross, fees, net, "same_bar_protective_stop"))
             position = None
             pending_exit = False
             exited_this_bar = True
@@ -123,7 +123,8 @@ def run_trend_breakout_backtest(
             # Compute prior-10-day lower channel explicitly; current day excluded.
             lower10 = data["low"].iloc[max(0, i - 10):i].min() if i >= 10 else np.nan
             pending_exit = bool(pd.notna(lower10) and close < lower10)
-            unrealized = (close - position["entry"]) * position["quantity"] - position["entry_fees"]
+            # Entry and exit fees are recognised exactly once when a trade closes.
+            unrealized = (close - position["entry"]) * position["quantity"]
         else:
             unrealized = 0.0
         marked_equity = equity + unrealized
@@ -135,9 +136,9 @@ def run_trend_breakout_backtest(
         exit_price = float(last["close"])
         gross = (exit_price - position["entry"]) * position["quantity"]
         fees = (position["entry"] + exit_price) * position["quantity"] * entry_cost_fraction
-        net = gross - fees - position["entry_fees"]
+        net = gross - fees
         equity += net
-        trades.append(_trade_record(position, data.index[-1], exit_price, gross, fees + position["entry_fees"], net, "end_of_test"))
+        trades.append(_trade_record(position, data.index[-1], exit_price, gross, fees, net, "end_of_test"))
         if equity_curve:
             equity_curve[-1]["equity"] = equity
 
@@ -151,12 +152,16 @@ def run_trend_breakout_backtest(
     drawdown = curve / running_max - 1 if not curve.empty else pd.Series(dtype=float)
     returns = curve.pct_change().dropna() if not curve.empty else pd.Series(dtype=float)
     sharpe = None
+    annualization = 365 if market == "crypto" else 252
     if len(returns) > 1 and returns.std(ddof=1) > 0:
-        sharpe = float(np.sqrt(252) * returns.mean() / returns.std(ddof=1))
-    downside = returns[returns < 0]
+        sharpe = float(np.sqrt(annualization) * returns.mean() / returns.std(ddof=1))
+    # Downside deviation is measured against a zero daily target across the
+    # full return series; using only negative observations understates risk.
+    downside = np.minimum(returns.to_numpy(dtype=float), 0.0)
     sortino = None
-    if len(downside) > 1 and downside.std(ddof=1) > 0:
-        sortino = float(np.sqrt(252) * returns.mean() / downside.std(ddof=1))
+    downside_deviation = float(np.sqrt(np.mean(np.square(downside)))) if len(downside) else 0.0
+    if len(returns) > 1 and downside_deviation > 0:
+        sortino = float(np.sqrt(annualization) * returns.mean() / downside_deviation)
     return {
         "initial_capital": initial_capital,
         "final_equity": equity,
@@ -169,6 +174,9 @@ def run_trend_breakout_backtest(
         "sharpe_daily_annualized": sharpe,
         "sortino_daily_annualized": sortino,
         "cost_bps_per_side": cost_bps_per_side,
+        "annualization_factor": annualization,
+        "risk_free_rate_annual": 0.0,
+        "sortino_target_daily": 0.0,
         "trades": trades,
         "equity_curve": equity_curve,
         "limitations": [

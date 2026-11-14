@@ -191,8 +191,8 @@ export function MarketSidebar() {
       });
       notifyWatchlistChanged();
       reload();
-    } catch {
-      // The watchlist remains unchanged when the backend rejects the removal.
+    } catch (caught) {
+      setFormError(caught instanceof Error ? caught.message : 'Could Not Remove Instrument');
     } finally {
       setRemoving(null);
     }
