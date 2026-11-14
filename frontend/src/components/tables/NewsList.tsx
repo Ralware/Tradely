@@ -7,11 +7,8 @@ export function NewsList({ items, note }: { items: NewsItem[]; note?: string }) 
   if (items.length === 0) {
     return (
       <EmptyState
-        title="No news items returned"
-        description={
-          note ??
-          'Configured providers returned nothing for this instrument. An empty result is not proof that no news exists.'
-        }
+        title="No News Items"
+        description={note ?? 'No provider records returned.'}
         icon="search"
       />
     );
@@ -20,7 +17,7 @@ export function NewsList({ items, note }: { items: NewsItem[]; note?: string }) 
   return (
     <ul className="divide-y divide-terminal-borderSoft">
       {items.map((item) => (
-        <li key={item.id} className="py-2.5 first:pt-0 last:pb-0">
+        <li key={item.id} className="py-1.5 first:pt-0 last:pb-0">
           <div className="flex items-start justify-between gap-3">
             <a
               href={item.url}
@@ -30,16 +27,16 @@ export function NewsList({ items, note }: { items: NewsItem[]; note?: string }) 
             >
               {item.title}
             </a>
-            {item.official ? <Badge tone="positive">official</Badge> : null}
+            {item.official ? <Badge tone="positive">Official</Badge> : null}
           </div>
           {item.summary ? (
-            <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-terminal-muted">
+            <p className="mt-0.5 line-clamp-2 text-2xs leading-relaxed text-terminal-muted">
               {item.summary}
             </p>
           ) : null}
-          <p className="mt-1 text-[10px] text-terminal-muted">
+          <p className="mt-0.5 text-2xs text-terminal-muted">
             {item.publisher ?? item.source} ·{' '}
-            {item.published_at ? formatDateTime(item.published_at) : 'Publication time unavailable'}
+            {item.published_at ? formatDateTime(item.published_at) : 'Time Unavailable'}
           </p>
         </li>
       ))}

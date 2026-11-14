@@ -8,9 +8,9 @@ import { useId } from 'react';
 import { cn } from '../../utils/format';
 
 const controlClasses =
-  'w-full rounded-lg border border-terminal-border bg-terminal-panelAlt px-3 py-2 text-sm text-terminal-text ' +
-  'placeholder:text-terminal-muted/70 transition-colors hover:border-[#2c3a4d] ' +
-  'focus:border-[#40598f] focus:outline-none focus:ring-1 focus:ring-[#40598f] disabled:opacity-60';
+  'w-full rounded-sm border border-terminal-border bg-terminal-panelAlt px-2 py-1.5 text-xs text-terminal-text ' +
+  'placeholder:text-terminal-muted/70 transition-colors hover:border-[#30353f] ' +
+  'focus:border-terminal-accent focus:outline-none disabled:opacity-60';
 
 interface FieldProps {
   label: string;
@@ -26,15 +26,15 @@ export function Field({ label, htmlFor, hint, error, children, className }: Fiel
     <div className={cn('min-w-0', className)}>
       <label
         htmlFor={htmlFor}
-        className="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-terminal-muted"
+        className="mb-1 block text-2xs font-medium text-terminal-muted"
       >
         {label}
       </label>
       {children}
       {error ? (
-        <p className="mt-1 text-xs text-terminal-red">{error}</p>
+        <p className="mt-0.5 text-2xs text-terminal-red">{error}</p>
       ) : hint ? (
-        <p className="mt-1 text-xs text-terminal-muted">{hint}</p>
+        <p className="mt-0.5 text-2xs text-terminal-muted">{hint}</p>
       ) : null}
     </div>
   );
@@ -82,7 +82,7 @@ export function Select({
   const generatedId = useId();
   const selectId = id ?? generatedId;
   const control = (
-    <select id={selectId} className={cn(controlClasses, 'appearance-none pr-8', className)} {...rest}>
+    <select id={selectId} className={cn(controlClasses, 'appearance-none pr-7', className)} {...rest}>
       {options.map((option) => (
         <option key={option.value} value={option.value}>
           {option.label}
@@ -119,7 +119,7 @@ export function Textarea({
   const generatedId = useId();
   const textareaId = id ?? generatedId;
   const control = (
-    <textarea id={textareaId} className={cn(controlClasses, 'min-h-[80px]', className)} {...rest} />
+    <textarea id={textareaId} className={cn(controlClasses, 'min-h-[70px]', className)} {...rest} />
   );
   if (!label) {
     return control;

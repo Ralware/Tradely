@@ -5,16 +5,16 @@ export function IndicatorTable({ indicators }: { indicators: IndicatorValues }) 
   const entries = Object.entries(indicators);
 
   if (entries.length === 0) {
-    return <p className="text-xs text-terminal-muted">No indicator values returned.</p>;
+    return <p className="text-xs text-terminal-muted">No Indicator Values</p>;
   }
 
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[380px] border-collapse text-xs">
         <thead>
-          <tr className="border-b border-terminal-border text-left text-[11px] uppercase tracking-[0.06em] text-terminal-muted">
-            <th className="py-2 pr-3 font-medium">Indicator</th>
-            <th className="py-2 text-right font-medium">Value</th>
+          <tr className="border-b border-terminal-border text-left text-2xs text-terminal-muted">
+            <th className="py-1.5 pr-3 font-medium">Indicator</th>
+            <th className="py-1.5 text-right font-medium">Value</th>
           </tr>
         </thead>
         <tbody>

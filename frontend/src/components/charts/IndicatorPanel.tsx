@@ -41,7 +41,7 @@ function Meter({
   return (
     <div>
       <div className="flex items-baseline justify-between gap-2">
-        <span className="truncate text-[11px] text-terminal-muted">{label}</span>
+        <span className="truncate text-2xs text-terminal-muted">{label}</span>
         <span className={cn('num text-xs font-medium', toneText[tone])}>{value}</span>
       </div>
       <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-terminal-borderSoft">
@@ -50,7 +50,7 @@ function Meter({
           style={{ width: `${clamp(fraction, 0, 1) * 100}%` }}
         />
       </div>
-      {hint ? <p className="mt-0.5 text-[10px] text-terminal-muted">{hint}</p> : null}
+      {hint ? <p className="mt-0.5 text-2xs text-terminal-muted">{hint}</p> : null}
     </div>
   );
 }
@@ -95,7 +95,7 @@ export function IndicatorPanel({
     >
       <div className="space-y-4">
         <div>
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-terminal-muted">
+          <p className="mb-2 text-2xs font-medium text-terminal-muted">
             Momentum
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -104,7 +104,7 @@ export function IndicatorPanel({
               value={rsi === null ? '—' : formatNumber(rsi, 1)}
               fraction={(rsi ?? 0) / 100}
               tone={rsi === null ? 'accent' : rsi >= 70 || rsi <= 30 ? 'warning' : 'accent'}
-              hint="30 / 70 context levels"
+              hint="Levels 30 / 70"
             />
             <Meter
               label="Stochastic RSI 14"
@@ -131,8 +131,8 @@ export function IndicatorPanel({
         </div>
 
         <div>
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-terminal-muted">
-            Trend strength
+          <p className="mb-2 text-2xs font-medium text-terminal-muted">
+            Trend Strength
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
             <Meter
@@ -140,7 +140,7 @@ export function IndicatorPanel({
               value={adx === null ? '—' : formatNumber(adx, 1)}
               fraction={(adx ?? 0) / 60}
               tone={adx === null ? 'accent' : adx >= 20 ? 'positive' : 'accent'}
-              hint="≥ 20 indicates a trending regime"
+              hint="Trending Above 20"
             />
             <Meter
               label="Directional index (+DI / −DI)"
@@ -159,13 +159,13 @@ export function IndicatorPanel({
                     ? 'positive'
                     : 'negative'
               }
-              hint="ADX shows strength, not direction"
+              hint="Strength Only"
             />
           </div>
         </div>
 
         <div>
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-terminal-muted">
+          <p className="mb-2 text-2xs font-medium text-terminal-muted">
             Volatility
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -177,7 +177,7 @@ export function IndicatorPanel({
               hint={close && atr !== null ? `${formatNumber((atr / close) * 100, 2)}% of close` : undefined}
             />
             <Meter
-              label="Bollinger position"
+              label="Bollinger Position"
               value={bandPosition === null ? '—' : `${formatNumber(bandPosition * 100, 1)}%`}
               fraction={bandPosition ?? 0.5}
               tone={
@@ -197,16 +197,16 @@ export function IndicatorPanel({
         </div>
 
         <div>
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-terminal-muted">
+          <p className="mb-2 text-2xs font-medium text-terminal-muted">
             Volume
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
             <Meter
-              label="Relative volume 20"
+              label="Relative Volume (20)"
               value={rvol === null ? '—' : formatNumber(rvol, 2)}
               fraction={(rvol ?? 0) / 3}
               tone={rvol === null ? 'accent' : rvol >= 1 ? 'positive' : 'accent'}
-              hint="≥ 1.0 = above the prior 20-bar average"
+              hint="Above Average at 1.0"
             />
             <Meter
               label="MFI 14"
@@ -225,21 +225,21 @@ export function IndicatorPanel({
               value={obv === null ? '—' : formatCompact(obv)}
               fraction={0.5}
               tone="accent"
-              hint="Cumulative volume; compare direction, not absolute level"
+              hint="Compare Direction, Not Level"
             />
           </div>
         </div>
 
-        <div className="rounded-lg border border-terminal-borderSoft bg-terminal-panelAlt px-3 py-2">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-terminal-muted">
+        <div className="rounded-sm border border-terminal-borderSoft bg-terminal-panelAlt px-2.5 py-1.5">
+          <p className="text-2xs font-medium text-terminal-muted">
             Session VWAP
           </p>
           <p className="num mt-0.5 text-xs text-terminal-text">
-            {vwap === null ? 'Unavailable on daily bars' : formatNumber(vwap, 2)}
+            {vwap === null ? 'Requires Intraday Bars' : formatNumber(vwap, 2)}
           </p>
           {vwap === null ? (
-            <p className="mt-0.5 text-[10px] text-terminal-muted">
-              Daily OHLCV cannot reconstruct the intraday volume distribution.
+            <p className="mt-0.5 text-2xs text-terminal-muted">
+              Daily Bars Do Not Carry Intraday Volume.
             </p>
           ) : null}
         </div>

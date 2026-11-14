@@ -9,16 +9,16 @@ import { PageHeader } from '../components/common/PageHeader';
 import { Button } from '../components/common/Button';
 import { Input, Select } from '../components/common/Field';
 import { Tabs } from '../components/common/Tabs';
-import { EmptyState, ErrorState, LoadingPanel, Notice } from '../components/common/States';
+import { ErrorState, LoadingPanel, Notice } from '../components/common/States';
 import { ScannerTable } from '../components/tables/ScannerTable';
 import { WatchlistTable } from '../components/tables/WatchlistTable';
-import { CryptoMarketsTable } from '../components/tables/CryptoMarketsTable';
 import { ProviderList } from '../components/tables/ProviderList';
 import { useApiStatus } from '../contexts/ApiStatusContext';
+import { notifyWatchlistChanged } from '../utils/events';
 
 const marketLabels: Record<Market, string> = {
-  india: 'Indian equities',
-  global: 'International equities',
+  india: 'Indian Equities',
+  global: 'International Equities',
   crypto: 'Crypto',
 };
 
@@ -47,9 +47,6 @@ export function MarketsPage() {
   const { providers, providersLoading, providersError, refresh } = useApiStatus();
   const watchlist = useApi((signal) => portfolioService.getWatchlist(signal), []);
   const scanner = useApi((signal) => marketService.getScanner(signal), []);
-  const crypto = useApi((signal) => marketService.getCryptoMarkets(undefined, signal), [], {
-    enabled: tab === 'crypto',
-  });
 
   const allItems = watchlist.data?.items ?? [];
   const filteredWatchlist = allItems.filter((item) => item.market === tab);
@@ -69,7 +66,7 @@ export function MarketsPage() {
     setFormMessage(null);
     const clean = symbol.trim().toUpperCase();
     if (!clean) {
-      setFormError('Enter a symbol.');
+      setFormError('Enter a Symbol');
       return;
     }
     setSaving(true);
@@ -80,13 +77,14 @@ export function MarketsPage() {
         exchange: tab === 'crypto' ? 'BINANCE' : exchange,
         display_name: displayName.trim() || null,
       });
-      setFormMessage(`${clean} added to the watchlist.`);
+      setFormMessage(`${clean} Added to Watchlist`);
       setSymbol('');
       setDisplayName('');
+      notifyWatchlistChanged();
       watchlist.reload();
       scanner.reload();
     } catch (caught) {
-      setFormError(caught instanceof Error ? caught.message : 'Could not add the instrument');
+      setFormError(caught instanceof Error ? caught.message : 'Could Not Add Instrument');
     } finally {
       setSaving(false);
     }
@@ -102,10 +100,11 @@ export function MarketsPage() {
         market: item.market,
         exchange: item.exchange,
       });
+      notifyWatchlistChanged();
       watchlist.reload();
       scanner.reload();
     } catch (caught) {
-      setFormError(caught instanceof Error ? caught.message : 'Could not remove the instrument');
+      setFormError(caught instanceof Error ? caught.message : 'Could Not Remove Instrument');
     } finally {
       setRemoving(null);
     }
@@ -115,7 +114,7 @@ export function MarketsPage() {
     <div>
       <PageHeader
         title="Markets"
-        subtitle="Watchlists, the daily scanner and provider state. Symbol entry is explicit — Tradely has no fabricated ticker database or instrument search endpoint."
+        subtitle="Watchlists · Scanner · Providers"
         actions={
           <Button
             size="sm"
@@ -123,7 +122,6 @@ export function MarketsPage() {
             onClick={() => {
               watchlist.reload();
               scanner.reload();
-              crypto.reload();
               refresh();
             }}
           >
@@ -133,24 +131,20 @@ export function MarketsPage() {
       />
 
       <Tabs
-        className="mb-4"
+        className="mb-3"
         active={tab}
         onChange={changeTab}
         items={[
-          { id: 'india', label: 'Indian equities', count: allItems.filter((i) => i.market === 'india').length },
+          { id: 'india', label: 'Indian Equities', count: allItems.filter((i) => i.market === 'india').length },
           { id: 'global', label: 'International', count: allItems.filter((i) => i.market === 'global').length },
           { id: 'crypto', label: 'Crypto', count: allItems.filter((i) => i.market === 'crypto').length },
         ]}
       />
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-        <Card
-          className="xl:col-span-5"
-          title={`Add ${marketLabels[tab].toLowerCase()} instrument`}
-          subtitle="Saved to the backend SQLite watchlist used by the scanner."
-        >
-          <form onSubmit={addInstrument} className="space-y-3">
-            <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 xl:grid-cols-12">
+        <Card className="xl:col-span-5" title="Add Instrument">
+          <form onSubmit={addInstrument} className="space-y-2">
+            <div className="grid gap-2 sm:grid-cols-2">
               <Input
                 label="Symbol"
                 value={symbol}
@@ -158,54 +152,41 @@ export function MarketsPage() {
                 placeholder={tab === 'crypto' ? 'BTCUSDT' : tab === 'global' ? 'AAPL' : 'RELIANCE'}
                 autoComplete="off"
               />
-              {tab === 'crypto' ? (
-                <Select
-                  label="Exchange"
-                  value={exchange}
-                  onChange={(event) => setExchange(event.target.value)}
-                  options={exchangeOptions.crypto}
-                  disabled
-                />
-              ) : (
-                <Select
-                  label="Exchange"
-                  value={exchange}
-                  onChange={(event) => setExchange(event.target.value)}
-                  options={exchangeOptions[tab]}
-                />
-              )}
+              <Select
+                label="Exchange"
+                value={exchange}
+                onChange={(event) => setExchange(event.target.value)}
+                options={exchangeOptions[tab]}
+                disabled={tab === 'crypto'}
+              />
             </div>
             <Input
-              label="Display name (optional)"
+              label="Display Name (Optional)"
               value={displayName}
               onChange={(event) => setDisplayName(event.target.value)}
               placeholder="Reliance Industries"
               autoComplete="off"
             />
             <Button type="submit" variant="primary" icon="plus" loading={saving}>
-              Add to watchlist
+              Add to Watchlist
             </Button>
           </form>
 
           {formMessage ? (
-            <Notice tone="positive" className="mt-3">
+            <Notice tone="positive" className="mt-2">
               {formMessage}
             </Notice>
           ) : null}
           {formError ? (
-            <Notice tone="negative" className="mt-3">
+            <Notice tone="negative" className="mt-2">
               {formError}
             </Notice>
           ) : null}
         </Card>
 
-        <Card
-          className="xl:col-span-7"
-          title={`${marketLabels[tab]} watchlist`}
-          subtitle="Open an instrument to run analysis, or remove it from the scanner."
-        >
+        <Card className="xl:col-span-7" title={`${marketLabels[tab]} Watchlist`}>
           {watchlist.loading && !watchlist.data ? (
-            <LoadingPanel label="Loading watchlist…" rows={4} />
+            <LoadingPanel label="Loading Watchlist" rows={4} />
           ) : watchlist.error ? (
             <ErrorState message={watchlist.error} onRetry={watchlist.reload} />
           ) : (
@@ -220,29 +201,20 @@ export function MarketsPage() {
         </Card>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
-        <Card
-          className="xl:col-span-7"
-          title="Daily scanner"
-          subtitle="One backend strategy evaluation per watchlist instrument."
-        >
+      <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-12">
+        <Card className="xl:col-span-7" title="Daily Scanner">
           {scanner.loading && !scanner.data ? (
-            <LoadingPanel label="Running scanner…" rows={5} />
+            <LoadingPanel label="Running Scanner" rows={5} />
           ) : scanner.error ? (
             <ErrorState message={scanner.error} onRetry={scanner.reload} />
           ) : (
-            <>
-              <ScannerTable items={filteredScanner} />
-              {scanner.data?.note ? (
-                <p className="mt-3 text-[11px] text-terminal-muted">{scanner.data.note}</p>
-              ) : null}
-            </>
+            <ScannerTable items={filteredScanner} />
           )}
         </Card>
 
-        <Card className="xl:col-span-5" title="Provider configuration" subtitle="Reported by the backend, never assumed.">
+        <Card className="xl:col-span-5" title="Provider Configuration">
           {providersLoading && !providers ? (
-            <LoadingPanel label="Checking providers…" rows={4} />
+            <LoadingPanel label="Checking Providers" rows={4} />
           ) : providersError ? (
             <ErrorState message={providersError} onRetry={refresh} />
           ) : providers ? (
@@ -250,27 +222,6 @@ export function MarketsPage() {
           ) : null}
         </Card>
       </div>
-
-      {tab === 'crypto' ? (
-        <Card
-          className="mt-4"
-          title="Crypto market metadata"
-          subtitle="CoinGecko Demo aggregates. Price rows are provider values; analysis links use Binance Spot candles."
-        >
-          {crypto.loading && !crypto.data ? (
-            <LoadingPanel label="Loading crypto markets…" rows={5} />
-          ) : crypto.error ? (
-            <ErrorState message={crypto.error} onRetry={crypto.reload} />
-          ) : crypto.data ? (
-            <>
-              <CryptoMarketsTable markets={crypto.data.markets} />
-              <p className="mt-3 text-[11px] text-terminal-muted">Source: {crypto.data.source}</p>
-            </>
-          ) : (
-            <EmptyState title="No crypto metadata" icon="crypto" />
-          )}
-        </Card>
-      ) : null}
     </div>
   );
 }

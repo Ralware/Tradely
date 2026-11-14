@@ -1,10 +1,10 @@
 import { apiRequest } from './api';
 import type {
   AnalysisResponse,
-  FundamentalsResponse,
   IndicatorSeriesResponse,
   Market,
   SignalsHistoryResponse,
+  TechnicalSummaryResponse,
 } from '../types/api';
 
 export interface AnalysisQuery {
@@ -51,28 +51,22 @@ export const analysisService = {
     );
   },
 
-  getFundamentals(
-    query: { symbol: string; market: Market; exchange?: string | null },
-    signal?: AbortSignal,
-  ): Promise<FundamentalsResponse> {
-    return apiRequest<FundamentalsResponse>(
-      `/api/instruments/${encodeURIComponent(query.symbol)}/fundamentals`,
-      {
-        query: {
-          market: query.market,
-          exchange: query.exchange ?? undefined,
-        },
-        signal,
-        timeoutMs: LONG_TIMEOUT,
-      },
-    );
-  },
-
   getSignalsHistory(limit = 50, signal?: AbortSignal): Promise<SignalsHistoryResponse> {
     return apiRequest<SignalsHistoryResponse>('/api/signals/history', {
       query: { limit },
       signal,
       timeoutMs: 15_000,
     });
+  },
+
+  getTechnicals(query: AnalysisQuery, signal?: AbortSignal): Promise<TechnicalSummaryResponse> {
+    return apiRequest<TechnicalSummaryResponse>(
+      `/api/instruments/${encodeURIComponent(query.symbol)}/technicals`,
+      {
+        query: analysisQuery(query),
+        signal,
+        timeoutMs: LONG_TIMEOUT,
+      },
+    );
   },
 };

@@ -9,11 +9,8 @@ class Settings(BaseSettings):
     port: int = 8765
     database_path: str = "./data/tradely.sqlite3"
     tejhq_api_key: str = ""
-    coingecko_api_key: str = ""
-    sec_user_agent: str = "Tradely Private Research contact@example.invalid"
     gdelt_enabled: bool = True
     yahoo_news_enabled: bool = True
-    rss_feed_urls: str = ""
     http_timeout_seconds: float = 15.0
     news_cache_seconds: int = 900
     market_cache_seconds: int = 300
@@ -30,11 +27,6 @@ class Settings(BaseSettings):
             path = (Path.cwd() / path).resolve()
         path.parent.mkdir(parents=True, exist_ok=True)
         return path
-
-    @property
-    def rss_urls(self) -> list[str]:
-        return [item.strip() for item in self.rss_feed_urls.split(",") if item.strip()]
-
 
 @lru_cache
 

@@ -1,10 +1,5 @@
 import { apiRequest } from './api';
-import type {
-  EventsResponse,
-  Market,
-  NewsResponse,
-  SecFilingsResponse,
-} from '../types/api';
+import type { Market, NewsResponse } from '../types/api';
 
 export const newsService = {
   getNews(
@@ -19,27 +14,6 @@ export const newsService = {
       },
       signal,
       timeoutMs: 60_000,
-    });
-  },
-
-  getEvents(
-    query: { symbol: string; market: Market },
-    signal?: AbortSignal,
-  ): Promise<EventsResponse> {
-    return apiRequest<EventsResponse>(
-      `/api/instruments/${encodeURIComponent(query.symbol)}/events`,
-      {
-        query: { market: query.market },
-        signal,
-        timeoutMs: 30_000,
-      },
-    );
-  },
-
-  getSecFilings(cik: string, signal?: AbortSignal): Promise<SecFilingsResponse> {
-    return apiRequest<SecFilingsResponse>(`/api/us/issuers/${encodeURIComponent(cik)}/filings`, {
-      signal,
-      timeoutMs: 30_000,
     });
   },
 };

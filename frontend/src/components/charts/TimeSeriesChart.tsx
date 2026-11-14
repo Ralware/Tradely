@@ -28,7 +28,7 @@ function shortDate(timestamp: string): string {
 export function TimeSeriesChart({
   points,
   height = 220,
-  color = '#7c9cff',
+  color = '#2f6feb',
   baseline,
   valueFormatter = (value) => value.toFixed(2),
   ariaLabel = 'Time series chart',
@@ -125,7 +125,7 @@ export function TimeSeriesChart({
               x2="100"
               y1={tick.position}
               y2={tick.position}
-              stroke="#182230"
+              stroke="#1a1d22"
               strokeWidth="1"
               vectorEffect="non-scaling-stroke"
             />
@@ -137,7 +137,7 @@ export function TimeSeriesChart({
               x2="100"
               y1={y(baseline)}
               y2={y(baseline)}
-              stroke="#33445c"
+              stroke="#3a3f4a"
               strokeWidth="1"
               strokeDasharray="3 3"
               vectorEffect="non-scaling-stroke"
@@ -161,7 +161,7 @@ export function TimeSeriesChart({
                 x2={x(hoverIndex ?? 0)}
                 y1="0"
                 y2="100"
-                stroke="#4a5a72"
+                stroke="#3a3f4a"
                 strokeWidth="1"
                 strokeDasharray="3 3"
                 vectorEffect="non-scaling-stroke"
@@ -178,7 +178,7 @@ export function TimeSeriesChart({
         </svg>
 
         <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-end">
-          <span className="num rounded-md border border-terminal-border bg-terminal-panelAlt/90 px-2 py-0.5 text-[11px] text-terminal-text">
+          <span className="num rounded-sm border border-terminal-border bg-terminal-panelAlt/90 px-2 py-0.5 text-2xs text-terminal-text">
             {hovered
               ? `${shortDate(hovered.timestamp)} · ${valueFormatter(hovered.value)}`
               : `${shortDate(last.timestamp)} · ${valueFormatter(last.value)}`}
@@ -190,7 +190,7 @@ export function TimeSeriesChart({
         {ticks.map((tick) => (
           <span
             key={tick.position}
-            className="num absolute right-0 -translate-y-1/2 text-[10px] text-terminal-muted"
+            className="num absolute right-0 -translate-y-1/2 text-2xs text-terminal-muted"
             style={{ top: `${tick.position}%` }}
           >
             {valueFormatter(tick.value)}
@@ -198,7 +198,7 @@ export function TimeSeriesChart({
         ))}
       </div>
 
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-between pr-14 text-[10px] text-terminal-muted">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-between pr-14 text-2xs text-terminal-muted">
         <span>{shortDate(valid[0].timestamp)}</span>
         <span>{shortDate(valid[Math.floor(valid.length / 2)].timestamp)}</span>
         <span>{shortDate(last.timestamp)}</span>

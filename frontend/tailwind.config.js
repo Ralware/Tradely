@@ -5,18 +5,19 @@ export default {
     extend: {
       colors: {
         terminal: {
-          bg: '#0b0f16',
-          panel: '#121821',
-          panelAlt: '#0f1520',
-          border: '#1f2a37',
-          borderSoft: '#182230',
-          text: '#e6edf6',
-          muted: '#8b9bb0',
-          accent: '#7c9cff',
-          green: '#2fd18a',
-          red: '#ff6b6b',
-          amber: '#f0b95c',
-          violet: '#c084fc',
+          bg: '#0b0c0e',
+          panel: '#121417',
+          panelAlt: '#0e1012',
+          border: '#24272e',
+          borderSoft: '#1a1d22',
+          text: '#e6e8eb',
+          muted: '#8b909a',
+          accent: '#2f6feb',
+          accentSoft: '#16233a',
+          green: '#26a69a',
+          red: '#ef5350',
+          amber: '#d6a45a',
+          violet: '#8f7ee7',
         },
       },
       fontFamily: {
@@ -24,16 +25,10 @@ export default {
         mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Consolas', 'monospace'],
       },
       boxShadow: {
-        panel: '0 1px 0 rgba(255,255,255,0.02), 0 12px 32px rgba(0,0,0,0.28)',
+        panel: 'none',
       },
-      keyframes: {
-        shimmer: {
-          '0%': { backgroundPosition: '-500px 0' },
-          '100%': { backgroundPosition: '500px 0' },
-        },
-      },
-      animation: {
-        shimmer: 'shimmer 1.4s linear infinite',
+      fontSize: {
+        '2xs': ['10px', '14px'],
       },
     },
   },

@@ -5,13 +5,11 @@ import { PageHeader } from '../components/common/PageHeader';
 export function NotFoundPage() {
   return (
     <div>
-      <PageHeader title="Page not found" subtitle="This route does not exist in Tradely." />
-      <div className="panel-surface flex flex-col items-start gap-3 p-6">
-        <p className="text-sm text-terminal-muted">
-          Check the address, or return to the dashboard to pick a section.
-        </p>
+      <PageHeader title="Page Not Found" subtitle="This Route Does Not Exist" />
+      <div className="panel-surface flex flex-col items-start gap-3 p-4">
+        <p className="text-xs text-terminal-muted">Check the address or return to the dashboard.</p>
         <Link to="/">
-          <Button variant="primary">Back to dashboard</Button>
+          <Button variant="primary">Back to Dashboard</Button>
         </Link>
       </div>
     </div>

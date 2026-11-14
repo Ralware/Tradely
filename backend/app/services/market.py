@@ -32,6 +32,9 @@ class MarketService:
         errors: list[str] = []
         if provider not in {"auto", "tejhq", "yahoo", "binance"}:
             raise ValueError("provider must be auto, tejhq, yahoo or binance")
+        compatible_provider = {"india": "tejhq", "global": "yahoo", "crypto": "binance"}[market]
+        if provider != "auto" and provider != compatible_provider:
+            raise ValueError(f"{provider} is not compatible with the {market} market; use {compatible_provider}")
         chain = []
         if provider == "tejhq":
             chain = [self.tejhq]
@@ -40,10 +43,12 @@ class MarketService:
         elif provider == "binance":
             chain = [self.binance]
         elif market == "india":
-            # Prefer adjusted history: the TejHQ adjusted endpoint is available on its free key tier.
-            chain = [self.tejhq, self.yahoo] if self.settings.tejhq_api_key else [self.yahoo, self.tejhq]
+            # India is always routed to TejHQ.  Raw candles remain visible when
+            # no key is configured, but downstream signal/backtest safeguards
+            # suppress actionable output until adjusted history is available.
+            chain = [self.tejhq]
         elif market == "crypto":
-            chain = [self.binance, self.yahoo]
+            chain = [self.binance]
         else:
             chain = [self.yahoo]
 

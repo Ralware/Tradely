@@ -30,6 +30,37 @@ export function formatCompact(value: number | null | undefined): string {
   }).format(value);
 }
 
+export function formatFixed(value: number | null | undefined, digits = 2): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return '—';
+  }
+  return new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(value);
+}
+
+export function formatSignedFixed(value: number | null | undefined, digits = 2): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return '—';
+  }
+  if (value > 0) {
+    return `+${formatFixed(value, digits)}`;
+  }
+  if (value < 0) {
+    return `−${formatFixed(Math.abs(value), digits)}`;
+  }
+  return formatFixed(0, digits);
+}
+
+/** Decimal places for an absolute price change, not for a quoted price. */
+export function changeDigits(value: number | null | undefined): number {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return 2;
+  }
+  return Math.abs(value) >= 1 ? 2 : 6;
+}
+
 export function formatPercent(
   value: number | null | undefined,
   digits = 2,
@@ -39,7 +70,7 @@ export function formatPercent(
     return '—';
   }
   const sign = withSign && value > 0 ? '+' : '';
-  return `${sign}${formatNumber(value, digits)}%`;
+  return `${sign}${formatFixed(value, digits)}%`;
 }
 
 export function formatDateTime(value: string | null | undefined): string {

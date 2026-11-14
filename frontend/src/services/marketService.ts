@@ -1,7 +1,6 @@
 import { apiRequest } from './api';
 import type {
   CandlesResponse,
-  CryptoMarketsResponse,
   HealthResponse,
   Market,
   ProvidersResponse,
@@ -47,14 +46,6 @@ export const marketService = {
     return apiRequest<ScannerResponse>('/api/scanner/watchlist', {
       signal,
       timeoutMs: LONG_TIMEOUT,
-    });
-  },
-
-  getCryptoMarkets(symbols?: string[], signal?: AbortSignal): Promise<CryptoMarketsResponse> {
-    return apiRequest<CryptoMarketsResponse>('/api/crypto/markets', {
-      query: symbols && symbols.length > 0 ? { symbols: symbols.join(',') } : undefined,
-      signal,
-      timeoutMs: 30_000,
     });
   },
 };

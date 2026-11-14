@@ -9,16 +9,14 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.core.models import BacktestRequest, HoldingTransaction, RiskRequest, RiskResult, WatchlistItem
 from app.providers.base import ProviderError
-from app.providers.crypto_metadata import CoinGeckoProvider
-from app.providers.fundamentals import YahooFundamentalsProvider
 from app.providers.news import (
-    GDELTNewsProvider, RSSNewsProvider, SECEdgarProvider, TejHQActionsProvider,
-    YahooFinanceNewsProvider,
+    GDELTNewsProvider, YahooFinanceNewsProvider,
 )
 from app.services.backtest import run_trend_breakout_backtest
 from app.services.indicators import compute_indicators
 from app.services.market import MarketService
 from app.services.strategy import evaluate_trend_breakout, position_size
+from app.services.technicals import build_technical_summary
 
 router = APIRouter(prefix="/api")
 
@@ -57,14 +55,18 @@ def health() -> dict[str, Any]:
 def provider_status(request: Request) -> dict[str, Any]:
     settings = request.app.state.settings
     providers = [
-        {"name": "TejHQ", "configured": True, "note": "NSE/BSE EOD; adjusted endpoint requires free API key; otherwise raw OHLCV."},
-        {"name": "Yahoo Finance / yfinance", "configured": True, "note": "Unofficial personal-use data interface; coverage/freshness varies."},
-        {"name": "Binance Spot", "configured": True, "note": "Public crypto market data; no API key for public endpoints."},
-        {"name": "CoinGecko Demo", "configured": bool(settings.coingecko_api_key), "note": "Optional aggregate crypto metadata; key required."},
-        {"name": "GDELT", "configured": bool(settings.gdelt_enabled), "note": "Global news discovery; relevance must be checked."},
-        {"name": "Publisher RSS", "configured": bool(settings.rss_urls), "note": f"{len(settings.rss_urls)} configured feed(s)."},
-        {"name": "SEC EDGAR", "configured": bool(settings.sec_user_agent and "contact@example.invalid" not in settings.sec_user_agent),
-         "note": "Official US filings; set a real identifying User-Agent."},
+        {"name": "TejHQ Adjusted OHLCV", "configured": bool(settings.tejhq_api_key), "available": bool(settings.tejhq_api_key),
+         "purpose": "Indian NSE/BSE daily adjusted OHLCV", "note": "Requires TEJHQ_API_KEY."},
+        {"name": "TejHQ Raw OHLCV", "configured": True, "available": True,
+         "purpose": "Indian NSE/BSE daily unadjusted OHLCV", "note": "Keyless; unadjusted history suppresses Indian actionable signals and backtests."},
+        {"name": "Yahoo Finance (yfinance)", "configured": True, "available": True,
+         "purpose": "International equity prices", "note": "Unofficial adapter; availability and freshness vary."},
+        {"name": "Binance Spot", "configured": True, "available": True,
+         "purpose": "Public crypto prices and OHLCV", "note": "Public market-data endpoints only; no API key or trading access."},
+        {"name": "GDELT", "configured": bool(settings.gdelt_enabled), "available": bool(settings.gdelt_enabled),
+         "purpose": "Global news discovery", "note": "Results require source verification."},
+        {"name": "Yahoo Finance News", "configured": bool(settings.yahoo_news_enabled), "available": bool(settings.yahoo_news_enabled),
+         "purpose": "Supplementary news discovery", "note": "Optional unofficial feed."},
     ]
     return {"providers": providers, "checked_at": datetime.now(timezone.utc).isoformat()}
 
@@ -227,15 +229,43 @@ def indicator_series(
     }
 
 
-@router.get("/instruments/{symbol}/fundamentals")
-def instrument_fundamentals(
-    symbol: str, market: str = Query("india", pattern="^(india|global|crypto)$"), exchange: str | None = None,
+@router.get("/instruments/{symbol}/technicals")
+def technical_summary(
+    request: Request,
+    symbol: str,
+    market: str = Query("india", pattern="^(india|global|crypto)$"),
+    exchange: str | None = None,
+    interval: str = "1d",
+    days: int = Query(500, ge=1, le=3650),
+    provider: str = "auto",
 ) -> dict[str, Any]:
+    """Per-indicator Buy/Sell/Neutral labels and gauge counts.
+
+    Additive and read-only. It reuses ``compute_indicators`` unchanged and only
+    classifies the values it already returns with published threshold
+    conventions. No strategy rule, existing route or stored record is changed.
+    """
     symbol = _clean_symbol(symbol)
     try:
-        return YahooFundamentalsProvider().fetch(symbol, market, exchange)
-    except ProviderError as exc:
+        frame, source = request.app.state.market_service.candles(
+            symbol, market=market, exchange=exchange, interval=interval, days=days, provider=provider
+        )
+    except (ProviderError, ValueError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    indicators = compute_indicators(frame)
+    latest = indicators.iloc[-1]
+    payload = build_technical_summary(latest, close=float(latest["close"]))
+    return {
+        "symbol": symbol,
+        "market": market,
+        "exchange": exchange,
+        "interval": interval,
+        "source": source,
+        "is_adjusted": bool(frame.attrs.get("is_adjusted", False)),
+        "is_stale": _is_stale(frame, market),
+        "as_of": frame.index[-1].isoformat(),
+        **payload,
+    }
 
 
 @router.get("/instruments/{symbol}/news")
@@ -250,8 +280,7 @@ def instrument_news(
     if cached is not None:
         return cached
     gdelt = GDELTNewsProvider(request.app.state.settings)
-    rss = RSSNewsProvider(request.app.state.settings)
-    items = gdelt.search(query, symbol, limit=limit) + rss.search(query, symbol)
+    items = gdelt.search(query, symbol, limit=limit)
     yahoo_provider = YahooFinanceNewsProvider()
     if request.app.state.settings.yahoo_news_enabled:
         items += yahoo_provider.search(symbol, market)
@@ -267,7 +296,6 @@ def instrument_news(
         "count": len(sorted_items),
         "providers": {
             "GDELT": {"enabled": request.app.state.settings.gdelt_enabled, "error": gdelt.last_error},
-            "RSS": {"configured_feeds": len(request.app.state.settings.rss_urls), "errors": rss.last_errors},
             "Yahoo Finance News": {"enabled": request.app.state.settings.yahoo_news_enabled,
                                    "note": "Optional unofficial personal-use feed; errors may appear as an empty result."},
         },
@@ -275,51 +303,6 @@ def instrument_news(
     }
     request.app.state.response_cache.set(cache_key, result, request.app.state.settings.news_cache_seconds)
     return result
-
-
-@router.get("/instruments/{symbol}/events")
-def instrument_events(request: Request, symbol: str, market: str = Query("india", pattern="^(india|global|crypto)$")) -> dict[str, Any]:
-    symbol = _clean_symbol(symbol)
-    events = []
-    provider_error = None
-    if market == "india":
-        actions_provider = TejHQActionsProvider(request.app.state.settings)
-        events = actions_provider.get_actions(symbol)
-        provider_error = actions_provider.last_error
-        links = [
-            {"label": "NSE corporate announcements", "url": "https://www.nseindia.com/companies-listing/corporate-filings-announcements"},
-            {"label": "BSE corporate announcements", "url": "https://www.bseindia.com/corporates/ann.html"},
-        ]
-    elif market == "global":
-        links = [{"label": "SEC company filings", "url": "https://www.sec.gov/edgar/search/"}]
-    else:
-        links = []
-    return {
-        "symbol": symbol, "market": market,
-        "events": [event.model_dump(mode="json") for event in events],
-        "official_source_links": links,
-        "provider_error": provider_error,
-        "note": "Only provider-returned records are shown as events. No upcoming date is inferred. Exchange links are provided for manual verification where structured free feeds are unavailable.",
-    }
-
-
-@router.get("/us/issuers/{cik}/filings")
-def sec_filings(request: Request, cik: str) -> dict[str, Any]:
-    try:
-        items = SECEdgarProvider(request.app.state.settings).recent_filings(cik)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return {"cik": cik.zfill(10), "items": [item.model_dump(mode="json") for item in items], "count": len(items)}
-
-
-@router.get("/crypto/markets")
-def crypto_markets(request: Request, symbols: str | None = None) -> dict[str, Any]:
-    requested = [item.strip() for item in symbols.split(",")] if symbols else None
-    try:
-        rows = CoinGeckoProvider(request.app.state.settings).markets(requested)
-        return {"source": "CoinGecko Demo", "markets": rows}
-    except ProviderError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.post("/backtests/trend-breakout")
@@ -332,6 +315,11 @@ def backtest_trend_breakout(request: Request, payload: BacktestRequest) -> dict[
             symbol, market=payload.market, exchange=payload.exchange, interval=payload.interval,
             days=payload.days, provider=payload.provider,
         )
+        if _is_stale(frame, payload.market):
+            raise HTTPException(
+                status_code=409,
+                detail="Backtest refused: the latest candle is stale for this market. Refresh data before evaluating results.",
+            )
         if payload.market == "india" and not bool(frame.attrs.get("is_adjusted", False)):
             raise HTTPException(
                 status_code=409,

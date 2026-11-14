@@ -23,17 +23,17 @@ export function Card({
   return (
     <section className={cn('panel-surface flex min-w-0 flex-col', className)}>
       {title || actions ? (
-        <header className="flex flex-wrap items-start justify-between gap-3 border-b border-terminal-borderSoft px-4 py-3">
+        <header className="flex flex-wrap items-center justify-between gap-2 border-b border-terminal-border px-3 py-1.5">
           <div className="min-w-0">
             {title ? (
-              <h2 className="text-sm font-semibold tracking-tight text-terminal-text">{title}</h2>
+              <h2 className="text-xs font-semibold text-terminal-text">{title}</h2>
             ) : null}
-            {subtitle ? <p className="mt-0.5 text-xs text-terminal-muted">{subtitle}</p> : null}
+            {subtitle ? <p className="text-2xs text-terminal-muted">{subtitle}</p> : null}
           </div>
-          {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+          {actions ? <div className="flex flex-wrap items-center gap-1.5">{actions}</div> : null}
         </header>
       ) : null}
-      <div className={cn('min-w-0 flex-1', padded && 'p-4', bodyClassName)}>{children}</div>
+      <div className={cn('min-w-0 flex-1', padded && 'p-3', bodyClassName)}>{children}</div>
     </section>
   );
 }

@@ -5,9 +5,9 @@ import pytest
 
 from app.core.config import Settings
 from app.providers.base import ProviderError
-from app.providers.crypto_metadata import CoinGeckoProvider
 from app.providers.market_data import BinanceSpotProvider, TejHQProvider
-from app.providers.news import GDELTNewsProvider, SECEdgarProvider, TejHQActionsProvider
+from app.providers.news import GDELTNewsProvider
+from app.services.market import MarketService
 
 
 class FakeResponse:
@@ -49,6 +49,26 @@ def test_tejhq_refuses_intraday_intervals():
     with pytest.raises(ProviderError, match="daily EOD"):
         provider.fetch_candles("RELIANCE", market="india", exchange="NSE", interval="5m",
                                start=None, end=None)
+
+
+def test_tejhq_uses_keyless_raw_endpoint_without_api_key(monkeypatch):
+    captured = {}
+
+    def fake_get(url, **kwargs):
+        captured["url"] = url
+        captured.update(kwargs)
+        return FakeResponse({"data": [{
+            "date": "2026-11-10", "open": 100, "high": 105, "low": 99,
+            "close": 104, "volume": 1000,
+        }]})
+
+    monkeypatch.setattr("app.providers.market_data.httpx.get", fake_get)
+    frame = TejHQProvider(Settings(_env_file=None)).fetch_candles(
+        "RELIANCE", market="india", exchange="NSE", interval="1d", start=None, end=None,
+    )
+    assert captured["url"].endswith("/v1/ohlcv/nse/RELIANCE")
+    assert captured["headers"] == {}
+    assert frame.attrs["is_adjusted"] is False
 
 
 def test_binance_spot_candle_normalization(monkeypatch):
@@ -139,50 +159,34 @@ def test_gdelt_article_timestamp_normalization(monkeypatch):
     assert items[0].url == "https://example.com/story"
 
 
-def test_tejhq_actions_are_stock_specific(monkeypatch):
-    payload = {"data": [{
-        "exchange": "NSE", "symbol": "RELIANCE", "ex_date": "2026-12-01",
-        "type": "Dividend", "raw_subject": "Dividend recommendation",
-    }]}
-    monkeypatch.setattr("app.providers.news.httpx.get", lambda *a, **k: FakeResponse(payload))
-    provider = TejHQActionsProvider(Settings(_env_file=None))
-    items = provider.get_actions("RELIANCE")
-    assert len(items) == 1
-    assert items[0].symbol == "RELIANCE"
-    assert items[0].event_date.isoformat() == "2026-12-01"
-    assert items[0].status == "confirmed"
+def test_market_routing_does_not_cross_market_providers(monkeypatch):
+    service = MarketService(Settings(_env_file=None))
+    calls: list[str] = []
+
+    def reject(name):
+        def fetch(*args, **kwargs):
+            calls.append(name)
+            raise ProviderError(name)
+        return fetch
+
+    monkeypatch.setattr(service.tejhq, "fetch_candles", reject("tejhq"))
+    monkeypatch.setattr(service.yahoo, "fetch_candles", reject("yahoo"))
+    monkeypatch.setattr(service.binance, "fetch_candles", reject("binance"))
+
+    with pytest.raises(ProviderError):
+        service.candles("RELIANCE", market="india")
+    assert calls == ["tejhq"]
+    calls.clear()
+    with pytest.raises(ProviderError):
+        service.candles("BTCUSDT", market="crypto")
+    assert calls == ["binance"]
+    calls.clear()
+    with pytest.raises(ProviderError):
+        service.candles("AAPL", market="global")
+    assert calls == ["yahoo"]
 
 
-def test_coingecko_requires_demo_key():
-    provider = CoinGeckoProvider(Settings(_env_file=None, coingecko_api_key=""))
-    with pytest.raises(ProviderError, match="API key is not configured"):
-        provider.markets(["btc"])
-
-
-def test_sec_requires_real_user_agent():
-    provider = SECEdgarProvider(Settings(_env_file=None))
-    with pytest.raises(RuntimeError, match="SEC_USER_AGENT"):
-        provider.recent_filings("0000320193")
-
-
-def test_yahoo_fundamentals_adapter_is_best_effort(monkeypatch):
-    import sys
-    from types import SimpleNamespace
-
-    from app.providers.fundamentals import YahooFundamentalsProvider
-
-    class FakeTicker:
-        def __init__(self, symbol):
-            self.symbol = symbol
-            self.quarterly_income_stmt = pd.DataFrame({pd.Timestamp("2026-09-30"): [10]}, index=["Total Revenue"])
-            self.quarterly_balance_sheet = pd.DataFrame()
-            self.quarterly_cashflow = pd.DataFrame()
-
-        def get_info(self):
-            return {"symbol": self.symbol, "marketCap": 1000000, "trailingPE": 20.5}
-
-    monkeypatch.setitem(sys.modules, "yfinance", SimpleNamespace(Ticker=FakeTicker))
-    result = YahooFundamentalsProvider().fetch("RELIANCE", "india", "NSE")
-    assert result["symbol"] == "RELIANCE.NS"
-    assert result["profile"]["marketCap"] == 1000000
-    assert result["quarterly_income_statement"]["rows"][0]["metric"] == "Total Revenue"
+def test_market_service_rejects_incompatible_manual_provider():
+    service = MarketService(Settings(_env_file=None))
+    with pytest.raises(ValueError, match="not compatible"):
+        service.candles("RELIANCE", market="india", provider="yahoo")

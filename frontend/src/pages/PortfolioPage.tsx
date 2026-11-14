@@ -14,9 +14,9 @@ import { PositionsTable } from '../components/tables/PositionsTable';
 import { TransactionsTable } from '../components/tables/TransactionsTable';
 
 const marketOptions = [
-  { value: 'india', label: 'Indian equities' },
-  { value: 'global', label: 'International equities' },
-  { value: 'crypto', label: 'Crypto spot' },
+  { value: 'india', label: 'Indian Equities' },
+  { value: 'global', label: 'International Equities' },
+  { value: 'crypto', label: 'Crypto Spot' },
 ];
 
 const sideOptions = [
@@ -71,23 +71,23 @@ export function PortfolioPage() {
     const parsedTime = new Date(tradeTime);
 
     if (!cleanSymbol) {
-      setError('Enter a symbol.');
+      setError('Enter a Symbol');
       return;
     }
     if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) {
-      setError('Quantity must be a positive number.');
+      setError('Quantity Must Be Positive');
       return;
     }
     if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) {
-      setError('Price must be a positive number.');
+      setError('Price Must Be Positive');
       return;
     }
     if (Number.isNaN(parsedTime.getTime())) {
-      setError('Enter a valid trade time.');
+      setError('Enter a Valid Trade Time');
       return;
     }
     if (!Number.isFinite(parsedFees) || parsedFees < 0) {
-      setError('Fees must be zero or positive.');
+      setError('Fees Must Be Zero or Positive');
       return;
     }
 
@@ -104,7 +104,7 @@ export function PortfolioPage() {
         fees: parsedFees,
         notes: notes.trim() || null,
       });
-      setMessage(`${side} ${cleanSymbol} recorded. FIFO positions were recalculated by the backend.`);
+      setMessage(`${side} ${cleanSymbol} Recorded`);
       setSymbol('');
       setQuantity('');
       setPrice('');
@@ -113,7 +113,7 @@ export function PortfolioPage() {
       transactions.reload();
       positions.reload();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not record the transaction');
+      setError(caught instanceof Error ? caught.message : 'Could Not Record Transaction');
     } finally {
       setSaving(false);
     }
@@ -127,7 +127,7 @@ export function PortfolioPage() {
     <div>
       <PageHeader
         title="Portfolio"
-        subtitle="A ledger of actual trades only. Cost basis and realised P&L use the backend FIFO accounting method. Tradely does not simulate or execute orders."
+        subtitle="FIFO Ledger · Positions · Transactions"
         actions={
           <Button
             size="sm"
@@ -142,30 +142,26 @@ export function PortfolioPage() {
         }
       />
 
-      <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="Open positions" value={String(positionRows.length)} hint="Across all markets" />
-        <Stat label="Transactions" value={String(transactionRows.length)} hint="Recorded ledger rows" />
+      <div className="mb-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <Stat label="Open Positions" value={String(positionRows.length)} hint="All Markets" />
+        <Stat label="Transactions" value={String(transactionRows.length)} hint="Ledger Rows" />
         <Stat
           label="Realised P&L"
           value={formatNumber(totalRealised, 2)}
           tone={totalRealised > 0 ? 'positive' : totalRealised < 0 ? 'negative' : 'neutral'}
-          hint="Sum across currencies; not converted"
+          hint="Not Currency Converted"
         />
         <Stat
           label="Accounting"
           value={positions.data?.accounting_method ?? 'FIFO'}
-          hint="Method reported by the backend"
+          hint="Backend Method"
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-        <Card
-          className="xl:col-span-5"
-          title="Record a transaction"
-          subtitle="Real trades only. The backend stores the row and recomputes FIFO positions."
-        >
-          <form onSubmit={recordTrade} className="space-y-3">
-            <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 xl:grid-cols-12">
+        <Card className="xl:col-span-5" title="Record Transaction">
+          <form onSubmit={recordTrade} className="space-y-2">
+            <div className="grid gap-2 sm:grid-cols-2">
               <Input
                 label="Symbol"
                 value={symbol}
@@ -185,12 +181,7 @@ export function PortfolioPage() {
                 onChange={(event) => setSide(event.target.value as Side)}
                 options={sideOptions}
               />
-              <Input
-                label={`Currency`}
-                value={currencyFor[market]}
-                readOnly
-                hint="Derived from the market, stored with the trade."
-              />
+              <Input label="Currency" value={currencyFor[market]} readOnly hint="From Market" />
               <Input
                 label="Quantity"
                 type="number"
@@ -200,7 +191,7 @@ export function PortfolioPage() {
                 onChange={(event) => setQuantity(event.target.value)}
               />
               <Input
-                label="Price per unit"
+                label="Price per Unit"
                 type="number"
                 min={0}
                 step="any"
@@ -208,7 +199,7 @@ export function PortfolioPage() {
                 onChange={(event) => setPrice(event.target.value)}
               />
               <Input
-                label="Trade time"
+                label="Trade Time"
                 type="datetime-local"
                 value={tradeTime}
                 onChange={(event) => setTradeTime(event.target.value)}
@@ -223,71 +214,48 @@ export function PortfolioPage() {
               />
             </div>
             <Textarea
-              label="Notes (optional)"
+              label="Notes (Optional)"
               value={notes}
               onChange={(event) => setNotes(event.target.value)}
-              placeholder="Broker reference, charges, partial-fill note…"
+              placeholder="Broker reference, charges, partial fill"
             />
             <Button type="submit" variant="primary" icon="plus" loading={saving}>
-              Record transaction
+              Record Transaction
             </Button>
           </form>
 
           {message ? (
-            <Notice tone="positive" className="mt-3">
+            <Notice tone="positive" className="mt-2">
               {message}
             </Notice>
           ) : null}
           {error ? (
-            <Notice tone="negative" className="mt-3">
+            <Notice tone="negative" className="mt-2">
               {error}
             </Notice>
           ) : null}
         </Card>
 
-        <Card
-          className="xl:col-span-7"
-          title="Open positions"
-          subtitle="FIFO cost basis and realised P&L exactly as returned by the backend."
-        >
+        <Card className="xl:col-span-7" title="Open Positions">
           {positions.loading && !positions.data ? (
-            <LoadingPanel label="Loading positions…" rows={4} />
+            <LoadingPanel label="Loading Positions" rows={4} />
           ) : positions.error ? (
             <ErrorState message={positions.error} onRetry={positions.reload} />
           ) : (
-            <>
-              <PositionsTable positions={positionRows} />
-              {positions.data?.note ? (
-                <p className="mt-3 text-[11px] text-terminal-muted">{positions.data.note}</p>
-              ) : null}
-            </>
+            <PositionsTable positions={positionRows} />
           )}
         </Card>
       </div>
 
-      <Card
-        className="mt-4"
-        title="Transaction ledger"
-        subtitle={
-          transactions.data?.mode
-            ? `Backend mode: ${transactions.data.mode}. Newest rows appear first.`
-            : 'Newest rows appear first.'
-        }
-      >
+      <Card className="mt-3" title="Transaction Ledger">
         {transactions.loading && !transactions.data ? (
-          <LoadingPanel label="Loading transactions…" rows={5} />
+          <LoadingPanel label="Loading Transactions" rows={5} />
         ) : transactions.error ? (
           <ErrorState message={transactions.error} onRetry={transactions.reload} />
         ) : (
           <TransactionsTable transactions={transactionRows} />
         )}
       </Card>
-
-      <Notice className="mt-4">
-        Positions are derived from recorded transactions using FIFO. The ledger does not estimate
-        live market value, unrealised P&L or currency conversion. Verify every fill against your
-        broker contract note.
-      </Notice>
     </div>
   );
 }

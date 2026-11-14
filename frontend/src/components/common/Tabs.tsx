@@ -21,7 +21,7 @@ export function Tabs({
     <div
       role="tablist"
       aria-label="Section"
-      className={cn('flex flex-wrap gap-1 rounded-lg border border-terminal-border bg-terminal-panelAlt p-1', className)}
+      className={cn('flex flex-wrap items-center gap-0.5 border-b border-terminal-border', className)}
     >
       {items.map((item) => {
         const selected = item.id === active;
@@ -33,15 +33,15 @@ export function Tabs({
             aria-selected={selected}
             onClick={() => onChange(item.id)}
             className={cn(
-              'rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
+              '-mb-px border-b-2 px-2.5 py-1.5 text-xs transition-colors',
               selected
-                ? 'bg-[#22304a] text-terminal-text'
-                : 'text-terminal-muted hover:text-terminal-text',
+                ? 'border-terminal-accent font-medium text-terminal-text'
+                : 'border-transparent text-terminal-muted hover:text-terminal-text',
             )}
           >
             {item.label}
             {typeof item.count === 'number' ? (
-              <span className="ml-1.5 text-[10px] text-terminal-muted">{item.count}</span>
+              <span className="num ml-1.5 text-2xs text-terminal-muted">{item.count}</span>
             ) : null}
           </button>
         );

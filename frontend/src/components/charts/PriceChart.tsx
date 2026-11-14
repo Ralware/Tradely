@@ -38,15 +38,15 @@ const overlayGroups: Array<{
   {
     key: 'sma',
     lines: [
-      { field: 'sma_20', title: 'SMA 20', color: '#f0b95c' },
-      { field: 'sma_50', title: 'SMA 50', color: '#7c9cff' },
-      { field: 'sma_200', title: 'SMA 200', color: '#c084fc' },
+      { field: 'sma_20', title: 'SMA 20', color: '#d6a45a' },
+      { field: 'sma_50', title: 'SMA 50', color: '#2f6feb' },
+      { field: 'sma_200', title: 'SMA 200', color: '#8f7ee7' },
     ],
   },
   {
     key: 'ema',
     lines: [
-      { field: 'ema_20', title: 'EMA 20', color: '#2fd18a' },
+      { field: 'ema_20', title: 'EMA 20', color: '#26a69a' },
       { field: 'ema_50', title: 'EMA 50', color: '#38bdf8' },
       { field: 'ema_200', title: 'EMA 200', color: '#f472b6' },
     ],
@@ -54,9 +54,9 @@ const overlayGroups: Array<{
   {
     key: 'bollinger',
     lines: [
-      { field: 'bb_upper', title: 'BB upper', color: '#64748b', dashed: true },
-      { field: 'bb_mid', title: 'BB mid', color: '#94a3b8', dashed: true },
-      { field: 'bb_lower', title: 'BB lower', color: '#64748b', dashed: true },
+      { field: 'bb_upper', title: 'BB Upper', color: '#6b7280', dashed: true },
+      { field: 'bb_mid', title: 'BB Mid', color: '#9ca3af', dashed: true },
+      { field: 'bb_lower', title: 'BB Lower', color: '#6b7280', dashed: true },
     ],
   },
 ];
@@ -94,36 +94,36 @@ export function PriceChart({
     const chart: IChartApi = createChart(element, {
       autoSize: true,
       layout: {
-        background: { type: ColorType.Solid, color: '#0f1520' },
-        textColor: '#8b9bb0',
+        background: { type: ColorType.Solid, color: '#0e1012' },
+        textColor: '#8b909a',
         fontSize: 11,
         fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
         attributionLogo: false,
       },
       grid: {
-        vertLines: { color: '#182230' },
-        horzLines: { color: '#182230' },
+        vertLines: { color: '#1a1d22' },
+        horzLines: { color: '#1a1d22' },
       },
-      rightPriceScale: { borderColor: '#1f2a37', scaleMargins: { top: 0.08, bottom: 0.08 } },
+      rightPriceScale: { borderColor: '#24272e', scaleMargins: { top: 0.08, bottom: 0.08 } },
       timeScale: {
-        borderColor: '#1f2a37',
+        borderColor: '#24272e',
         timeVisible: intraday,
         secondsVisible: false,
         rightOffset: 4,
       },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: '#33445c', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#22304a' },
-        horzLine: { color: '#33445c', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#22304a' },
+        vertLine: { color: '#3a3f4a', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#20242b' },
+        horzLine: { color: '#3a3f4a', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#20242b' },
       },
     });
 
     const candleSeries: ISeriesApi<'Candlestick'> = chart.addSeries(CandlestickSeries, {
-      upColor: '#2fd18a',
-      downColor: '#ff6b6b',
+      upColor: '#26a69a',
+      downColor: '#ef5350',
       borderVisible: false,
-      wickUpColor: '#2fd18a',
-      wickDownColor: '#ff6b6b',
+      wickUpColor: '#26a69a',
+      wickDownColor: '#ef5350',
       priceLineVisible: false,
     });
 
@@ -166,7 +166,7 @@ export function PriceChart({
             time,
             value: candle.volume,
             color:
-              candle.close >= candle.open ? 'rgba(47, 209, 138, 0.28)' : 'rgba(255, 107, 107, 0.28)',
+              candle.close >= candle.open ? 'rgba(38, 166, 154, 0.28)' : 'rgba(239, 83, 80, 0.28)',
           },
         ];
       }),
@@ -200,7 +200,7 @@ export function PriceChart({
       const rsiSeries = chart.addSeries(
         LineSeries,
         {
-          color: '#c084fc',
+          color: '#8f7ee7',
           lineWidth: 2,
           priceLineVisible: false,
           lastValueVisible: true,
@@ -218,7 +218,7 @@ export function PriceChart({
       for (const level of [70, 30]) {
         rsiSeries.createPriceLine({
           price: level,
-          color: '#33445c',
+          color: '#3a3f4a',
           lineWidth: 1,
           lineStyle: LineStyle.Dashed,
           axisLabelVisible: false,
@@ -248,14 +248,14 @@ export function PriceChart({
             return [];
           }
           return [
-            { time, value, color: value >= 0 ? 'rgba(47, 209, 138, 0.5)' : 'rgba(255, 107, 107, 0.5)' },
+            { time, value, color: value >= 0 ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)' },
           ];
         }),
       );
 
       const macdLine = chart.addSeries(
         LineSeries,
-        { color: '#7c9cff', lineWidth: 2, priceLineVisible: false, lastValueVisible: false },
+        { color: '#2f6feb', lineWidth: 2, priceLineVisible: false, lastValueVisible: false },
         paneIndex,
       );
       macdLine.setData(
@@ -268,7 +268,7 @@ export function PriceChart({
 
       const signalLine = chart.addSeries(
         LineSeries,
-        { color: '#f0b95c', lineWidth: 1, priceLineVisible: false, lastValueVisible: false },
+        { color: '#d6a45a', lineWidth: 1, priceLineVisible: false, lastValueVisible: false },
         paneIndex,
       );
       signalLine.setData(

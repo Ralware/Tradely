@@ -24,6 +24,8 @@ export interface HealthResponse {
 export interface ProviderStatus {
   name: string;
   configured: boolean;
+  available?: boolean;
+  purpose?: string;
   note: string;
 }
 
@@ -202,87 +204,6 @@ export interface NewsResponse {
   note: string;
 }
 
-export type EventStatus =
-  | 'confirmed'
-  | 'tentative'
-  | 'postponed'
-  | 'cancelled'
-  | 'historical'
-  | 'unverified';
-
-export interface CorporateEvent {
-  id: string;
-  symbol: string;
-  event_type: string;
-  description: string;
-  event_date: string | null;
-  announced_at: string | null;
-  status: EventStatus;
-  source: string;
-  source_url: string | null;
-  official: boolean;
-}
-
-export interface OfficialSourceLink {
-  label: string;
-  url: string;
-}
-
-export interface EventsResponse {
-  symbol: string;
-  market: Market;
-  events: CorporateEvent[];
-  official_source_links: OfficialSourceLink[];
-  provider_error: string | null;
-  note: string;
-}
-
-export interface SecFilingsResponse {
-  cik: string;
-  items: NewsItem[];
-  count: number;
-}
-
-export interface CryptoMarket {
-  id: string;
-  symbol: string;
-  name: string;
-  image?: string;
-  current_price: number | null;
-  market_cap: number | null;
-  market_cap_rank: number | null;
-  total_volume: number | null;
-  price_change_percentage_24h: number | null;
-  [key: string]: unknown;
-}
-
-export interface CryptoMarketsResponse {
-  source: string;
-  markets: CryptoMarket[];
-}
-
-export interface StatementRow {
-  metric: string;
-  values: Array<string | number | boolean | null>;
-}
-
-export interface StatementPayload {
-  periods: string[];
-  rows: StatementRow[];
-}
-
-export type FundamentalValue = string | number | boolean | null;
-
-export interface FundamentalsResponse {
-  symbol: string;
-  source: string;
-  profile: Record<string, FundamentalValue>;
-  quarterly_income_statement: StatementPayload;
-  quarterly_balance_sheet: StatementPayload;
-  quarterly_cash_flow: StatementPayload;
-  limitations: string[];
-}
-
 export interface BacktestRequest {
   symbol: string;
   market: Market;
@@ -403,6 +324,45 @@ export interface PositionsResponse {
 
 export interface SignalsHistoryResponse {
   signals: StrategySignal[];
+}
+
+export type TechnicalAction = 'Buy' | 'Sell' | 'Neutral';
+
+export type TechnicalAssessment = 'Strong Buy' | 'Buy' | 'Neutral' | 'Sell' | 'Strong Sell';
+
+export interface TechnicalRow {
+  name: string;
+  field: string;
+  value: number | null;
+  action: TechnicalAction;
+}
+
+export interface TechnicalCounts {
+  action: TechnicalAssessment;
+  score: number;
+  sell: number;
+  neutral: number;
+  buy: number;
+}
+
+export interface TechnicalSummaryResponse {
+  symbol: string;
+  market: Market;
+  exchange: string | null;
+  interval: string;
+  source: string;
+  is_adjusted: boolean;
+  is_stale: boolean;
+  as_of: string;
+  close: number;
+  oscillators: TechnicalRow[];
+  moving_averages: TechnicalRow[];
+  summary: {
+    oscillators: TechnicalCounts;
+    moving_averages: TechnicalCounts;
+    overall: TechnicalCounts;
+  };
+  method: string;
 }
 
 export interface ApiErrorPayload {

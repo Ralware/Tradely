@@ -23,6 +23,7 @@ export function RiskCalculator({ entry, stop, currency }: RiskCalculatorProps) {
   const [lotSize, setLotSize] = useState('1');
   const [result, setResult] = useState<RiskResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorKind, setErrorKind] = useState<'validation' | 'request'>('validation');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -33,6 +34,11 @@ export function RiskCalculator({ entry, stop, currency }: RiskCalculatorProps) {
       setStopPrice(String(stop));
     }
   }, [entry, stop]);
+
+  function fail(message: string) {
+    setErrorKind('validation');
+    setError(message);
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -55,7 +61,31 @@ export function RiskCalculator({ entry, stop, currency }: RiskCalculatorProps) {
       !Number.isFinite(payload.stop) ||
       !Number.isFinite(payload.lot_size)
     ) {
-      setError('Enter valid numeric values.');
+      fail('Enter valid numeric values.');
+      return;
+    }
+    if (payload.capital <= 0) {
+      fail('Account capital must be above zero.');
+      return;
+    }
+    if (payload.risk_fraction <= 0 || payload.risk_fraction > 0.02) {
+      fail('Risk per trade must be above 0% and at most 2%.');
+      return;
+    }
+    if (payload.entry <= 0) {
+      fail('Entry price must be above zero.');
+      return;
+    }
+    if (payload.stop <= 0) {
+      fail('Stop price must be above zero.');
+      return;
+    }
+    if (payload.stop >= payload.entry) {
+      fail('Stop price must be below the entry price.');
+      return;
+    }
+    if (payload.lot_size < 1) {
+      fail('Lot size must be at least 1.');
       return;
     }
 
@@ -63,20 +93,18 @@ export function RiskCalculator({ entry, stop, currency }: RiskCalculatorProps) {
     try {
       setResult(await riskService.calculate(payload));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Position sizing failed');
+      setErrorKind('request');
+      setError(caught instanceof Error ? caught.message : 'Position Sizing Failed');
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <Card
-      title="Position sizing"
-      subtitle="ATR/stop-based risk budget calculated by the FastAPI backend."
-    >
-      <form onSubmit={submit} className="space-y-3">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Account capital">
+    <Card title="Position Sizing" subtitle="Backend Risk Calculation">
+      <form onSubmit={submit} className="space-y-2">
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          <Field label="Account Capital">
             <Input
               type="number"
               min={1}
@@ -85,7 +113,7 @@ export function RiskCalculator({ entry, stop, currency }: RiskCalculatorProps) {
               onChange={(event) => setCapital(event.target.value)}
             />
           </Field>
-          <Field label="Risk per trade (%)" hint="Backend maximum is 2%.">
+          <Field label="Risk per Trade (%)" hint="Maximum 2%">
             <Input
               type="number"
               min={0.01}
@@ -95,7 +123,7 @@ export function RiskCalculator({ entry, stop, currency }: RiskCalculatorProps) {
               onChange={(event) => setRiskPercent(event.target.value)}
             />
           </Field>
-          <Field label="Entry price">
+          <Field label="Entry Price">
             <Input
               type="number"
               min={0}
@@ -104,7 +132,7 @@ export function RiskCalculator({ entry, stop, currency }: RiskCalculatorProps) {
               onChange={(event) => setEntryPrice(event.target.value)}
             />
           </Field>
-          <Field label="Stop price">
+          <Field label="Stop Price">
             <Input
               type="number"
               min={0}
@@ -113,7 +141,7 @@ export function RiskCalculator({ entry, stop, currency }: RiskCalculatorProps) {
               onChange={(event) => setStopPrice(event.target.value)}
             />
           </Field>
-          <Field label="Lot size">
+          <Field label="Lot Size">
             <Input
               type="number"
               min={1}
@@ -125,32 +153,37 @@ export function RiskCalculator({ entry, stop, currency }: RiskCalculatorProps) {
         </div>
 
         <Button type="submit" variant="primary" loading={loading}>
-          Calculate position size
+          Calculate Position Size
         </Button>
       </form>
 
-      {error ? <ErrorState className="mt-3" message={error} /> : null}
+      {error ? (
+        <ErrorState
+          className="mt-2"
+          title={errorKind === 'validation' ? 'Check Inputs' : 'Request Failed'}
+          message={error}
+        />
+      ) : null}
 
       {result ? (
-        <dl className="mt-3 divide-y divide-terminal-borderSoft rounded-lg border border-terminal-borderSoft bg-terminal-panelAlt px-3 py-1">
-          <KeyValue label="Risk budget" value={formatNumber(result.risk_budget, 2)} />
-          <KeyValue label="Risk per unit" value={formatNumber(result.risk_per_unit, 2)} />
+        <dl className="mt-2 divide-y divide-terminal-borderSoft border-y border-terminal-borderSoft">
+          <KeyValue label="Risk Budget" value={formatNumber(result.risk_budget, 2)} />
+          <KeyValue label="Risk per Unit" value={formatNumber(result.risk_per_unit, 2)} />
           <KeyValue label="Quantity" value={formatNumber(result.quantity, 0)} />
           <KeyValue
-            label="Position value"
+            label="Position Value"
             value={`${formatNumber(result.position_value, 2)}${currency ? ` ${currency}` : ''}`}
           />
-          <KeyValue label="Planned loss" value={formatNumber(result.planned_loss, 2)} />
+          <KeyValue label="Planned Loss" value={formatNumber(result.planned_loss, 2)} />
           <KeyValue
-            label="Limited by"
-            value={result.capital_limited ? 'Position capital' : 'Risk budget'}
+            label="Limited By"
+            value={result.capital_limited ? 'Position Capital' : 'Risk Budget'}
           />
         </dl>
       ) : null}
 
-      <Notice className="mt-3">
-        Position sizing excludes charges, spread, slippage, partial fills and gap risk. A stop order
-        does not guarantee a fill at the stop price.
+      <Notice className="mt-2">
+        Excludes charges, spread, slippage, partial fills and gap risk.
       </Notice>
     </Card>
   );

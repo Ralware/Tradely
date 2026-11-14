@@ -14,9 +14,9 @@ import type { TimeSeriesPoint } from '../components/charts/TimeSeriesChart';
 import { TradesTable } from '../components/tables/TradesTable';
 
 const marketOptions = [
-  { value: 'india', label: 'Indian equities' },
-  { value: 'global', label: 'International equities' },
-  { value: 'crypto', label: 'Crypto spot' },
+  { value: 'india', label: 'Indian Equities' },
+  { value: 'global', label: 'International Equities' },
+  { value: 'crypto', label: 'Crypto Spot' },
 ];
 
 const exchangeOptions: Record<Market, Array<{ value: string; label: string }>> = {
@@ -63,27 +63,27 @@ export function BacktestingPage() {
     const parsedMaxPosition = Number(maxPositionPercent) / 100;
 
     if (!cleanSymbol) {
-      setError('Enter a symbol.');
+      setError('Enter a Symbol');
       return;
     }
     if (!Number.isFinite(parsedDays) || parsedDays < 240 || parsedDays > 3650) {
-      setError('History must be between 240 and 3650 days.');
+      setError('History Must Be 240 to 3650 Days');
       return;
     }
     if (!Number.isFinite(parsedCapital) || parsedCapital <= 0) {
-      setError('Initial capital must be positive.');
+      setError('Initial Capital Must Be Positive');
       return;
     }
     if (!Number.isFinite(parsedRisk) || parsedRisk <= 0 || parsedRisk > 0.02) {
-      setError('Risk per trade must be above 0 and at most 2%.');
+      setError('Risk per Trade Must Be Above 0 and at Most 2%');
       return;
     }
     if (!Number.isFinite(parsedCost) || parsedCost < 0) {
-      setError('Cost per side must be zero or positive.');
+      setError('Cost per Side Must Be Zero or Positive');
       return;
     }
     if (!Number.isFinite(parsedMaxPosition) || parsedMaxPosition <= 0 || parsedMaxPosition > 1) {
-      setError('Maximum position fraction must be above 0 and at most 100%.');
+      setError('Max Position Must Be Above 0 and at Most 100%');
       return;
     }
 
@@ -103,7 +103,7 @@ export function BacktestingPage() {
     try {
       setResult(await backtestService.run(payload));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Backtest failed');
+      setError(caught instanceof Error ? caught.message : 'Backtest Failed');
     } finally {
       setLoading(false);
     }
@@ -118,9 +118,8 @@ export function BacktestingPage() {
     [result],
   );
 
-  // Visualisation only: the underwater curve is derived from the equity points
-  // that the backend already returned. It does not recalculate any strategy or
-  // risk metric; the headline drawdown figure is backend `max_drawdown_pct`.
+  // Visualisation only: the underwater curve is derived from equity points the
+  // backend already returned. The headline figure is backend max_drawdown_pct.
   const drawdownPoints: TimeSeriesPoint[] = useMemo(() => {
     if (!result) {
       return [];
@@ -142,14 +141,11 @@ export function BacktestingPage() {
 
   return (
     <div>
-      <PageHeader
-        title="Backtesting"
-        subtitle="Single-instrument research on the backend trend-breakout strategy. Daily candles only, costs included by the backend. Results are historical simulations, not forecasts."
-      />
+      <PageHeader title="Backtesting" subtitle="Trend Breakout · Daily Bars · Costs Included" />
 
-      <Card className="mb-4" title="Configuration" subtitle="Strategy parameters are enforced by the FastAPI backend.">
-        <form onSubmit={runBacktest} className="space-y-3">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <Card className="mb-3" title="Configuration">
+        <form onSubmit={runBacktest} className="space-y-2">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             <Input
               label="Symbol"
               value={symbol}
@@ -171,17 +167,17 @@ export function BacktestingPage() {
               disabled={market === 'crypto'}
             />
             <Input
-              label="History (days)"
+              label="History (Days)"
               type="number"
               min={240}
               max={3650}
               step={1}
               value={days}
               onChange={(event) => setDays(event.target.value)}
-              hint="Backend range 240–3650"
+              hint="240–3650"
             />
             <Input
-              label="Initial capital"
+              label="Initial Capital"
               type="number"
               min={1}
               step="any"
@@ -189,17 +185,17 @@ export function BacktestingPage() {
               onChange={(event) => setCapital(event.target.value)}
             />
             <Input
-              label="Risk per trade (%)"
+              label="Risk per Trade (%)"
               type="number"
               min={0.01}
               max={2}
               step="0.01"
               value={riskPercent}
               onChange={(event) => setRiskPercent(event.target.value)}
-              hint="Backend maximum 2%"
+              hint="Maximum 2%"
             />
             <Input
-              label="Cost per side (bps)"
+              label="Cost per Side (bps)"
               type="number"
               min={0}
               step="any"
@@ -207,7 +203,7 @@ export function BacktestingPage() {
               onChange={(event) => setCostBps(event.target.value)}
             />
             <Input
-              label="Max position (%)"
+              label="Max Position (%)"
               type="number"
               min={1}
               max={100}
@@ -218,93 +214,84 @@ export function BacktestingPage() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button type="submit" variant="primary" icon="flask" loading={loading}>
-              Run backtest
+              Run Backtest
             </Button>
-            <p className="text-[11px] text-terminal-muted">
-              The interval is fixed at daily bars; intraday requests are rejected by the backend.
-            </p>
+            <span className="text-2xs text-terminal-muted">Daily Bars Only</span>
           </div>
         </form>
 
-        {error ? <ErrorState className="mt-3" message={error} /> : null}
+        {error ? <ErrorState className="mt-2" message={error} /> : null}
       </Card>
 
       {loading ? (
         <Card>
-          <EmptyState
-            title="Running the simulation…"
-            description="The backend is fetching history and replaying the strategy. This can take a few seconds."
-            icon="flask"
-          />
+          <EmptyState title="Running Backtest" description="Fetching history and replaying the strategy." icon="flask" />
         </Card>
       ) : result ? (
-        <div className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="space-y-3">
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
             <Stat
-              label="Net return"
+              label="Net Return"
               value={formatPercent(result.net_return_pct, 2, true)}
               tone={result.net_return_pct > 0 ? 'positive' : result.net_return_pct < 0 ? 'negative' : 'neutral'}
-              hint={`Final equity ${formatNumber(result.final_equity, 2)}`}
+              hint={`Final Equity ${formatNumber(result.final_equity, 2)}`}
             />
-            <Stat label="Trades" value={String(result.trade_count)} hint={`Win rate ${formatPercent(result.win_rate_pct)}`} />
-            <Stat label="Profit factor" value={profitFactor} hint="Gross wins ÷ gross losses" />
+            <Stat label="Trades" value={String(result.trade_count)} hint={`Win Rate ${formatPercent(result.win_rate_pct)}`} />
+            <Stat label="Profit Factor" value={profitFactor} hint="Gross Wins ÷ Gross Losses" />
             <Stat
-              label="Max drawdown"
+              label="Max Drawdown"
               value={formatPercent(result.max_drawdown_pct)}
               tone="negative"
-              hint="Reported by the backend"
+              hint="Backend Computed"
             />
             <Stat
-              label="Expectancy / trade"
+              label="Expectancy per Trade"
               value={formatNumber(result.expectancy_per_trade, 2)}
-              hint="Net of backend costs"
+              hint="Net of Costs"
             />
-            <Stat label="Sharpe (annualised)" value={formatNumber(result.sharpe_daily_annualized, 2)} hint="Daily returns basis" />
-            <Stat label="Sortino (annualised)" value={formatNumber(result.sortino_daily_annualized, 2)} hint="Daily returns basis" />
-            <Stat label="Costs per side" value={`${formatNumber(result.cost_bps_per_side, 2)} bps`} hint={result.data_adjusted ? 'Adjusted data' : 'Unadjusted data'} />
+            <Stat label="Sharpe (Annualised)" value={formatNumber(result.sharpe_daily_annualized, 2)} hint="Daily Returns" />
+            <Stat label="Sortino (Annualised)" value={formatNumber(result.sortino_daily_annualized, 2)} hint="Daily Returns" />
+            <Stat
+              label="Costs per Side"
+              value={`${formatNumber(result.cost_bps_per_side, 2)} bps`}
+              hint={result.data_adjusted ? 'Adjusted Data' : 'Unadjusted Data'}
+            />
           </div>
 
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+          <div className="grid grid-cols-1 gap-3 xl:grid-cols-12">
             <Card
               className="xl:col-span-7"
-              title="Equity curve"
+              title="Equity Curve"
               subtitle={`${result.strategy} · ${result.strategy_version} · ${result.source}`}
             >
               <TimeSeriesChart
                 points={equityPoints}
-                height={260}
-                color="#2fd18a"
+                height={240}
+                color="#26a69a"
                 baseline={result.initial_capital}
                 valueFormatter={(value) => formatNumber(value, 2)}
-                ariaLabel="Backtest equity curve"
+                ariaLabel="Backtest Equity Curve"
               />
             </Card>
-            <Card
-              className="xl:col-span-5"
-              title="Drawdown"
-              subtitle="Underwater curve derived from the backend equity points for visualisation; the headline figure is backend-computed."
-            >
+            <Card className="xl:col-span-5" title="Drawdown" subtitle="Derived from Backend Equity Points">
               <TimeSeriesChart
                 points={drawdownPoints}
-                height={260}
-                color="#ff6b6b"
+                height={240}
+                color="#ef5350"
                 baseline={0}
                 valueFormatter={(value) => `${formatNumber(value, 2)}%`}
-                ariaLabel="Backtest drawdown curve"
+                ariaLabel="Backtest Drawdown Curve"
               />
             </Card>
           </div>
 
-          <Card
-            title="Trades"
-            subtitle={`${result.symbol} · ${result.market} · ${result.trade_count} completed round trips`}
-          >
+          <Card title="Trades" subtitle={`${result.symbol} · ${result.market} · ${result.trade_count} Round Trips`}>
             <TradesTable trades={result.trades} />
           </Card>
 
           {result.limitations.length > 0 ? (
-            <Card title="Model limitations">
-              <ul className="list-disc space-y-1 pl-4 text-[11px] leading-relaxed text-terminal-muted">
+            <Card title="Model Limitations">
+              <ul className="list-disc space-y-0.5 pl-4 text-2xs leading-relaxed text-terminal-muted">
                 {result.limitations.map((limitation) => (
                   <li key={limitation}>{limitation}</li>
                 ))}
@@ -314,19 +301,11 @@ export function BacktestingPage() {
         </div>
       ) : (
         <Card>
-          <EmptyState
-            title="No backtest run yet"
-            description="Configure a symbol and run the simulation. All metrics, trades and equity points are produced by the backend."
-            icon="flask"
-          />
+          <EmptyState title="No Backtest Run" description="Configure a symbol and run the simulation." icon="flask" />
         </Card>
       )}
 
-      <Notice className="mt-4">
-        Backtests are in-sample simulations with simplified fills and configurable costs. They do not
-        model liquidity, taxes, corporate-action timing or slippage beyond the stated cost. Past
-        performance does not indicate future results.
-      </Notice>
+      <Notice className="mt-3">Historical Simulation · Not a Forecast</Notice>
     </div>
   );
 }

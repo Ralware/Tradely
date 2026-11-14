@@ -16,52 +16,49 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variants: Record<Variant, string> = {
   primary:
-    'bg-[#2b3f6b] text-white border border-[#40598f] hover:bg-[#334b7f] disabled:bg-[#243148]',
+    'bg-terminal-accent text-white border border-terminal-accent hover:brightness-110 disabled:opacity-60',
   secondary:
-    'bg-terminal-panelAlt text-terminal-text border border-terminal-border hover:border-[#34445a] hover:bg-[#151d2a]',
+    'bg-terminal-panelAlt text-terminal-text border border-terminal-border hover:border-[#343943] hover:text-white disabled:opacity-60',
   ghost:
-    'bg-transparent text-terminal-muted border border-transparent hover:text-terminal-text hover:bg-white/5',
+    'bg-transparent text-terminal-muted border border-transparent hover:text-terminal-text hover:bg-white/[0.05] disabled:opacity-60',
   danger:
-    'bg-transparent text-terminal-red border border-[#4a2a33] hover:bg-[#2a1419] hover:border-[#6b3542]',
+    'bg-transparent text-terminal-red border border-[#3f2528] hover:bg-[#221416] hover:border-[#5a3136] disabled:opacity-60',
 };
 
 const sizes: Record<Size, string> = {
-  sm: 'h-8 px-2.5 text-xs gap-1.5',
-  md: 'h-10 px-3.5 text-sm gap-2',
+  sm: 'h-7 px-2 text-2xs gap-1',
+  md: 'h-8 px-3 text-xs gap-1.5',
 };
 
 export function Button({
   variant = 'secondary',
-  size = 'md',
+  size = 'sm',
   loading = false,
   icon,
-  className,
   children,
+  className,
   disabled,
-  type = 'button',
   ...rest
 }: ButtonProps) {
   return (
     <button
-      type={type}
+      type="button"
+      disabled={disabled || loading}
       className={cn(
-        'inline-flex items-center justify-center rounded-lg font-medium transition-colors',
-        'disabled:cursor-not-allowed disabled:opacity-60',
+        'inline-flex items-center justify-center rounded-sm font-medium transition-colors',
         variants[variant],
         sizes[size],
         className,
       )}
-      disabled={disabled || loading}
-      aria-busy={loading || undefined}
       {...rest}
     >
       {loading ? (
         <span
-          className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white"
+          className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent"
           aria-hidden="true"
         />
       ) : icon ? (
-        <Icon name={icon} size={size === 'sm' ? 14 : 16} />
+        <Icon name={icon} size={size === 'sm' ? 12 : 14} />
       ) : null}
       {children}
     </button>

@@ -16,24 +16,18 @@ export function WatchlistTable({
   removing: string | null;
 }) {
   if (items.length === 0) {
-    return (
-      <EmptyState
-        title="Watchlist is empty"
-        description="Add an instrument to track it in the daily scanner and open its analysis page."
-        icon="portfolio"
-      />
-    );
+    return <EmptyState title="Watchlist Empty" description="Add an instrument to track it." icon="portfolio" />;
   }
 
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[420px] border-collapse text-xs">
         <thead>
-          <tr className="border-b border-terminal-border text-left text-[11px] uppercase tracking-[0.06em] text-terminal-muted">
-            <th className="py-2 pr-3 font-medium">Symbol</th>
-            <th className="py-2 pr-3 font-medium">Market</th>
-            <th className="py-2 pr-3 font-medium">Added</th>
-            <th className="py-2 text-right font-medium">Action</th>
+          <tr className="border-b border-terminal-border text-left text-2xs text-terminal-muted">
+            <th className="py-1.5 pr-3 font-medium">Symbol</th>
+            <th className="py-1.5 pr-3 font-medium">Market</th>
+            <th className="py-1.5 pr-3 font-medium">Added</th>
+            <th className="py-1.5 text-right font-medium">Action</th>
           </tr>
         </thead>
         <tbody>
@@ -41,7 +35,7 @@ export function WatchlistTable({
             const key = `${item.market}:${item.symbol}:${item.exchange}`;
             return (
               <tr key={key} className="border-b border-terminal-borderSoft last:border-0">
-                <td className="py-2 pr-3">
+                <td className="py-1.5 pr-3">
                   <Link
                     to={analysisPath(item.symbol, item.market, item.exchange)}
                     className="font-medium text-terminal-text hover:text-terminal-accent"
@@ -49,14 +43,14 @@ export function WatchlistTable({
                     {item.symbol}
                   </Link>
                   {item.exchange ? (
-                    <span className="ml-1.5 text-[10px] text-terminal-muted">{item.exchange}</span>
+                    <span className="ml-1.5 text-2xs text-terminal-muted">{item.exchange}</span>
                   ) : null}
                 </td>
-                <td className="py-2 pr-3">
+                <td className="py-1.5 pr-3">
                   <Badge>{item.market}</Badge>
                 </td>
-                <td className="num py-2 pr-3 text-terminal-muted">{formatDate(item.created_at)}</td>
-                <td className="py-2 text-right">
+                <td className="num py-1.5 pr-3 text-terminal-muted">{formatDate(item.created_at)}</td>
+                <td className="py-1.5 text-right">
                   <Button
                     size="sm"
                     variant="danger"

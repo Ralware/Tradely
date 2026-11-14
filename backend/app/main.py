@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router
@@ -27,10 +27,16 @@ app.state.market_service = MarketService(settings)
 app.state.response_cache = TTLCache()
 app.include_router(router)
 
-WEB_DIR = Path(__file__).parent / "web"
-app.mount("/assets", StaticFiles(directory=WEB_DIR), name="assets")
+FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets", check_dir=False), name="assets")
 
 
 @app.get("/", include_in_schema=False)
 def home():
-    return FileResponse(WEB_DIR / "index.html")
+    index = FRONTEND_DIST / "index.html"
+    if index.is_file():
+        return FileResponse(index)
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "React production build is unavailable. Run the frontend build or use the Vite development server."},
+    )

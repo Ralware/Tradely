@@ -19,21 +19,18 @@ export function SignalCard({
 
   return (
     <Card
-      title="Strategy state"
+      title="Strategy State"
       subtitle={`${signal.strategy} · ${signal.strategy_version}`}
       actions={<SignalBadge state={signal.state} />}
     >
-      <p className="text-xs leading-relaxed text-terminal-muted">{signal.explanation}</p>
+      <p className="text-2xs leading-relaxed text-terminal-muted">{signal.explanation}</p>
 
       {hasLevels ? (
-        <dl className="mt-3 divide-y divide-terminal-borderSoft rounded-lg border border-terminal-borderSoft bg-terminal-panelAlt px-3 py-1">
+        <dl className="mt-2 divide-y divide-terminal-borderSoft border-y border-terminal-borderSoft">
+          <KeyValue label="Entry Reference" value={formatNumber(signal.entry_reference, 2)} />
+          <KeyValue label="Stop Reference" value={formatNumber(signal.stop_reference, 2)} />
           <KeyValue
-            label="Entry reference"
-            value={formatNumber(signal.entry_reference, 2)}
-          />
-          <KeyValue label="Stop reference" value={formatNumber(signal.stop_reference, 2)} />
-          <KeyValue
-            label="Risk per unit"
+            label="Risk per Unit"
             value={
               signal.risk_per_unit === null
                 ? '—'
@@ -43,14 +40,12 @@ export function SignalCard({
         </dl>
       ) : null}
 
-      <div className="mt-3">
-        <p className="mb-1 text-[11px] font-medium uppercase tracking-[0.08em] text-terminal-muted">
-          Rule checks
-        </p>
+      <div className="mt-2">
+        <p className="mb-1 text-2xs font-medium text-terminal-muted">Rule Checks</p>
         <ConditionList conditions={signal.conditions} />
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-terminal-borderSoft pt-2 text-[11px] text-terminal-muted">
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-terminal-borderSoft pt-1.5 text-2xs text-terminal-muted">
         <span>As of {formatDateTime(signal.as_of)}</span>
         {signal.data_source ? <span>Source: {signal.data_source}</span> : null}
       </div>

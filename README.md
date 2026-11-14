@@ -21,14 +21,14 @@ This repository now contains a **runnable local application foundation**, not ju
 
 - FastAPI backend bound to `127.0.0.1` by default, with a startup guard that rejects non-loopback hosts.
 - SQLite persistence for a single-owner watchlist, manual actual-holdings transactions and signal audit history.
-- Provider adapters for TejHQ daily Indian equity data, Yahoo Finance through `yfinance`, Binance public Spot candles (paged up to 20,000 bars per fetch, with a truncation flag), CoinGecko market metadata, GDELT news, configurable RSS/Atom feeds, Yahoo Finance news through `yfinance`, TejHQ corporate actions and SEC EDGAR filings by CIK.
+- Provider adapters for TejHQ daily Indian equity OHLCV, Yahoo Finance through `yfinance` for international equity prices, Binance public Spot candles (paged up to 20,000 bars per fetch, with a truncation flag), GDELT news, and optional Yahoo Finance News through `yfinance`.
 - OHLCV normalisation and validation, with provider/source and adjustment metadata.
 - Best-effort Yahoo Finance company profiles, valuation/quality ratios and quarterly financial statements where the provider supplies them.
 - Deterministic SMA, EMA, Wilder-seeded RSI/ATR/ADX, MACD, Bollinger Bands, Donchian channels, relative volume, OBV, session VWAP (intraday bars only; deliberately unavailable on daily bars), MFI, CMF, CCI and Stochastic RSI calculations.
 - One versioned daily long-only trend/Donchian strategy. `BUY` means all entry conditions pass. `SELL` means exit an existing long after a close below the prior 10-bar low; it does **not** open a short.
 - Signal suppression when daily strategy data is stale or Indian-equity history is not confirmed corporate-action-adjusted.
 - ATR-based position sizing, a single-instrument daily backtest with next-bar-open execution assumptions and configurable aggregate basis-point costs.
-- Stock/asset-specific news and event endpoints. The India events panel returns TejHQ corporate-action records plus links to official NSE/BSE announcement pages; it does not invent future board-meeting or results dates when no structured source is available.
+- Stock/asset-specific news endpoint with GDELT discovery and optional Yahoo Finance News supplementation.
 - Manual actual-holdings transaction ledger with FIFO cost-basis and realised P&L calculations. No simulated trades, paper-trading account or order placement.
 - React + TypeScript frontend with dashboard, markets/watchlist, stock and crypto analysis, portfolio (FIFO), backtesting and settings pages; candlestick/volume charts via Lightweight Charts and backend-computed indicator series; machine-readable API at `/docs`; automated unit/API tests.
 
@@ -37,9 +37,8 @@ This repository now contains a **runnable local application foundation**, not ju
 - A statistically approved or profitable strategy. The included backtest is an initial single-instrument research implementation, not a full portfolio simulator, survivorship-free universe test or completed walk-forward/PBO/DSR validation programme.
 - Multiple strategy families as executable engines. Momentum ranking, pullback, mean reversion and intraday ORB remain research specifications until implemented and tested.
 - Full point-in-time NSE/BSE constituent history, delisted-equity coverage, exchange-calendar integration, complete Indian transaction-tax calculation or a broker-specific fill model.
-- Complete institutional-grade fundamentals/financial-statement coverage, ticker search/discovery and automatic international issuer-to-CIK mapping. The current Yahoo fundamentals adapter is best-effort and must be cross-checked against issuer filings.
-- Structured upcoming NSE/BSE board-meeting, earnings-call and AGM feeds. The official exchange pages are linked for verification; provider-returned TejHQ corporate actions are the only structured India event feed implemented here.
-- Crypto project-event discovery, smart-contract/token unlock calendar or derivatives/funding data. Crypto candles are exchange-specific Binance Spot data; CoinGecko is currently metadata/market-context enrichment only.
+- Fundamental statements, filing feeds, corporate-action/event feeds, ticker search/discovery and automatic issuer mapping.
+- Crypto project-event discovery, smart-contract/token unlock calendar or derivatives/funding data. Crypto candles are exchange-specific Binance Spot data.
 - Unrealised P&L from live market marks, currency conversion or broker account synchronisation. The holdings API reports recorded positions and FIFO realised P&L; it does not pretend to know a live mark when no market mark has been fetched.
 - Automated notifications or remote access. Unrealised P&L from live marks, currency conversion and broker synchronisation remain out of scope.
 
@@ -104,7 +103,7 @@ npm run dev
 
 Open `http://localhost:5173` for the React application. API documentation is at `http://127.0.0.1:8000/docs`; the legacy plain-HTML workbench remains at `http://127.0.0.1:8000/`.
 
-Set `TEJHQ_API_KEY` to use TejHQ's adjusted-price endpoint. Without it, Tradely prefers adjusted Yahoo Finance history for Indian technical analysis and only falls back to raw TejHQ EOD if Yahoo is unavailable; **the signal is suppressed when the chosen Indian source is unadjusted**. Set `COINGECKO_API_KEY` for optional CoinGecko market metadata. Set `SEC_USER_AGENT` to a real identifying product/contact string before calling SEC EDGAR. Add permitted feed URLs to `RSS_FEED_URLS` as a comma-separated list. Provider keys stay in `.env` and must never be committed.
+Set `TEJHQ_API_KEY` to use TejHQ's adjusted-price endpoint. Without it, Tradely uses TejHQ's keyless raw EOD endpoint and **suppresses Indian actionable signals and backtests because the history is unadjusted**. International prices use the unofficial Yahoo Finance adapter; crypto prices use Binance Spot public market-data endpoints. Provider keys stay in `.env` and must never be committed.
 
 Run the backend tests (from the repository root):
 
@@ -131,11 +130,8 @@ The production bundle is written to `frontend/dist/`.
 | `GET` | `/api/market/candles` | Normalised OHLCV candles |
 | `GET` | `/api/instruments/{symbol}/analysis` | Latest indicators and strategy explanation |
 | `GET` | `/api/instruments/{symbol}/indicators` | Per-bar OHLCV plus every backend-computed indicator (additive; used for chart panes) |
-| `GET` | `/api/instruments/{symbol}/fundamentals` | Best-effort profile, ratios and quarterly statements |
-| `GET` | `/api/instruments/{symbol}/news` | GDELT, RSS and Yahoo news discovery |
-| `GET` | `/api/instruments/{symbol}/events` | Instrument-specific corporate actions and official source links |
-| `GET` | `/api/us/issuers/{cik}/filings` | SEC EDGAR filing feed by CIK |
-| `GET` | `/api/crypto/markets` | CoinGecko Demo market metadata |
+| `GET` | `/api/instruments/{symbol}/technicals` | Conventional Buy/Sell/Neutral labels for existing backend indicators (additive; drives the gauges and tables) |
+| `GET` | `/api/instruments/{symbol}/news` | GDELT discovery with optional Yahoo Finance News supplementation |
 | `GET` | `/api/scanner/watchlist` | Daily strategy scan of saved watchlist |
 | `POST` | `/api/backtests/trend-breakout` | Initial daily single-instrument backtest |
 | `POST` | `/api/risk/position-size` | Risk-budget position sizing |
@@ -158,20 +154,22 @@ frontend/
   tailwind.config.js
   src/
     components/
-      analysis/     # instrument form, analysis workspace, fundamentals, SEC filings
-      charts/       # Lightweight Charts price/RSI/MACD panes, SVG time-series chart
+      analysis/     # instrument form, analysis workspace, technical gauges/tables
+      charts/       # Lightweight Charts price/RSI/MACD panes, SVG time-series chart, sparkline
       common/       # buttons, cards, fields, tabs, states, page headers
-      layout/       # sidebar, top bar, app shell
+      layout/       # top bar, market sidebar, mobile navigation drawer, app shell
       signals/      # signal badge, condition list, signal card, risk calculator
       tables/       # candles, indicators, watchlist, scanner, positions, trades, news, events
-    contexts/       # API status provider (health + provider configuration)
-    hooks/          # typed useApi hook with cancellation
+    contexts/       # API status and URL-driven selected-instrument providers
+    hooks/          # typed useApi hook with cancellation, watchlist quote loader
     pages/          # dashboard, markets, stock/crypto analysis, portfolio, backtesting, settings
     services/       # centralised typed API layer
     types/          # backend response interfaces
-    utils/          # formatting and navigation helpers
+    utils/          # formatting, navigation, supported timeframes, watchlist events
 ```
 
+- The layout is a slim top bar plus a persistent right-hand market rail on desktop. Below `xl`, navigation and the watchlist move into drawers. The rail reports watchlist quotes and session statistics from backend candles; it does not calculate indicators.
+- The technical gauges and tables render `/api/instruments/{symbol}/technicals`. That endpoint only labels values already produced by `compute_indicators` with documented conventional thresholds. It is not the trend-breakout strategy and does not introduce a second trading algorithm.
 - All HTTP calls go through `src/services/api.ts`. `VITE_API_BASE_URL` is empty by default, so the browser calls `/api/...` on the same origin and Vite proxies it to `http://127.0.0.1:8000`. Set the variable only for a separately hosted build; that requires CORS on the FastAPI side.
 - The frontend never calculates indicators, signals, risk or backtest metrics. It renders values returned by the backend and shows the backend's `detail` message when a request fails. There is no mock or fallback market data.
 - Charts use Lightweight Charts for candlesticks, volume, RSI and MACD, plus a small SVG component for equity and drawdown curves. Indicator overlay values come from `/analysis`; RSI/MACD series come from the additive `/indicators` endpoint, which reuses the existing `compute_indicators` function.

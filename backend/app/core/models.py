@@ -62,19 +62,6 @@ class NewsItem(BaseModel):
     official: bool = False
 
 
-class CorporateEvent(BaseModel):
-    id: str
-    symbol: str
-    event_type: str
-    description: str
-    event_date: date | None = None
-    announced_at: datetime | None = None
-    status: Literal["confirmed", "tentative", "postponed", "cancelled", "historical", "unverified"] = "unverified"
-    source: str
-    source_url: str | None = None
-    official: bool = False
-
-
 class IndicatorSnapshot(BaseModel):
     timestamp: datetime
     values: dict[str, float | None]

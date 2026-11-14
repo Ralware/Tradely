@@ -2,35 +2,35 @@ import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
+import { useSelectedInstrument } from '../../contexts/SelectedInstrumentContext';
 import { analysisService } from '../../services/analysisService';
 import { newsService } from '../../services/newsService';
 import { portfolioService } from '../../services/portfolioService';
-import type { Market } from '../../types/api';
-import { cn, formatNumber, formatPercent, toneForNumber } from '../../utils/format';
+import { changeDigits, cn, formatDate, formatNumber, formatPercent, formatSignedFixed, toneForNumber } from '../../utils/format';
+import { defaultDaysFor, intervalLabel, isIntradayInterval, timeframesFor } from '../../utils/timeframes';
+import { notifyWatchlistChanged } from '../../utils/events';
 import { Badge } from '../common/Badge';
 import { Button } from '../common/Button';
 import { Card } from '../common/Card';
-import { PageHeader } from '../common/PageHeader';
 import { EmptyState, ErrorState, LoadingPanel, Notice } from '../common/States';
-import { Stat } from '../common/Stat';
+import { KeyValue } from '../common/Stat';
+import { Tabs } from '../common/Tabs';
 import { PriceChart } from '../charts/PriceChart';
 import type { OverlayToggles } from '../charts/PriceChart';
 import { IndicatorPanel } from '../charts/IndicatorPanel';
-import { InstrumentForm } from './InstrumentForm';
-import type { InstrumentQuery } from './InstrumentForm';
 import { SignalCard } from '../signals/SignalCard';
 import { RiskCalculator } from '../signals/RiskCalculator';
 import { CandleTable } from '../tables/CandleTable';
 import { IndicatorTable } from '../tables/IndicatorTable';
 import { NewsList } from '../tables/NewsList';
-import { EventsList } from '../tables/EventsList';
-import { FundamentalsPanel } from './FundamentalsPanel';
-import { SecFilingsPanel } from './SecFilingsPanel';
+import { InstrumentForm } from './InstrumentForm';
+import type { InstrumentQuery } from './InstrumentForm';
+import { TechnicalGauge } from './TechnicalGauge';
+import { TechnicalTable } from './TechnicalTable';
+import { TimeframeSelector } from './TimeframeSelector';
 
 interface AnalysisWorkspaceProps {
   variant: 'stocks' | 'crypto';
-  title: string;
-  subtitle: string;
 }
 
 function ToggleChip({
@@ -48,9 +48,9 @@ function ToggleChip({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        'rounded-md border px-2 py-1 text-[11px] font-medium transition-colors',
+        'rounded-sm border px-1.5 py-0.5 text-2xs font-medium transition-colors',
         active
-          ? 'border-[#33477a] bg-[#141d33] text-terminal-accent'
+          ? 'border-terminal-accent/60 bg-terminal-accentSoft text-terminal-accent'
           : 'border-terminal-border text-terminal-muted hover:text-terminal-text',
       )}
     >
@@ -59,30 +59,21 @@ function ToggleChip({
   );
 }
 
-function asMarket(value: string | null, fallback: Market): Market {
-  return value === 'india' || value === 'global' || value === 'crypto' ? value : fallback;
+function priceDigits(value: number | null): number {
+  if (value === null) return 2;
+  if (value >= 1000) return 2;
+  if (value >= 1) return 4;
+  return 6;
 }
 
-function asDays(value: string | null): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed >= 1 && parsed <= 3650 ? parsed : 500;
-}
-
-export function AnalysisWorkspace({ variant, title, subtitle }: AnalysisWorkspaceProps) {
+export function AnalysisWorkspace({ variant }: AnalysisWorkspaceProps) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const defaultMarket: Market = variant === 'crypto' ? 'crypto' : 'india';
-  const defaultExchange = variant === 'crypto' ? 'BINANCE' : 'NSE';
+  const selected = useSelectedInstrument();
   const defaultSymbol = variant === 'crypto' ? 'BTCUSDT' : 'RELIANCE';
 
-  const symbol = (searchParams.get('symbol') ?? '').trim().toUpperCase();
-  const urlMarket = asMarket(searchParams.get('market'), defaultMarket);
-  const market: Market =
-    variant === 'crypto' ? 'crypto' : urlMarket === 'crypto' ? 'india' : urlMarket;
-  const exchange = searchParams.get('exchange') ?? defaultExchange;
-  const interval = searchParams.get('interval') ?? '1d';
-  const days = asDays(searchParams.get('days'));
+  const { symbol, market, exchange, interval, days } = selected;
   const companyName = searchParams.get('company') ?? '';
-  const enabled = symbol.length > 0;
+  const enabled = selected.enabled;
 
   const [overlays, setOverlays] = useState<OverlayToggles>({
     sma: true,
@@ -91,6 +82,7 @@ export function AnalysisWorkspace({ variant, title, subtitle }: AnalysisWorkspac
   });
   const [showRsi, setShowRsi] = useState(true);
   const [showMacd, setShowMacd] = useState(true);
+  const [tab, setTab] = useState('signal');
   const [watchState, setWatchState] = useState<{
     loading: boolean;
     message: string | null;
@@ -114,6 +106,13 @@ export function AnalysisWorkspace({ variant, title, subtitle }: AnalysisWorkspac
     { enabled },
   );
 
+  const technicals = useApi(
+    (signal) =>
+      analysisService.getTechnicals({ symbol, market, exchange, interval, days }, signal),
+    [symbol, market, exchange, interval, days],
+    { enabled },
+  );
+
   const news = useApi(
     (signal) =>
       newsService.getNews({ symbol, market, companyName: companyName || null }, signal),
@@ -121,14 +120,21 @@ export function AnalysisWorkspace({ variant, title, subtitle }: AnalysisWorkspac
     { enabled },
   );
 
-  const events = useApi(
-    (signal) => newsService.getEvents({ symbol, market }, signal),
-    [symbol, market],
-    { enabled },
-  );
-
   const currency = market === 'india' ? 'INR' : market === 'crypto' ? 'USDT' : 'USD';
-  const intraday = interval !== '1d' && interval !== '1wk';
+  const intraday = isIntradayInterval(interval);
+  const data = analysis.data;
+  const quote = selected.quote;
+
+  const last = quote?.last ?? data?.latest.close ?? null;
+  const previousClose =
+    data && data.candles.length > 1 ? data.candles[data.candles.length - 2].close : null;
+  const change =
+    quote?.change ??
+    (last !== null && previousClose !== null ? last - previousClose : null);
+  const changePct =
+    quote?.changePct ??
+    (change !== null && previousClose ? (change / previousClose) * 100 : null);
+  const changeTone = toneForNumber(change);
 
   const initialQuery: InstrumentQuery = {
     symbol: symbol || defaultSymbol,
@@ -146,8 +152,8 @@ export function AnalysisWorkspace({ variant, title, subtitle }: AnalysisWorkspac
     if (query.exchange) {
       next.set('exchange', query.exchange);
     }
-    next.set('interval', query.interval);
-    next.set('days', String(query.days));
+    next.set('interval', interval);
+    next.set('days', String(defaultDaysFor(interval)));
     if (query.companyName) {
       next.set('company', query.companyName);
     }
@@ -155,11 +161,19 @@ export function AnalysisWorkspace({ variant, title, subtitle }: AnalysisWorkspac
     setSearchParams(next);
   }
 
+  function changeTimeframe(nextInterval: string) {
+    const next = new URLSearchParams(searchParams);
+    next.set('interval', nextInterval);
+    next.set('days', String(defaultDaysFor(nextInterval)));
+    setSearchParams(next, { replace: true });
+  }
+
   function refreshAll() {
+    selected.reload();
     analysis.reload();
     indicatorSeries.reload();
+    technicals.reload();
     news.reload();
-    events.reload();
   }
 
   async function addToWatchlist() {
@@ -169,60 +183,29 @@ export function AnalysisWorkspace({ variant, title, subtitle }: AnalysisWorkspac
     setWatchState({ loading: true, message: null, error: null });
     try {
       await portfolioService.addWatchlist({ symbol, market, exchange });
-      setWatchState({ loading: false, message: `${symbol} added to the watchlist.`, error: null });
+      notifyWatchlistChanged();
+      setWatchState({ loading: false, message: `${symbol} Added to Watchlist`, error: null });
     } catch (caught) {
       setWatchState({
         loading: false,
         message: null,
-        error: caught instanceof Error ? caught.message : 'Could not add to watchlist',
+        error: caught instanceof Error ? caught.message : 'Could Not Add Instrument',
       });
     }
   }
 
-  const data = analysis.data;
-  const previousClose =
-    data && data.candles.length > 1 ? data.candles[data.candles.length - 2].close : null;
-  const changePercent =
-    data && previousClose ? ((data.latest.close - previousClose) / previousClose) * 100 : null;
+  const tabs = [
+    { id: 'signal', label: 'Signal' },
+    { id: 'risk', label: 'Risk' },
+    { id: 'indicators', label: 'Indicators' },
+    { id: 'candles', label: 'Candles' },
+    { id: 'news', label: 'News' },
+  ];
+  const activeTab = tabs.some((item) => item.id === tab) ? tab : 'signal';
 
   return (
-    <div>
-      <PageHeader
-        title={title}
-        subtitle={subtitle}
-        meta={
-          data ? (
-            <>
-              <Badge tone="accent">{data.source}</Badge>
-              <Badge tone={data.is_adjusted ? 'positive' : 'warning'}>
-                {data.is_adjusted ? 'adjusted' : 'unadjusted'}
-              </Badge>
-              {data.is_stale ? <Badge tone="warning">stale candle</Badge> : null}
-              {data.history_truncated ? <Badge tone="warning">history truncated</Badge> : null}
-            </>
-          ) : null
-        }
-        actions={
-          symbol ? (
-            <>
-              <Button size="sm" icon="refresh" onClick={refreshAll} loading={analysis.loading}>
-                Refresh
-              </Button>
-              <Button
-                size="sm"
-                variant="primary"
-                icon="plus"
-                loading={watchState.loading}
-                onClick={addToWatchlist}
-              >
-                Add to watchlist
-              </Button>
-            </>
-          ) : null
-        }
-      />
-
-      <Card className="mb-4" title="Instrument" subtitle="All analysis is produced by the FastAPI backend.">
+    <div className="space-y-3">
+      <div className="panel-surface flex flex-wrap items-center justify-between gap-2 px-2 py-1.5">
         <InstrumentForm
           initial={initialQuery}
           allowMarket={variant !== 'crypto'}
@@ -230,32 +213,43 @@ export function AnalysisWorkspace({ variant, title, subtitle }: AnalysisWorkspac
           busy={analysis.loading}
           onSubmit={handleSubmit}
         />
-        {watchState.message ? (
-          <Notice tone="positive" className="mt-3">
-            {watchState.message}
-          </Notice>
-        ) : null}
-        {watchState.error ? (
-          <Notice tone="negative" className="mt-3">
-            {watchState.error}
-          </Notice>
-        ) : null}
-      </Card>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {watchState.message ? (
+            <span className="text-2xs text-terminal-green">{watchState.message}</span>
+          ) : null}
+          {watchState.error ? (
+            <span className="text-2xs text-terminal-red">{watchState.error}</span>
+          ) : null}
+          <Button size="sm" icon="refresh" onClick={refreshAll} loading={analysis.loading}>
+            Refresh
+          </Button>
+          <Button
+            size="sm"
+            variant="primary"
+            icon="plus"
+            loading={watchState.loading}
+            disabled={!symbol}
+            onClick={addToWatchlist}
+          >
+            Watchlist
+          </Button>
+        </div>
+      </div>
 
       {!symbol ? (
         <EmptyState
-          title="Enter an instrument symbol"
-          description="Use the form above or the global search in the top bar. No prices or signals are invented when a request has not been made."
+          title="No Instrument Selected"
+          description="Search a symbol in the top bar or load one above."
           icon="search"
         />
       ) : analysis.loading && !data ? (
-        <LoadingPanel label={`Loading ${symbol} analysis…`} rows={8} />
+        <LoadingPanel label={`Loading ${symbol}`} rows={10} />
       ) : analysis.error ? (
         <ErrorState message={analysis.error} onRetry={analysis.reload} />
       ) : data ? (
-        <div className="space-y-4">
+        <>
           {data.warnings.length > 0 ? (
-            <div className="space-y-2">
+            <div className="space-y-1">
               {data.warnings.map((warning) => (
                 <Notice key={warning} tone="warning">
                   {warning}
@@ -264,68 +258,134 @@ export function AnalysisWorkspace({ variant, title, subtitle }: AnalysisWorkspac
             </div>
           ) : null}
 
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <Stat
-              label="Last close"
-              value={`${formatNumber(data.latest.close, 2)} ${currency}`}
-              hint={`As of ${data.as_of.slice(0, 10)}`}
-            />
-            <Stat
-              label="Change vs prior bar"
-              value={formatPercent(changePercent, 2, true)}
-              tone={
-                toneForNumber(changePercent) === 'positive'
-                  ? 'positive'
-                  : toneForNumber(changePercent) === 'negative'
-                    ? 'negative'
-                    : 'neutral'
-              }
-              hint="Derived from the two latest backend candles"
-            />
-            <Stat label="Volume" value={formatNumber(data.latest.volume, 0)} hint={data.interval} />
-            <Stat
-              label="History"
-              value={`${data.candles.length} bars`}
-              hint={data.history_pages ? `${data.history_pages} provider pages` : 'Provider dependent'}
+          <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <h1 className="text-lg font-semibold leading-none tracking-tight text-terminal-text">
+                  {symbol}
+                </h1>
+                {companyName ? (
+                  <span className="truncate text-xs text-terminal-muted">{companyName}</span>
+                ) : null}
+                <Badge tone="accent">{exchange}</Badge>
+                <Badge>{market === 'india' ? 'India' : market === 'crypto' ? 'Crypto' : 'Global'}</Badge>
+                <Badge tone={data.is_adjusted ? 'positive' : 'warning'}>
+                  {data.is_adjusted ? 'Adjusted' : 'Unadjusted'}
+                </Badge>
+                {data.is_stale ? <Badge tone="warning">Stale</Badge> : null}
+              </div>
+              <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <span className="num text-xl font-semibold leading-none text-terminal-text">
+                  {formatNumber(last, priceDigits(last))}
+                  <span className="ml-1 text-2xs font-normal text-terminal-muted">{currency}</span>
+                </span>
+                <span
+                  className={cn(
+                    'num text-xs font-medium',
+                    changeTone === 'positive'
+                      ? 'text-terminal-green'
+                      : changeTone === 'negative'
+                        ? 'text-terminal-red'
+                        : 'text-terminal-muted',
+                  )}
+                >
+                  {change === null ? '—' : formatSignedFixed(change, changeDigits(change))}
+                  {'  '}
+                  {formatPercent(changePct, 2, true)}
+                </span>
+                <span className="text-2xs text-terminal-muted">
+                  {intervalLabel(interval)} · As of {formatDate(data.as_of)}
+                </span>
+              </div>
+            </div>
+
+            <TimeframeSelector
+              options={timeframesFor(market)}
+              value={interval}
+              onChange={changeTimeframe}
             />
           </div>
 
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-            <Card
-              className="xl:col-span-8"
-              title="Price chart"
-              subtitle="Candles and volume from the backend. Indicator overlays use the latest backend-computed values."
-              actions={
-                <div className="flex flex-wrap gap-1.5">
-                  <ToggleChip
-                    active={overlays.sma}
-                    onClick={() => setOverlays((previous) => ({ ...previous, sma: !previous.sma }))}
-                  >
-                    SMA
-                  </ToggleChip>
-                  <ToggleChip
-                    active={overlays.ema}
-                    onClick={() => setOverlays((previous) => ({ ...previous, ema: !previous.ema }))}
-                  >
-                    EMA
-                  </ToggleChip>
-                  <ToggleChip
-                    active={overlays.bollinger}
-                    onClick={() =>
-                      setOverlays((previous) => ({ ...previous, bollinger: !previous.bollinger }))
-                    }
-                  >
-                    Bollinger
-                  </ToggleChip>
-                  <ToggleChip active={showRsi} onClick={() => setShowRsi((value) => !value)}>
-                    RSI pane
-                  </ToggleChip>
-                  <ToggleChip active={showMacd} onClick={() => setShowMacd((value) => !value)}>
-                    MACD pane
-                  </ToggleChip>
+          <section className="panel-surface">
+            <header className="flex flex-wrap items-center justify-between gap-2 border-b border-terminal-border px-3 py-1.5">
+              <h2 className="text-xs font-semibold text-terminal-text">Technical Analysis</h2>
+              <span className="truncate text-2xs text-terminal-muted">
+                {technicals.data ? `${technicals.data.source} · ${intervalLabel(interval)}` : intervalLabel(interval)}
+              </span>
+            </header>
+            <div className="px-3 py-3">
+              {technicals.data ? (
+                <div className="grid grid-cols-1 items-end gap-4 sm:grid-cols-3">
+                  <div className="flex justify-center">
+                    <TechnicalGauge label="Oscillators" summary={technicals.data.summary.oscillators} />
+                  </div>
+                  <div className="flex justify-center">
+                    <TechnicalGauge
+                      label="Summary"
+                      summary={technicals.data.summary.overall}
+                      size="hero"
+                    />
+                  </div>
+                  <div className="flex justify-center">
+                    <TechnicalGauge
+                      label="Moving Averages"
+                      summary={technicals.data.summary.moving_averages}
+                    />
+                  </div>
                 </div>
-              }
-            >
+              ) : technicals.error ? (
+                <ErrorState message={technicals.error} onRetry={technicals.reload} />
+              ) : (
+                <LoadingPanel label="Loading Technical Summary" rows={3} />
+              )}
+            </div>
+          </section>
+
+          {technicals.data ? (
+            <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+              <TechnicalTable title="Oscillators" rows={technicals.data.oscillators} />
+              <TechnicalTable title="Moving Averages" rows={technicals.data.moving_averages} />
+            </div>
+          ) : null}
+
+          <section className="panel-surface">
+            <header className="flex flex-wrap items-center justify-between gap-2 border-b border-terminal-border px-3 py-1.5">
+              <div className="flex items-baseline gap-2">
+                <h2 className="text-xs font-semibold text-terminal-text">Price Chart</h2>
+                <span className="text-2xs text-terminal-muted">
+                  {intervalLabel(interval)} · {data.candles.length} Bars
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-1">
+                <ToggleChip
+                  active={overlays.sma}
+                  onClick={() => setOverlays((previous) => ({ ...previous, sma: !previous.sma }))}
+                >
+                  SMA
+                </ToggleChip>
+                <ToggleChip
+                  active={overlays.ema}
+                  onClick={() => setOverlays((previous) => ({ ...previous, ema: !previous.ema }))}
+                >
+                  EMA
+                </ToggleChip>
+                <ToggleChip
+                  active={overlays.bollinger}
+                  onClick={() =>
+                    setOverlays((previous) => ({ ...previous, bollinger: !previous.bollinger }))
+                  }
+                >
+                  Bollinger
+                </ToggleChip>
+                <ToggleChip active={showRsi} onClick={() => setShowRsi((value) => !value)}>
+                  RSI
+                </ToggleChip>
+                <ToggleChip active={showMacd} onClick={() => setShowMacd((value) => !value)}>
+                  MACD
+                </ToggleChip>
+              </div>
+            </header>
+            <div className="px-1.5 py-1.5">
               <PriceChart
                 candles={data.candles}
                 series={indicatorSeries.data?.series ?? null}
@@ -334,109 +394,75 @@ export function AnalysisWorkspace({ variant, title, subtitle }: AnalysisWorkspac
                 showRsi={showRsi}
                 showMacd={showMacd}
                 intraday={intraday}
-                height={430}
+                height={360}
               />
-              {indicatorSeries.error ? (
-                <Notice tone="warning" className="mt-2">
-                  Indicator series unavailable ({indicatorSeries.error}). Price and volume still
-                  render; RSI/MACD panes are hidden.
-                </Notice>
-              ) : null}
-              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-terminal-muted">
-                <span>SMA 20 / 50 / 200 and EMA / Bollinger lines are latest backend values.</span>
-                <span>Volume bars use backend OHLCV.</span>
-              </div>
-            </Card>
-
-            <div className="xl:col-span-4">
-              <SignalCard signal={data.strategy} currency={currency} />
             </div>
-          </div>
+            {indicatorSeries.error ? (
+              <p className="border-t border-terminal-border px-3 py-1.5 text-2xs text-terminal-amber">
+                Indicator Series Unavailable · RSI and MACD Panes Hidden
+              </p>
+            ) : null}
+          </section>
 
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-            <IndicatorPanel
-              className="xl:col-span-6"
-              indicators={data.indicators}
-              close={data.latest.close}
+          <Tabs items={tabs} active={activeTab} onChange={setTab} />
+
+          {activeTab === 'signal' ? (
+            <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+              <SignalCard signal={data.strategy} currency={currency} />
+              <Card title="Latest Bar" subtitle={intervalLabel(interval)}>
+                <dl className="divide-y divide-terminal-borderSoft">
+                  <KeyValue label="Open" value={formatNumber(data.latest.open, priceDigits(last))} />
+                  <KeyValue label="High" value={formatNumber(data.latest.high, priceDigits(last))} />
+                  <KeyValue label="Low" value={formatNumber(data.latest.low, priceDigits(last))} />
+                  <KeyValue label="Close" value={formatNumber(data.latest.close, priceDigits(last))} />
+                  <KeyValue label="Volume" value={formatNumber(data.latest.volume, 0)} />
+                  <KeyValue label="Prior Close" value={formatNumber(previousClose, priceDigits(last))} />
+                  <KeyValue label="History" value={`${data.candles.length} Bars`} />
+                  <KeyValue label="Source" value={data.source} />
+                </dl>
+              </Card>
+            </div>
+          ) : null}
+
+          {activeTab === 'risk' ? (
+            <RiskCalculator
+              entry={data.strategy.entry_reference ?? data.latest.close}
+              stop={data.strategy.stop_reference}
+              currency={currency}
             />
+          ) : null}
+
+          {activeTab === 'indicators' ? (
+            <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+              <IndicatorPanel indicators={data.indicators} close={data.latest.close} />
+              <Card title="Indicator Values" subtitle="Latest Completed Bar">
+                <IndicatorTable indicators={data.indicators} />
+              </Card>
+            </div>
+          ) : null}
+
+          {activeTab === 'candles' ? (
             <Card
-              className="xl:col-span-6"
-              title="Indicator table"
-              subtitle="Every indicator returned by the backend for the latest completed bar."
+              title="Recent Candles"
+              subtitle={`Last ${Math.min(30, data.candles.length)} Bars · ${intervalLabel(interval)}`}
             >
-              <IndicatorTable indicators={data.indicators} />
+              <CandleTable candles={data.candles} limit={30} />
             </Card>
-          </div>
+          ) : null}
 
-          <Card
-            title="Recent candles"
-            subtitle={`Last ${Math.min(30, data.candles.length)} bars · ${data.interval}`}
-          >
-            <CandleTable candles={data.candles} limit={30} />
-          </Card>
-
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-            <Card
-              className="xl:col-span-6"
-              title="Company / asset news"
-              subtitle="Provider-returned items only. Open and verify each original publisher link."
-            >
+          {activeTab === 'news' ? (
+            <Card title="News" subtitle="Provider Records">
               {news.loading ? (
-                <LoadingPanel label="Loading news…" rows={4} />
+                <LoadingPanel label="Loading News" rows={4} />
               ) : news.error ? (
                 <ErrorState message={news.error} onRetry={news.reload} />
               ) : (
                 <NewsList items={news.data?.items ?? []} note={news.data?.note} />
               )}
             </Card>
+          ) : null}
 
-            <Card
-              className="xl:col-span-6"
-              title="Events & filings"
-              subtitle="Structured provider records plus links to official exchange sources."
-            >
-              {events.loading ? (
-                <LoadingPanel label="Loading events…" rows={3} />
-              ) : events.error ? (
-                <ErrorState message={events.error} onRetry={events.reload} />
-              ) : (
-                <EventsList
-                  events={events.data?.events ?? []}
-                  links={events.data?.official_source_links ?? []}
-                  providerError={events.data?.provider_error ?? null}
-                  note={events.data?.note}
-                />
-              )}
-            </Card>
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-            <div className="xl:col-span-6">
-              <RiskCalculator
-                entry={data.strategy.entry_reference ?? data.latest.close}
-                stop={data.strategy.stop_reference}
-                currency={currency}
-              />
-            </div>
-
-            {market === 'global' ? (
-              <div className="xl:col-span-6">
-                <SecFilingsPanel />
-              </div>
-            ) : market === 'crypto' ? (
-              <Card className="xl:col-span-6" title="Crypto market context">
-                <Notice>
-                  Binance Spot candles and the backend strategy are shown above. CoinGecko aggregate
-                  market metadata is available on the Markets page when a demo API key is configured.
-                </Notice>
-              </Card>
-            ) : (
-              <div className="xl:col-span-6">
-                <FundamentalsPanel symbol={symbol} market={market} exchange={exchange} />
-              </div>
-            )}
-          </div>
-        </div>
+        </>
       ) : null}
     </div>
   );

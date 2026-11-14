@@ -23,12 +23,10 @@ export function Stat({
   } as const;
 
   return (
-    <div className={cn('panel-surface px-4 py-3', className)}>
-      <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-terminal-muted">
-        {label}
-      </p>
-      <p className={cn('num mt-1 text-xl font-semibold tracking-tight', tones[tone])}>{value}</p>
-      {hint ? <p className="mt-0.5 text-xs text-terminal-muted">{hint}</p> : null}
+    <div className={cn('panel-surface px-3 py-2', className)}>
+      <p className="text-2xs text-terminal-muted">{label}</p>
+      <p className={cn('num mt-0.5 text-base font-semibold', tones[tone])}>{value}</p>
+      {hint ? <p className="mt-0.5 text-2xs text-terminal-muted">{hint}</p> : null}
     </div>
   );
 }
@@ -43,9 +41,9 @@ export function KeyValue({
   className?: string;
 }) {
   return (
-    <div className={cn('flex items-baseline justify-between gap-3 py-1.5', className)}>
-      <dt className="text-xs text-terminal-muted">{label}</dt>
-      <dd className="num text-right text-xs font-medium text-terminal-text">{value}</dd>
+    <div className={cn('flex items-baseline justify-between gap-3 py-1', className)}>
+      <dt className="text-2xs text-terminal-muted">{label}</dt>
+      <dd className="num text-right text-2xs font-medium text-terminal-text">{value}</dd>
     </div>
   );
 }

@@ -1,11 +1,21 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useApiStatus } from '../../contexts/ApiStatusContext';
-import { cn } from '../../utils/format';
-import { Button } from '../common/Button';
-import { Icon } from '../common/Icon';
+import { useSelectedInstrument } from '../../contexts/SelectedInstrumentContext';
 import type { Market } from '../../types/api';
+import { changeDigits, cn, formatNumber, formatPercent, formatSignedFixed, toneForNumber } from '../../utils/format';
+import { Icon } from '../common/Icon';
+
+const navigation = [
+  { to: '/', label: 'Dashboard', end: true },
+  { to: '/markets', label: 'Markets' },
+  { to: '/stocks', label: 'Stocks' },
+  { to: '/crypto', label: 'Crypto' },
+  { to: '/portfolio', label: 'Portfolio' },
+  { to: '/backtesting', label: 'Backtesting' },
+  { to: '/settings', label: 'Settings' },
+];
 
 const marketOptions: Array<{ value: Market; label: string }> = [
   { value: 'india', label: 'India' },
@@ -13,19 +23,30 @@ const marketOptions: Array<{ value: Market; label: string }> = [
   { value: 'crypto', label: 'Crypto' },
 ];
 
-function statusTone(error: string | null, loading: boolean): string {
-  if (error) {
-    return 'text-terminal-red';
-  }
-  if (loading) {
-    return 'text-terminal-amber';
-  }
-  return 'text-terminal-green';
+function priceDigits(value: number | null): number {
+  if (value === null) return 2;
+  if (value >= 1000) return 2;
+  if (value >= 1) return 4;
+  return 6;
 }
 
-export function TopBar({ onOpenMenu }: { onOpenMenu: () => void }) {
+function toneClass(value: number | null): string {
+  const tone = toneForNumber(value);
+  if (tone === 'positive') return 'text-terminal-green';
+  if (tone === 'negative') return 'text-terminal-red';
+  return 'text-terminal-muted';
+}
+
+export function TopBar({
+  onOpenMenu,
+  onOpenWatchlist,
+}: {
+  onOpenMenu: () => void;
+  onOpenWatchlist: () => void;
+}) {
   const navigate = useNavigate();
   const { health, healthLoading, healthError, refresh } = useApiStatus();
+  const selected = useSelectedInstrument();
   const [symbol, setSymbol] = useState('');
   const [market, setMarket] = useState<Market>('india');
 
@@ -41,44 +62,99 @@ export function TopBar({ onOpenMenu }: { onOpenMenu: () => void }) {
     setSymbol('');
   }
 
+  const quote = selected.quote;
   const statusLabel = healthError
-    ? 'API offline'
+    ? 'Offline'
     : healthLoading
-      ? 'Checking API…'
+      ? 'Checking'
       : health
-        ? `API ${health.status}`
-        : 'API unknown';
+        ? 'Online'
+        : 'Unknown';
+  const statusTone = healthError
+    ? 'text-terminal-red'
+    : healthLoading
+      ? 'text-terminal-amber'
+      : 'text-terminal-green';
 
   return (
-    <header className="sticky top-0 z-20 border-b border-terminal-border bg-terminal-bg/95 backdrop-blur">
-      <div className="flex flex-wrap items-center gap-3 px-4 py-3 lg:px-6">
-        <button
-          type="button"
-          onClick={onOpenMenu}
-          className="rounded-lg border border-terminal-border p-2 text-terminal-muted hover:text-terminal-text lg:hidden"
-          aria-label="Open navigation menu"
-        >
-          <Icon name="menu" size={16} />
-        </button>
+    <header className="z-30 flex h-11 shrink-0 items-center gap-2 border-b border-terminal-border bg-terminal-panel px-2 sm:px-3">
+      <button
+        type="button"
+        onClick={onOpenMenu}
+        className="rounded p-1.5 text-terminal-muted hover:bg-white/[0.05] hover:text-terminal-text xl:hidden"
+        aria-label="Open Navigation"
+      >
+        <Icon name="menu" size={15} />
+      </button>
 
-        <form onSubmit={submit} className="flex min-w-0 flex-1 items-center gap-2">
-          <div className="relative min-w-0 flex-1 sm:max-w-xs">
-            <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-terminal-muted">
-              <Icon name="search" size={15} />
+      <Link to="/" className="flex shrink-0 items-center gap-1.5">
+        <span className="flex h-6 w-6 items-center justify-center rounded-sm bg-terminal-accent text-white">
+          <Icon name="chart" size={14} />
+        </span>
+        <span className="text-[13px] font-semibold tracking-tight text-terminal-text">Tradely</span>
+      </Link>
+
+      <nav className="ml-1 hidden items-center gap-0.5 xl:flex" aria-label="Main Navigation">
+        {navigation.map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.end}
+            className={({ isActive }) =>
+              cn(
+                'rounded px-2 py-1 text-[11px] font-medium transition-colors',
+                isActive
+                  ? 'bg-[#20242b] text-terminal-text'
+                  : 'text-terminal-muted hover:bg-white/[0.04] hover:text-terminal-text',
+              )
+            }
+          >
+            {item.label}
+          </NavLink>
+        ))}
+      </nav>
+
+      <div className="ml-auto flex min-w-0 items-center gap-2">
+        <div className="hidden items-center gap-2 border-r border-terminal-border pr-3 lg:flex">
+          {selected.enabled ? (
+            <>
+              <span className="text-xs font-semibold text-terminal-text">{selected.symbol}</span>
+              <span className="num text-xs text-terminal-text">
+                {quote ? formatNumber(quote.last, priceDigits(quote.last)) : '—'}
+              </span>
+              <span className={cn('num text-2xs', toneClass(quote?.change ?? null))}>
+                {quote?.change === null || quote?.change === undefined
+                  ? '—'
+                  : formatSignedFixed(quote.change, changeDigits(quote.change))}
+              </span>
+              <span className={cn('num text-2xs', toneClass(quote?.changePct ?? null))}>
+                {formatPercent(quote?.changePct ?? null, 2, true)}
+              </span>
+            </>
+          ) : (
+            <span className="text-2xs text-terminal-muted">No Instrument Selected</span>
+          )}
+        </div>
+
+        <form onSubmit={submit} className="flex min-w-0 items-center gap-1">
+          <div className="relative min-w-0 flex-1 sm:w-52">
+            <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-terminal-muted">
+              <Icon name="search" size={13} />
             </span>
             <input
               value={symbol}
               onChange={(event) => setSymbol(event.target.value)}
-              placeholder="Symbol, e.g. RELIANCE or BTCUSDT"
-              aria-label="Instrument symbol"
-              className="h-9 w-full rounded-lg border border-terminal-border bg-terminal-panelAlt pl-8 pr-3 text-sm text-terminal-text placeholder:text-terminal-muted/70 focus:border-[#40598f] focus:outline-none focus:ring-1 focus:ring-[#40598f]"
+              placeholder="Search Symbol"
+              aria-label="Instrument Symbol"
+              autoComplete="off"
+              className="h-7 w-full rounded-sm border border-terminal-border bg-terminal-panelAlt pl-7 pr-2 text-xs text-terminal-text placeholder:text-terminal-muted/70 focus:border-terminal-accent focus:outline-none"
             />
           </div>
           <select
             value={market}
             onChange={(event) => setMarket(event.target.value as Market)}
-            aria-label="Market"
-            className="h-9 rounded-lg border border-terminal-border bg-terminal-panelAlt px-2 text-xs text-terminal-text focus:border-[#40598f] focus:outline-none"
+            aria-label="Search Market"
+            className="hidden h-7 rounded-sm border border-terminal-border bg-terminal-panelAlt px-1 text-2xs text-terminal-text focus:border-terminal-accent focus:outline-none sm:block"
           >
             {marketOptions.map((option) => (
               <option key={option.value} value={option.value}>
@@ -86,31 +162,36 @@ export function TopBar({ onOpenMenu }: { onOpenMenu: () => void }) {
               </option>
             ))}
           </select>
-          <Button type="submit" size="sm" variant="primary" className="h-9">
-            Load
-          </Button>
+          <button
+            type="submit"
+            aria-label="Load Instrument"
+            title="Load Instrument"
+            className="flex h-7 w-7 items-center justify-center rounded-sm border border-terminal-border text-terminal-muted hover:border-terminal-accent hover:text-terminal-text"
+          >
+            <Icon name="arrowUp" size={13} />
+          </button>
         </form>
 
-        <div className="flex items-center gap-2">
-          <span
-            className={cn(
-              'flex items-center gap-1.5 rounded-full border border-terminal-border px-2.5 py-1 text-[11px]',
-              statusTone(healthError, healthLoading),
-            )}
-            title={healthError ?? (health ? `Mode: ${health.mode}` : 'Waiting for the backend')}
-          >
-            <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" />
-            {statusLabel}
-          </span>
-          <button
-            type="button"
-            onClick={refresh}
-            className="rounded-lg border border-terminal-border p-2 text-terminal-muted transition-colors hover:text-terminal-text"
-            aria-label="Refresh API status"
-          >
-            <Icon name="refresh" size={15} />
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={refresh}
+          title={healthError ?? (health ? `${health.application} · ${health.mode}` : 'Backend Status')}
+          aria-label="Refresh Backend Status"
+          className="flex items-center gap-1.5 rounded-sm px-1.5 py-1 hover:bg-white/[0.05]"
+        >
+          <span className={cn('h-1.5 w-1.5 rounded-full bg-current', statusTone)} aria-hidden="true" />
+          <span className={cn('hidden text-2xs 2xl:inline', statusTone)}>{statusLabel}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={onOpenWatchlist}
+          className="rounded p-1.5 text-terminal-muted hover:bg-white/[0.05] hover:text-terminal-text xl:hidden"
+          aria-label="Open Watchlist"
+          title="Open Watchlist"
+        >
+          <Icon name="portfolio" size={15} />
+        </button>
       </div>
     </header>
   );
