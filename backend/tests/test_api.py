@@ -165,6 +165,25 @@ def test_intraday_analysis_evaluates_signals_instead_of_returning_insufficient_d
     assert body["strategy"]["conditions"]
 
 
+def test_completed_weekly_and_monthly_bars_use_interval_aware_freshness():
+    from datetime import timedelta
+
+    import pandas as pd
+
+    from app.api.routes import _is_stale
+
+    now = pd.Timestamp.now(tz="UTC")
+    weekly = pd.DataFrame({"close": [1.0]}, index=pd.DatetimeIndex([now - timedelta(days=7)]))
+    monthly = pd.DataFrame({"close": [1.0]}, index=pd.DatetimeIndex([now - timedelta(days=45)]))
+    old_weekly = pd.DataFrame({"close": [1.0]}, index=pd.DatetimeIndex([now - timedelta(days=15)]))
+    old_monthly = pd.DataFrame({"close": [1.0]}, index=pd.DatetimeIndex([now - timedelta(days=63)]))
+
+    assert _is_stale(weekly, "crypto", "1wk") is False
+    assert _is_stale(monthly, "crypto", "1mo") is False
+    assert _is_stale(old_weekly, "crypto", "1wk") is True
+    assert _is_stale(old_monthly, "crypto", "1mo") is True
+
+
 def test_technicals_endpoint_classifies_existing_values_without_writing_signals(monkeypatch):
     import numpy as np
     import pandas as pd

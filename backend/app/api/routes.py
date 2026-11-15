@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncIterator
 
 import pandas as pd
@@ -55,13 +55,19 @@ def _to_json_records(
     return selected.reset_index(names="timestamp").to_dict(orient="records")
 
 
-def _is_stale(frame: pd.DataFrame, market: str) -> bool:
+def _is_stale(frame: pd.DataFrame, market: str, interval: str = "1d") -> bool:
     if frame.empty:
         return True
     age = pd.Timestamp.now(tz="UTC") - frame.index[-1]
     # Daily EOD candle timestamps are often session-date labels, not close timestamps.
-    threshold_hours = 48 if market == "crypto" else 120
-    return age > pd.Timedelta(hours=threshold_hours)
+    if interval == "1wk":
+        threshold = timedelta(days=14)
+    elif interval == "1mo":
+        threshold = timedelta(days=62)
+    else:
+        threshold_hours = 48 if market == "crypto" else 120
+        threshold = timedelta(hours=threshold_hours)
+    return age > threshold
 
 
 def _scan_identity(item: dict[str, Any]) -> dict[str, Any]:
@@ -177,7 +183,7 @@ def candles(
     except (ProviderError, ValueError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     latest = frame.index[-1].to_pydatetime()
-    stale = _is_stale(frame, market)
+    stale = _is_stale(frame, market, interval)
     return {
         "symbol": symbol, "market": market, "exchange": exchange, "interval": interval,
         "instrument": instrument,
@@ -201,7 +207,7 @@ def scan_watchlist(request: Request) -> dict[str, Any]:
                 interval="1d", days=500, provider="auto",
             )
             signal = evaluate_trend_breakout(frame, symbol=item["symbol"], market=item["market"], source=source)
-            stale = _is_stale(frame, item["market"])
+            stale = _is_stale(frame, item["market"], "1d")
             adjusted = bool(frame.attrs.get("is_adjusted", False))
             if stale:
                 signal.state = "STALE_DATA"
@@ -264,7 +270,7 @@ def analyze(
         position_side=position_side,
     )
     adjusted = bool(frame.attrs.get("is_adjusted", False))
-    stale = _is_stale(frame, market)
+    stale = _is_stale(frame, market, interval)
     warnings = []
     if stale:
         warnings.append("Latest candle is stale for this market; actionable signal output is suppressed.")
@@ -335,7 +341,7 @@ def indicator_series(
         "symbol": symbol, "market": market, "exchange": exchange, "interval": interval,
         "instrument": instrument,
         "source": source, "is_adjusted": bool(frame.attrs.get("is_adjusted", False)),
-        "is_stale": _is_stale(frame, market),
+        "is_stale": _is_stale(frame, market, interval),
         "as_of": frame.index[-1].isoformat(),
         "count": len(records),
         "series": records,
@@ -382,7 +388,7 @@ def technical_summary(
         "interval": interval,
         "source": source,
         "is_adjusted": bool(frame.attrs.get("is_adjusted", False)),
-        "is_stale": _is_stale(frame, market),
+        "is_stale": _is_stale(frame, market, interval),
         "as_of": frame.index[-1].isoformat(),
         **payload,
     }
@@ -452,7 +458,7 @@ def backtest_trend_breakout(request: Request, payload: BacktestRequest) -> dict[
             symbol, market=market, exchange=exchange, interval=payload.interval,
             days=payload.days, provider=payload.provider, full_history=False,
         )
-        if _is_stale(frame, market):
+        if _is_stale(frame, market, payload.interval):
             raise HTTPException(
                 status_code=409,
                 detail="Backtest refused: the latest candle is stale for this market. Refresh data before evaluating results.",
@@ -645,7 +651,7 @@ def instrument_history(
         "interval": selected,
         "source": source,
         "is_adjusted": bool(frame.attrs.get("is_adjusted", False)),
-        "is_stale": _is_stale(frame, instrument["market"]),
+        "is_stale": _is_stale(frame, instrument["market"], selected),
         "count": len(frame),
         "candles": _to_json_records(frame),
     }

@@ -42,12 +42,7 @@ export function timeframesFor(market: Market): TimeframeOption[] {
   return market === 'crypto' ? CRYPTO_TIMEFRAMES : EQUITY_TIMEFRAMES;
 }
 
-const ALL_TIMEFRAMES: TimeframeOption[] = [
-  ...EQUITY_TIMEFRAMES,
-  ...CRYPTO_TIMEFRAMES.filter(
-    (option) => !EQUITY_TIMEFRAMES.some((existing) => existing.id === option.id),
-  ),
-];
+const ALL_TIMEFRAMES = CRYPTO_TIMEFRAMES;
 
 /** Timeframes exposed by the verified provider for one resolved instrument. */
 export function timeframesForIntervals(intervals: string[] | null | undefined): TimeframeOption[] {

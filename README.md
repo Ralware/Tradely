@@ -28,7 +28,7 @@ This repository now contains a **runnable local application foundation**, not ju
 - TradingView symbol metadata (`pricescale`/`minmov`, currency, session) and scanner technical ratings exposed through the bridge.
 - Deterministic SMA, EMA, Wilder-seeded RSI/ATR/ADX, MACD, Bollinger Bands, Donchian channels, relative volume, OBV, session VWAP (intraday bars only; deliberately unavailable on daily bars), MFI, CMF, CCI and Stochastic RSI calculations.
 - One versioned daily trend/Donchian strategy with selectable long-only, short-only and long/short research modes. `BUY` opens a long, `SELL` exits an existing long, `SELL_SHORT` opens a short research exposure, and `BUY_TO_COVER` exits an existing short. Signals use completed candles only and never place orders.
-- Signal suppression when daily strategy data is stale or TradingView does not confirm split-adjusted history.
+- Signal suppression when selected-interval strategy data is stale or TradingView does not confirm split-adjusted history.
 - Direction-aware ATR-based position sizing and a single-instrument daily backtest with next-bar-open execution assumptions, configurable aggregate basis-point costs and explicit LONG/SHORT trade records.
 - A news endpoint kept for client compatibility that explicitly returns an empty result because no news provider is bundled.
 - Manual exposure ledger with explicit BUY, SELL, SELL_SHORT and BUY_TO_COVER intents and separate FIFO long/short lots. Short rows are research/manual exposure only; the system makes no claim of exchange execution, borrowing, margin, collateral or funding. The owner enters a monetary reference notional; the backend validates a provider quote, derives quantity and stores the reference price. Invalid oversells, over-covers, reversals and deletions that would invalidate the ledger are rejected. No order placement or paper-trading account is provided.
@@ -230,7 +230,7 @@ frontend/
 
 ### Data and execution semantics
 
-- The first strategy is daily-only. Intraday indicators can be inspected from sources that provide completed intraday candles, but the daily strategy is not applied to those intervals.
+- The strategy is evaluated on completed bars of whichever interval is selected. It requires at least 220 completed bars, so the analysis, chart and history views load the maximum history TradingView exposes for that timeframe instead of a fixed cap.
 - TradingView's active, still-forming candle is excluded. Analysis, chart and history requests load the maximum number of bars TradingView exposes for the chosen symbol and timeframe; the library pages through deep history until the server reports no more bars. Bars are requested split-adjusted, and provider timestamps and market sessions can still vary by exchange.
 - Session VWAP is only calculated when the input spacing is intraday. Daily OHLCV bars do not contain the intraday volume distribution, so daily session VWAP is returned as unavailable rather than approximated from typical price.
 - The single-instrument backtest evaluates completed daily signals and uses next-bar open entries/exits for close-based conditions. Protective stops are checked against candle ranges and gaps are filled at the bar open when that is worse than the stop. Intrabar path, queue position, liquidity impact and exchange-auction mechanics remain approximate.
