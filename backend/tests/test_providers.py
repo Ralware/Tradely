@@ -1,14 +1,14 @@
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, date, datetime
+from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
 import pytest
 from app.core.config import Settings
-from app.providers.base import ProviderError
-from app.providers.market_data import BinanceSpotProvider, TejHQProvider, YahooFinanceProvider
-from app.providers.news import GDELTNewsProvider
+from app.core.instruments import TRADINGVIEW_PROVIDER
+from app.providers.base import ProviderError, normalize_candles
+from app.providers.tradingview import TradingViewProvider
 from app.services.market import MarketService, _CandleCache
 
 
@@ -16,137 +16,145 @@ class FakeResponse:
     def __init__(self, payload, status_code=200):
         self._payload = payload
         self.status_code = status_code
-
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise RuntimeError(f"HTTP {self.status_code}")
+        self.text = str(payload)
 
     def json(self):
         return self._payload
 
 
-def test_tejhq_adjusted_daily_adapter(monkeypatch):
+def candle_row(timestamp, close=104.0, volume=1000):
+    return {
+        "time": int(pd.Timestamp(timestamp).timestamp()),
+        "open": close - 4,
+        "high": close + 1,
+        "low": close - 5,
+        "close": close,
+        "volume": volume,
+    }
+
+
+def test_tradingview_candle_adapter_uses_exchange_symbol_and_split_adjustment(monkeypatch):
     captured = {}
-    def fake_get(url, **kwargs):
+
+    def fake_get(url, params=None, timeout=None):
         captured["url"] = url
-        captured.update(kwargs)
-        return FakeResponse({"data": [{
-            "date": "2026-11-10", "open": 100, "high": 105, "low": 99,
-            "close": 104, "volume": 1000,
-        }]})
-    monkeypatch.setattr("app.providers.market_data.httpx.get", fake_get)
-    settings = Settings(_env_file=None, tejhq_api_key="tej_live_test")
-    frame = TejHQProvider(settings).fetch_candles(
+        captured["params"] = params
+        captured["timeout"] = timeout
+        return FakeResponse({"candles": [candle_row("2026-11-10T00:00:00Z")]})
+
+    monkeypatch.setattr("app.providers.tradingview.httpx.get", fake_get)
+    provider = TradingViewProvider(Settings(_env_file=None))
+    frame = provider.fetch_candles(
         "RELIANCE", market="india", exchange="NSE", interval="1d",
         start=date(2026, 1, 1), end=date(2026, 11, 10),
     )
-    assert captured["url"].endswith("/v1/adjusted/nse/RELIANCE")
-    assert captured["headers"]["Authorization"] == "Bearer tej_live_test"
-    assert frame.iloc[-1]["close"] == 104
+
+    assert captured["url"].endswith("/candles")
+    assert captured["params"]["symbol"] == "NSE:RELIANCE"
+    assert captured["params"]["timeframe"] == "D"
+    assert captured["params"]["adjustment"] == "splits"
+    assert captured["params"]["from"] == int(pd.Timestamp("2026-01-01", tz="UTC").timestamp())
+    assert captured["params"]["to"] == int(pd.Timestamp("2026-11-11", tz="UTC").timestamp()) - 1
+    assert "count" not in captured["params"]
+    assert frame.iloc[-1]["close"] == 104.0
     assert frame.attrs["is_adjusted"] is True
+    assert frame.attrs["provider_symbol"] == "NSE:RELIANCE"
+    assert frame.attrs["source"] == TRADINGVIEW_PROVIDER
 
 
-def test_tejhq_refuses_intraday_intervals():
-    provider = TejHQProvider(Settings(_env_file=None))
-    with pytest.raises(ProviderError, match="daily EOD"):
-        provider.fetch_candles("RELIANCE", market="india", exchange="NSE", interval="5m",
-                               start=None, end=None)
-
-
-def test_tejhq_uses_keyless_raw_endpoint_without_api_key(monkeypatch):
+def test_tradingview_candle_adapter_requests_maximum_history_when_no_range(monkeypatch):
     captured = {}
 
-    def fake_get(url, **kwargs):
-        captured["url"] = url
-        captured.update(kwargs)
-        return FakeResponse({"data": [{
-            "date": "2026-11-10", "open": 100, "high": 105, "low": 99,
-            "close": 104, "volume": 1000,
-        }]})
+    def fake_get(url, params=None, timeout=None):
+        captured["params"] = params
+        return FakeResponse({"candles": [candle_row("2026-11-10T00:00:00Z")]})
 
-    monkeypatch.setattr("app.providers.market_data.httpx.get", fake_get)
-    frame = TejHQProvider(Settings(_env_file=None)).fetch_candles(
-        "RELIANCE", market="india", exchange="NSE", interval="1d", start=None, end=None,
+    monkeypatch.setattr("app.providers.tradingview.httpx.get", fake_get)
+    frame = TradingViewProvider(Settings(_env_file=None)).fetch_candles(
+        "AAPL", market="global", exchange="NASDAQ", interval="1d",
+        start=None, end=None,
     )
-    assert captured["url"].endswith("/v1/ohlcv/nse/RELIANCE")
-    assert captured["headers"] == {}
-    assert frame.attrs["is_adjusted"] is False
+
+    assert captured["params"]["count"] == 1_000_000
+    assert "from" not in captured["params"]
+    assert "to" not in captured["params"]
+    assert len(frame) == 1
 
 
-def test_binance_spot_candle_normalization(monkeypatch):
-    old = int(pd.Timestamp("2025-01-01T00:00:00Z").timestamp() * 1000)
-    payload = [
-        [old, "100", "105", "99", "103", "1000", old + 59_999],
-        [old + 60_000, "103", "107", "102", "106", "1200", old + 119_999],
+def test_tradingview_rejects_unsupported_interval():
+    provider = TradingViewProvider(Settings(_env_file=None))
+    with pytest.raises(ProviderError, match="Unsupported TradingView interval"):
+        provider.fetch_candles(
+            "AAPL", market="global", exchange="NASDAQ", interval="2d",
+            start=None, end=None,
+        )
+
+
+def test_tradingview_requires_an_exchange():
+    provider = TradingViewProvider(Settings(_env_file=None))
+    with pytest.raises(ProviderError, match="exchange-qualified"):
+        provider.fetch_candles(
+            "AAPL", market="global", exchange=None, interval="1d",
+            start=None, end=None,
+        )
+
+
+def test_normalize_candles_keeps_the_full_requested_range():
+    index = pd.date_range("2026-01-01", periods=2600, freq="min", tz="UTC")
+    frame = pd.DataFrame({
+        "open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5, "volume": 10.0,
+    }, index=index)
+    normalized = normalize_candles(frame)
+    assert len(normalized) == len(frame)
+    assert normalized.index[0] == frame.index[0]
+    assert normalized.index[-1] == frame.index[-1]
+
+
+def test_tradingview_drops_the_still_forming_final_candle(monkeypatch):
+    now = pd.Timestamp.now(tz="UTC").floor("min")
+    rows = [
+        candle_row(now - pd.Timedelta(minutes=2), close=100.0),
+        candle_row(now - pd.Timedelta(minutes=1), close=101.0),
+        candle_row(now, close=999.0),
     ]
-    captured = {}
-    def fake_get(url, **kwargs):
-        captured["url"] = url
-        captured.update(kwargs)
-        return FakeResponse(payload)
-    monkeypatch.setattr("app.providers.market_data.httpx.get", fake_get)
-    provider = BinanceSpotProvider(Settings(_env_file=None))
-    frame = provider.fetch_candles("BTCUSDT", market="crypto", exchange="BINANCE", interval="1m",
-                                   start=date(2025, 1, 1), end=date(2025, 1, 2))
-    assert captured["url"].endswith("/api/v3/klines")
-    assert captured["params"]["symbol"] == "BTCUSDT"
+    monkeypatch.setattr(
+        "app.providers.tradingview.httpx.get",
+        lambda *a, **k: FakeResponse({"candles": rows}),
+    )
+    today = datetime.now(timezone.utc).date()
+    frame = TradingViewProvider(Settings(_env_file=None)).fetch_candles(
+        "BTCUSDT", market="crypto", exchange="BINANCE", interval="1m",
+        start=today, end=today,
+    )
     assert len(frame) == 2
-    assert frame.iloc[-1]["close"] == 106
+    assert frame.iloc[-1]["close"] == 101.0
 
 
-def test_binance_paginates_beyond_1000_candles(monkeypatch):
-    first_open = int(pd.Timestamp("2025-01-01T00:00:00Z").timestamp() * 1000)
-    minute = 60_000
-    first_page = [
-        [first_open + i * minute, "100", "101", "99", "100.5", "1000",
-         first_open + (i + 1) * minute - 1]
-        for i in range(1000)
-    ]
-    second_open = first_open + 1000 * minute
-    second_page = [[second_open, "100.5", "102", "100", "101.5", "1500",
-                    second_open + minute - 1]]
-    pages = [first_page, second_page]
-    calls = []
-
-    def fake_get(url, **kwargs):
-        calls.append(kwargs["params"].copy())
-        return FakeResponse(pages[len(calls) - 1])
-
-    monkeypatch.setattr("app.providers.market_data.httpx.get", fake_get)
-    frame = BinanceSpotProvider(Settings(_env_file=None)).fetch_candles(
-        "BTCUSDT", market="crypto", exchange="BINANCE", interval="1m",
-        start=date(2025, 1, 1), end=date(2025, 1, 2),
+def test_tradingview_bridge_http_error_is_actionable(monkeypatch):
+    monkeypatch.setattr(
+        "app.providers.tradingview.httpx.get",
+        lambda *a, **k: FakeResponse({"error": {"message": "symbol not found"}}, status_code=404),
     )
-    assert len(calls) == 2
-    assert calls[1]["startTime"] == first_page[-1][6] + 1
-    assert len(frame) == 1001
-    assert frame.attrs["history_truncated"] is False
+    with pytest.raises(ProviderError, match="HTTP 404: symbol not found"):
+        TradingViewProvider(Settings(_env_file=None)).symbol_info("NASDAQ:MISSING")
 
 
-def test_binance_history_request_is_bounded_to_2500_candles(monkeypatch):
-    first_open = int(pd.Timestamp("2020-01-01T00:00:00Z").timestamp() * 1000)
-    minute = 60_000
-    calls = []
+def test_tradingview_symbol_metadata_and_search(monkeypatch):
+    def fake_get(url, params=None, timeout=None):
+        if url.endswith("/symbol"):
+            assert params == {"symbol": "NSE:RELIANCE"}
+            return FakeResponse({"info": {"pricescale": 100, "minmov": 1, "currency_code": "INR"}})
+        if url.endswith("/search"):
+            assert params == {"q": "RELIANCE", "limit": 5}
+            return FakeResponse({"results": [{"symbol": "RELIANCE", "exchange": "NSE"}]})
+        raise AssertionError(url)
 
-    def fake_get(url, **kwargs):
-        params = kwargs["params"]
-        calls.append(params.copy())
-        offset = sum(call["limit"] for call in calls[:-1])
-        rows = [
-            [first_open + (offset + i) * minute, "100", "101", "99", "100.5", "1000",
-             first_open + (offset + i + 1) * minute - 1]
-            for i in range(params["limit"])
-        ]
-        return FakeResponse(rows)
-
-    monkeypatch.setattr("app.providers.market_data.httpx.get", fake_get)
-    frame = BinanceSpotProvider(Settings(_env_file=None)).fetch_candles(
-        "BTCUSDT", market="crypto", exchange="BINANCE", interval="1m",
-        start=date(2020, 1, 1), end=None,
-    )
-    assert [call["limit"] for call in calls] == [1000, 1000, 501]
-    assert len(frame) == 2500
-    assert frame.attrs["history_truncated"] is True
+    monkeypatch.setattr("app.providers.tradingview.httpx.get", fake_get)
+    provider = TradingViewProvider(Settings(_env_file=None))
+    info = provider.symbol_info("NSE:RELIANCE")
+    results = provider.search("RELIANCE", limit=5)
+    assert info["pricescale"] == 100
+    assert results[0]["exchange"] == "NSE"
 
 
 def test_market_cache_normalizes_identity_and_returns_copies(monkeypatch):
@@ -157,17 +165,20 @@ def test_market_cache_normalizes_identity_and_returns_copies(monkeypatch):
         "open": [2, 1, 3], "high": [3, 2, 4], "low": [1, 0, 2],
         "close": [2, 1, 3], "volume": [20, 10, 30],
     }, index=index)
+    source_frame.attrs["is_adjusted"] = True
 
     def fetch(*args, **kwargs):
         calls.append(kwargs)
         return source_frame
 
-    monkeypatch.setattr(service.yahoo, "fetch_candles", fetch)
+    monkeypatch.setattr(service.tradingview, "fetch_candles", fetch)
     first, source = service.candles("AAPL", market="global", exchange="NASDAQ")
     first.iloc[0, first.columns.get_loc("close")] = -1
-    second, _ = service.candles("aapl", market="global", exchange="nasdaq", provider="yahoo")
+    second, _ = service.candles(
+        "aapl", market="global", exchange="nasdaq", provider="tradingview"
+    )
     assert len(calls) == 1
-    assert source == service.yahoo.name
+    assert source == TRADINGVIEW_PROVIDER
     assert second.index.is_monotonic_increasing
     assert not second.index.has_duplicates
     assert second.iloc[-1]["close"] == 3
@@ -191,7 +202,7 @@ def test_market_cache_deduplicates_concurrent_provider_requests(monkeypatch):
         release.wait(timeout=2)
         return frame
 
-    monkeypatch.setattr(service.yahoo, "fetch_candles", fetch)
+    monkeypatch.setattr(service.tradingview, "fetch_candles", fetch)
     with ThreadPoolExecutor(max_workers=2) as pool:
         first = pool.submit(service.candles, "AAPL", market="global")
         assert entered.wait(timeout=2)
@@ -220,102 +231,21 @@ def test_market_cache_evicts_entries_at_its_capacity():
     assert len(calls) == 3
 
 
-def test_yahoo_crypto_symbol_is_normalized_without_double_hyphen(monkeypatch):
-    import sys
-    from types import SimpleNamespace
-
-    captured = {}
-    index = pd.DatetimeIndex([pd.Timestamp("2025-01-01", tz="UTC")])
-    download_frame = pd.DataFrame({
-        "Open": [100], "High": [105], "Low": [99], "Close": [103], "Volume": [1000],
-    }, index=index)
-
-    def fake_download(ticker, **kwargs):
-        captured["ticker"] = ticker
-        return download_frame
-
-    monkeypatch.setitem(sys.modules, "yfinance", SimpleNamespace(download=fake_download))
-    from app.providers.market_data import YahooFinanceProvider
-
-    frame = YahooFinanceProvider().fetch_candles(
-        "BTCUSDT", market="crypto", exchange=None, interval="1d",
-        start=date(2025, 1, 1), end=date(2025, 1, 2),
-    )
-    assert captured["ticker"] == "BTC-USD"
-    assert frame.attrs["is_adjusted"] is True
-
-
-def test_yahoo_clamps_intraday_history_to_provider_window(monkeypatch):
-    import sys
-    from types import SimpleNamespace
-
-    captured = {}
-    download_frame = pd.DataFrame({
-        "Open": [100], "High": [105], "Low": [99], "Close": [103], "Volume": [1000],
-    }, index=pd.DatetimeIndex(["2025-04-24T10:00:00Z"]))
-
-    def fake_download(ticker, **kwargs):
-        captured.update(kwargs)
-        return download_frame
-
-    monkeypatch.setitem(sys.modules, "yfinance", SimpleNamespace(download=fake_download))
-    frame = YahooFinanceProvider().fetch_candles(
-        "AAPL", market="global", exchange="NASDAQ", interval="1m",
-        start=date(2025, 1, 1), end=date(2025, 4, 30),
-    )
-    assert captured["start"] == "2025-04-24"
-    assert frame.attrs["history_truncated"] is True
-
-
-def test_yahoo_rejects_unsupported_intervals():
-    with pytest.raises(ProviderError, match="Unsupported Yahoo Finance interval"):
-        YahooFinanceProvider().fetch_candles(
-            "AAPL", market="global", exchange="NASDAQ", interval="4h",
-            start=None, end=None,
-        )
-
-
-def test_gdelt_article_timestamp_normalization(monkeypatch):
-    payload = {"articles": [{
-        "title": "Example company filing", "url": "https://example.com/story",
-        "domain": "example.com", "seendate": "20261111T120000Z",
-    }]}
-    monkeypatch.setattr("app.providers.news.httpx.get", lambda *a, **k: FakeResponse(payload))
-    provider = GDELTNewsProvider(Settings(_env_file=None))
-    items = provider.search('"Example Company"', "EXAMPLE")
-    assert len(items) == 1
-    assert items[0].published_at == datetime(2026, 11, 11, 12, 0, tzinfo=UTC)
-    assert items[0].url == "https://example.com/story"
-
-
-def test_market_routing_does_not_cross_market_providers(monkeypatch):
+def test_market_service_rejects_removed_provider_names():
     service = MarketService(Settings(_env_file=None))
-    calls: list[str] = []
-
-    def reject(name):
-        def fetch(*args, **kwargs):
-            calls.append(name)
-            raise ProviderError(name)
-        return fetch
-
-    monkeypatch.setattr(service.tejhq, "fetch_candles", reject("tejhq"))
-    monkeypatch.setattr(service.yahoo, "fetch_candles", reject("yahoo"))
-    monkeypatch.setattr(service.binance, "fetch_candles", reject("binance"))
-
-    with pytest.raises(ProviderError):
-        service.candles("RELIANCE", market="india")
-    assert calls == ["tejhq"]
-    calls.clear()
-    with pytest.raises(ProviderError):
-        service.candles("BTCUSDT", market="crypto")
-    assert calls == ["binance"]
-    calls.clear()
-    with pytest.raises(ProviderError):
-        service.candles("AAPL", market="global")
-    assert calls == ["yahoo"]
-
-
-def test_market_service_rejects_incompatible_manual_provider():
-    service = MarketService(Settings(_env_file=None))
-    with pytest.raises(ValueError, match="not compatible"):
+    with pytest.raises(ValueError, match="auto or tradingview"):
         service.candles("RELIANCE", market="india", provider="yahoo")
+
+
+def test_market_service_quotes_and_health_pass_through(monkeypatch):
+    service = MarketService(Settings(_env_file=None))
+    monkeypatch.setattr(
+        service.tradingview,
+        "quotes",
+        lambda symbols: ({"NSE:RELIANCE": {"lp": 2500}}, {"NSE:BAD": "missing"}),
+    )
+    monkeypatch.setattr(service.tradingview.bridge, "health", lambda: {"status": "ok"})
+    quotes, errors = service.quotes(["NSE:RELIANCE", "NSE:BAD"])
+    assert quotes["NSE:RELIANCE"]["lp"] == 2500
+    assert errors["NSE:BAD"] == "missing"
+    assert service.bridge_health()["status"] == "ok"

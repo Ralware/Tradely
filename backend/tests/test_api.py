@@ -63,47 +63,49 @@ def test_removed_endpoints_return_not_found():
     assert client.get("/api/us/issuers/0000320193/filings").status_code == 404
 
 
-def test_provider_status_reports_only_retained_sources():
+def test_provider_status_reports_only_tradingview_and_bridge():
     response = client.get("/api/providers/status")
     assert response.status_code == 200
-    providers = response.json()["providers"]
-    names = {provider["name"] for provider in providers}
-    assert names == {
-        "TejHQ Adjusted OHLCV", "TejHQ Raw OHLCV", "Yahoo Finance (yfinance)",
-        "Binance Spot", "GDELT", "Yahoo Finance News",
-    }
-    adjusted = next(provider for provider in providers if provider["name"] == "TejHQ Adjusted OHLCV")
-    assert adjusted["configured"] is False
-    assert adjusted["available"] is False
+    body = response.json()
+    providers = body["providers"]
+    assert [provider["name"] for provider in providers] == ["TradingView (unofficial)"]
+    assert providers[0]["configured"] is True
+    assert "TradingView bridge" in providers[0]["note"] or "bridge" in providers[0]["note"]
+    assert "bridge" in body
+    assert "checked_at" in body
 
 
-def test_news_returns_yahoo_records_when_gdelt_fails(monkeypatch):
-    from datetime import datetime, timezone
-
-    from app.core.models import NewsItem
-
-    class FailingGdelt:
-        def __init__(self, settings):
-            self.last_error = "upstream unavailable"
-
-        def search(self, query, symbol, limit=20):
-            return []
-
-    class YahooFallback:
-        def search(self, symbol, market):
-            return [NewsItem(
-                id="yahoo-fallback", title="Example headline", url="https://example.com/news",
-                published_at=datetime.now(timezone.utc), source="Yahoo Finance News (unofficial)",
-            )]
-
-    monkeypatch.setattr("app.api.routes.GDELTNewsProvider", FailingGdelt)
-    monkeypatch.setattr("app.api.routes.YahooFinanceNewsProvider", YahooFallback)
-    app.state.response_cache.clear()
-
+def test_news_returns_an_explicit_empty_result():
     response = client.get("/api/instruments/AAPL/news?market=global")
     assert response.status_code == 200
-    assert response.json()["count"] == 1
-    assert response.json()["providers"]["GDELT"]["error"] == "upstream unavailable"
+    body = response.json()
+    assert body["symbol"] == "AAPL"
+    assert body["market"] == "global"
+    assert body["items"] == []
+    assert body["count"] == 0
+    assert body["providers"] == {}
+    assert "not configured" in body["note"]
+
+
+def test_news_accepts_an_instrument_id():
+    response = client.get(
+        "/api/instruments/RELIANCE/news",
+        params={"instrument_id": "india:NSE:RELIANCE"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["instrument"]["instrument_id"] == "india:NSE:RELIANCE"
+    assert body["count"] == 0
+
+
+def test_catalogue_refresh_without_query_explains_live_search():
+    response = client.post("/api/instruments/catalogue/refresh")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["updated"] == 0
+    source = body["sources"]["TradingView market search"]
+    assert source["entries"] == 0
+    assert "q=" in source["note"]
 
 
 def test_indicator_series_is_additive_and_uses_backend_calculations(monkeypatch):
@@ -132,6 +134,35 @@ def test_indicator_series_is_additive_and_uses_backend_calculations(monkeypatch)
     assert body["series"][-1]["close"] == 200.0
     assert "sma_200" in body["series"][-1]
     assert "rsi_14" in body["series"][-1]
+
+
+def test_intraday_analysis_evaluates_signals_instead_of_returning_insufficient_data(monkeypatch):
+    import numpy as np
+    import pandas as pd
+
+    from app.main import app
+
+    end = pd.Timestamp.now(tz="UTC").floor("4h")
+    index = pd.date_range(end=end, periods=320, freq="4h")
+    close = pd.Series(np.linspace(100.0, 200.0, 320), index=index)
+    frame = pd.DataFrame(
+        {"open": close, "high": close + 2, "low": close - 2, "close": close, "volume": 1000.0},
+        index=index,
+    )
+    frame.attrs["is_adjusted"] = True
+
+    monkeypatch.setattr(app.state.market_service, "candles", lambda *args, **kwargs: (frame, "test"))
+
+    response = client.get(
+        "/api/instruments/BTCUSDT/analysis?market=crypto&exchange=BINANCE&interval=4h"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["interval"] == "4h"
+    assert len(body["candles"]) == 320
+    assert body["strategy"]["state"] != "INSUFFICIENT_DATA"
+    assert body["strategy"]["conditions"]
 
 
 def test_technicals_endpoint_classifies_existing_values_without_writing_signals(monkeypatch):

@@ -5,8 +5,14 @@ import time
 from typing import Any
 
 from app.core.config import Settings
-from app.core.instruments import canonical_instrument, parse_instrument_id, split_crypto_pair
+from app.core.instruments import (
+    TRADINGVIEW_PROVIDER,
+    canonical_instrument,
+    parse_instrument_id,
+    split_crypto_pair,
+)
 from app.instruments.capabilities import capabilities_payload
+from app.instruments.catalogue import entry_from_search_result
 from app.instruments.catalogue_data import (
     CATALOGUE_SOURCE,
     CATALOGUE_VERSION,
@@ -21,6 +27,13 @@ from app.instruments.search import (
     is_equivalent_listing,
     rank_instruments,
 )
+from app.providers.tradingview import TradingViewBridge
+
+LEGACY_PROVIDER_NAMES = {
+    "TejHQ",
+    "Yahoo Finance (yfinance; unofficial)",
+    "Binance Spot Public Market Data",
+}
 
 NO_MATCH_MESSAGE = "No Supported Instrument Found"
 UNAVAILABLE_MESSAGE = "Instrument Recognized — Market Data Unavailable"
@@ -72,6 +85,14 @@ def instrument_payload(row: dict[str, Any]) -> dict[str, Any]:
     payload["status"] = payload.get("status") or "active"
     payload["supported_intervals"] = _parse_intervals(payload.get("supported_intervals"))
     payload["aliases"] = list(payload.get("aliases") or [])
+    if not payload.get("provider") or payload.get("provider") in LEGACY_PROVIDER_NAMES:
+        payload["provider"] = TRADINGVIEW_PROVIDER
+    exchange = str(payload.get("exchange") or "").upper()
+    symbol = str(payload.get("symbol") or "").upper()
+    provider_symbol = str(payload.get("provider_symbol") or "").strip()
+    if ":" not in provider_symbol:
+        provider_symbol = f"{exchange}:{symbol}" if exchange and symbol else provider_symbol
+    payload["provider_symbol"] = provider_symbol
     return payload
 
 
@@ -83,6 +104,44 @@ class InstrumentResolver:
         self.db = db
         self._snapshot: tuple[list[dict[str, Any]], list[dict[str, Any]]] | None = None
         self._snapshot_at = 0.0
+        self._bridge: TradingViewBridge | None = None
+
+    def _tradingview(self) -> TradingViewBridge:
+        if self._bridge is None:
+            self._bridge = TradingViewBridge(self.settings)
+        return self._bridge
+
+    def _live_search(
+        self,
+        query: str,
+        *,
+        market: str | None = None,
+        limit: int = 20,
+    ) -> bool:
+        """Import exact TradingView search matches not present in the catalogue.
+
+        Failures are deliberately silent: local catalogue resolution must still
+        work when the bridge or TradingView is unavailable.
+        """
+        if not self.settings.tradingview_live_search_enabled or len(query.strip()) < 2:
+            return False
+        try:
+            results = self._tradingview().search(query, limit=min(max(limit, 1), 50))
+        except Exception:
+            return False
+        entries = [
+            entry
+            for entry in (entry_from_search_result(item) for item in results)
+            if entry is not None and (market is None or entry.get("market") == market)
+        ]
+        if not entries:
+            return False
+        try:
+            self.db.upsert_catalogue_entries(entries)
+        except Exception:
+            return False
+        self.invalidate_cache()
+        return True
 
     # ------------------------------------------------------------------
     # Catalogue
@@ -139,6 +198,9 @@ class InstrumentResolver:
         clean = normalize_query(query)
         rows, aliases = self.snapshot()
         ranked = rank_instruments(rows, aliases, clean, limit=limit, market=market)
+        if not ranked and self._live_search(clean, market=market, limit=limit):
+            rows, aliases = self.snapshot(max_age_seconds=0.0)
+            ranked = rank_instruments(rows, aliases, clean, limit=limit, market=market)
         candidates = [candidate_payload(item) for item in ranked]
         status = "resolved" if ranked else "not_found"
         instrument = None
@@ -222,6 +284,16 @@ class InstrumentResolver:
                 item for item in ranked if upper(str(item.row.get("exchange") or "")) == requested
             ]
             ranked = on_exchange
+        if not ranked:
+            if self._live_search(clean, market=market, limit=40):
+                rows, aliases = self.snapshot(max_age_seconds=0.0)
+                ranked = rank_instruments(rows, aliases, clean, limit=40, market=market)
+                if exchange:
+                    requested = upper(exchange)
+                    ranked = [
+                        item for item in ranked
+                        if upper(str(item.row.get("exchange") or "")) == requested
+                    ]
         if not ranked:
             pair = split_crypto_pair(clean.replace("/", "").replace("-", "").replace("_", ""))
             if pair is not None:
@@ -501,7 +573,7 @@ class InstrumentResolver:
             "base_currency": base,
             "quote_currency": quote,
             "trading_pair": f"{base}/{quote}",
-            "reason": "No verified Binance Spot listing exists for this exact pair.",
+            "reason": "No verified Binance Spot listing exists for this exact pair in TradingView.",
         }
 
     def provider_for(self, instrument: dict[str, Any]) -> str:

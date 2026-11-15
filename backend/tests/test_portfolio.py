@@ -32,7 +32,7 @@ def row(
         "currency": currency,
         "asset_type": "crypto" if market == "crypto" else "equity",
         "provider": "test",
-        "provider_symbol": symbol,
+        "provider_symbol": f"{exchange}:{symbol}",
         "side": side,
         "quantity": quantity,
         "price": price,

@@ -20,7 +20,7 @@ def _evaluate_trend_breakout_long_only(
     min_adx: float = 20.0,
     min_rvol: float = 1.0,
 ) -> StrategySignal:
-    """Long-only daily candidate; completed-bar close breakout over prior 20 bars.
+    """Long-only completed-bar candidate; close breakout over the prior 20 bars.
 
     The latest input bar must be final. Execution is not modelled here; an actual
     backtest should execute no earlier than the next available bar.
@@ -33,7 +33,7 @@ def _evaluate_trend_breakout_long_only(
             strategy_version=STRATEGY_VERSION,
             state="INSUFFICIENT_DATA",
             conditions=[],
-            explanation=f"At least 220 completed daily bars are required; received {len(frame)}.",
+            explanation=f"At least 220 completed bars are required; received {len(frame)}.",
             data_source=source,
         )
 

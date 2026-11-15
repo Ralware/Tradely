@@ -1,81 +1,90 @@
 from __future__ import annotations
 
-import csv
-import io
 from typing import Any
 
-import httpx
-
 from app.core.config import Settings
-from app.core.instruments import CRYPTO_QUOTE_ASSETS
+from app.core.instruments import normalize_symbol
 from app.instruments.catalogue_data import _crypto, _equity
+from app.providers.tradingview import TradingViewBridge
+
+_EQUITY_EXCHANGES = {
+    "NSE": ("india", "INR"),
+    "BSE": ("india", "INR"),
+    "NASDAQ": ("global", "USD"),
+    "NYSE": ("global", "USD"),
+    "AMEX": ("global", "USD"),
+    "NYSEARCA": ("global", "USD"),
+}
 
 
-def _binance_entries(settings: Settings) -> list[dict[str, Any]]:
-    response = httpx.get(
-        "https://data-api.binance.vision/api/v3/exchangeInfo",
-        timeout=settings.http_timeout_seconds,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    entries: list[dict[str, Any]] = []
-    for item in payload.get("symbols", []):
-        symbol = str(item.get("symbol") or "").upper()
-        quote = str(item.get("quoteAsset") or "").upper()
-        status = str(item.get("status") or "")
-        if (
-            not symbol
-            or quote not in CRYPTO_QUOTE_ASSETS
-            or status != "TRADING"
-            or not item.get("isSpotTradingAllowed", True)
-        ):
-            continue
+def entry_from_search_result(result: dict[str, Any]) -> dict[str, Any] | None:
+    """Map one TradingView market-search row to a canonical catalogue entry."""
+    exchange = str(result.get("exchange") or "").strip().upper()
+    symbol = str(result.get("symbol") or "").strip().upper()
+    if not symbol:
+        return None
+    description = str(result.get("description") or "").strip()
+    if exchange in _EQUITY_EXCHANGES:
+        market, currency = _EQUITY_EXCHANGES[exchange]
+        try:
+            normalize_symbol(symbol, market)
+        except ValueError:
+            return None
+        entry = _equity(symbol, description or symbol, market, exchange, currency)
+    elif exchange == "BINANCE":
         try:
             entry = _crypto(symbol)
         except ValueError:
-            continue
-        entry["catalogue_source"] = "Binance Spot exchangeInfo (live)"
-        entry["status"] = "active"
-        entries.append(entry)
-    return entries
+            return None
+        if description:
+            entry["name"] = description
+            entry["display_name"] = description
+    else:
+        return None
+    entry["catalogue_source"] = "TradingView market search (live)"
+    entry["catalogue_updated_at"] = None
+    return entry
 
 
-def _nse_entries(settings: Settings) -> list[dict[str, Any]]:
-    response = httpx.get(
-        "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv",
-        headers={"User-Agent": "Tradely/1.0 (private personal research)"},
-        timeout=settings.http_timeout_seconds,
-        follow_redirects=True,
-    )
-    response.raise_for_status()
-    reader = csv.DictReader(io.StringIO(response.text))
-    entries: list[dict[str, Any]] = []
-    for row in reader:
-        symbol = str(row.get("SYMBOL") or "").strip().upper()
-        name = str(row.get("NAME OF COMPANY") or "").strip()
-        series = str(row.get(" SERIES") or row.get("SERIES") or "").strip().upper()
-        if not symbol or not name or series not in {"EQ", "BE", "BZ"}:
-            continue
-        entry = _equity(symbol, name.title(), "india", "NSE", "INR")
-        entry["catalogue_source"] = "NSE Equity List archive (live)"
-        entries.append(entry)
-    return entries
+def refresh_catalogue(
+    db: Any,
+    settings: Settings,
+    *,
+    query: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Import supported listings from live TradingView search.
 
-
-def refresh_catalogue(db: Any, settings: Settings) -> dict[str, Any]:
-    """Best-effort catalogue refresh from legitimate public sources.
-
-    Failures are reported explicitly and never replace the bundled catalogue.
+    There is no direct Binance/NSE catalogue call any more. An explicit query
+    returns matching supported listings; without one the endpoint reports that
+    live search is available on demand instead of pretending to enumerate every
+    exchange.
     """
     report: dict[str, Any] = {"updated": 0, "sources": {}, "errors": []}
-    for name, loader in (("Binance Spot exchangeInfo", _binance_entries),
-                         ("NSE Equity List", _nse_entries)):
-        try:
-            entries = loader(settings)
-            written = db.upsert_catalogue_entries(entries)
-            report["sources"][name] = {"entries": written}
-            report["updated"] += written
-        except Exception as exc:  # network/provider changes must be explicit
-            report["sources"][name] = {"entries": 0}
-            report["errors"].append(f"{name}: {exc}")
+    if not query:
+        report["sources"]["TradingView market search"] = {
+            "entries": 0,
+            "note": (
+                "Provide q=... to import matching supported listings. Unknown "
+                "symbols are also resolved through live TradingView search on demand."
+            ),
+        }
+        return report
+    try:
+        bridge = TradingViewBridge(settings)
+        results = bridge.search(query, limit=min(max(1, limit), 50))
+        entries = [
+            entry
+            for entry in (entry_from_search_result(item) for item in results)
+            if entry is not None
+        ]
+        written = db.upsert_catalogue_entries(entries)
+        report["sources"]["TradingView market search"] = {
+            "entries": written,
+            "query": query,
+        }
+        report["updated"] = written
+    except Exception as exc:  # bridge/network failures must stay explicit
+        report["sources"]["TradingView market search"] = {"entries": 0, "query": query}
+        report["errors"].append(f"TradingView market search: {exc}")
     return report

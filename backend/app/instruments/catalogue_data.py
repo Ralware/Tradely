@@ -2,22 +2,23 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-from app.core.instruments import split_crypto_pair
+from app.core.instruments import TRADINGVIEW_PROVIDER, split_crypto_pair
 
-CATALOGUE_VERSION = "2026.11.1"
-CATALOGUE_SOURCE = "Bundled Verified Catalogue (NSE/NASDAQ/NYSE/Binance Spot Listings)"
-CATALOGUE_RELEASE_DATE = "2026-11-14T00:00:00+00:00"
+CATALOGUE_VERSION = "2026.11.3"
+CATALOGUE_SOURCE = "Bundled Verified Catalogue (NSE/NASDAQ/NYSE/Binance Spot Listings; TradingView identities)"
+CATALOGUE_RELEASE_DATE = "2026-11-16T00:00:00+00:00"
 
-INDIA_PROVIDER = "TejHQ"
-GLOBAL_PROVIDER = "Yahoo Finance (yfinance; unofficial)"
-CRYPTO_PROVIDER = "Binance Spot Public Market Data"
+INDIA_PROVIDER = TRADINGVIEW_PROVIDER
+GLOBAL_PROVIDER = TRADINGVIEW_PROVIDER
+CRYPTO_PROVIDER = TRADINGVIEW_PROVIDER
 
-INDIA_INTERVALS = ["1d"]
+INDIA_INTERVALS = ["1m", "5m", "15m", "30m", "1h", "1d", "1wk", "1mo"]
 GLOBAL_INTERVALS = ["1m", "5m", "15m", "30m", "1h", "1d", "1wk", "1mo"]
 CRYPTO_INTERVALS = [
-    "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h",
-    "1d", "3d", "1w", "1M",
+    "1m", "3m", "5m", "15m", "30m", "45m", "1h", "2h", "4h", "6h", "8h", "12h",
+    "1d", "3d", "1wk", "1mo",
 ]
+
 
 _ASSET_NAMES: dict[str, str] = {
     "BTC": "Bitcoin", "ETH": "Ethereum", "SOL": "Solana", "BNB": "BNB",
@@ -61,8 +62,8 @@ def _equity(
         "currency": currency,
         "asset_type": "equity",
         "provider": provider,
-        "provider_symbol": symbol,
-        "provider_instrument_id": symbol if market == "global" else "",
+        "provider_symbol": f"{exchange}:{symbol}",
+        "provider_instrument_id": f"{exchange}:{symbol}",
         "base_currency": currency,
         "quote_currency": currency,
         "settlement_currency": currency,
@@ -92,8 +93,8 @@ def _crypto(symbol: str, extra_aliases: Iterable[str] = ()) -> dict[str, Any]:
         "currency": quote,
         "asset_type": "crypto",
         "provider": CRYPTO_PROVIDER,
-        "provider_symbol": symbol,
-        "provider_instrument_id": symbol,
+        "provider_symbol": f"BINANCE:{symbol}",
+        "provider_instrument_id": f"BINANCE:{symbol}",
         "base_currency": base,
         "quote_currency": quote,
         "settlement_currency": quote,

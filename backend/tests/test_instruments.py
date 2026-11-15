@@ -21,7 +21,12 @@ from app.instruments.resolver import (
 
 
 def make_resolver(tmp_path, **settings_overrides) -> InstrumentResolver:
-    settings = Settings(database_path=str(tmp_path / "catalogue.sqlite3"), **settings_overrides)
+    settings = Settings(
+        _env_file=None,
+        database_path=str(tmp_path / "catalogue.sqlite3"),
+        tradingview_live_search_enabled=False,
+        **settings_overrides,
+    )
     db = Database(tmp_path / "catalogue.sqlite3")
     resolver = InstrumentResolver(settings, db)
     resolver.ensure_catalogue()
@@ -173,7 +178,7 @@ def test_canonical_identity_is_shared_by_search_watchlist_and_market_target(reso
 
     target = resolver.market_target(instrument_id=instrument_id)
     assert target["instrument_id"] == instrument_id
-    assert target["provider_symbol"] == "RELIANCE"
+    assert target["provider_symbol"] == "NSE:RELIANCE"
 
     fetched = resolver.get(instrument_id)
     assert fetched["instrument_id"] == instrument_id
@@ -214,20 +219,12 @@ def test_catalogue_seed_is_versioned_and_repeatable(resolver):
 # ----------------------------------------------------------------------
 # Provider routing and capabilities
 # ----------------------------------------------------------------------
-@pytest.mark.parametrize(
-    ("query", "expected_chain"),
-    [
-        ("RELIANCE", ["tejhq"]),
-        ("AAPL", ["yahoo"]),
-        ("BTCUSDT", ["binance"]),
-    ],
-)
-def test_provider_routing_is_derived_from_the_resolved_instrument(
-    resolver, query, expected_chain
-):
+@pytest.mark.parametrize("query", ["RELIANCE", "AAPL", "BTCUSDT"])
+def test_provider_routing_is_derived_from_the_resolved_instrument(resolver, query):
     instrument = resolver.resolve(query)["instrument"]
-    assert provider_chain(instrument) == expected_chain
-    assert instrument["provider"]
+    assert provider_chain(instrument) == ["tradingview"]
+    assert instrument["provider"] == "TradingView (unofficial)"
+    assert ":" in instrument["provider_symbol"]
 
 
 def test_provider_mapping_rejects_unverified_exchange():
@@ -237,7 +234,7 @@ def test_provider_mapping_rejects_unverified_exchange():
         "market": "global",
         "exchange": "BSE",
         "asset_type": "equity",
-        "provider_symbol": "AAPL",
+        "provider_symbol": "BSE:AAPL",
     }
     with pytest.raises(ValueError):
         verify_instrument_mapping(mismatched)
@@ -248,40 +245,53 @@ def test_provider_mapping_rejects_unverified_exchange():
         "market": "crypto",
         "exchange": "NASDAQ",
         "asset_type": "crypto",
-        "provider_symbol": "BTCUSDT",
+        "provider_symbol": "NASDAQ:BTCUSDT",
     }
     with pytest.raises(ValueError):
         verify_instrument_mapping(wrong_asset)
 
+    wrong_prefix = {
+        "instrument_id": "india:NSE:RELIANCE",
+        "symbol": "RELIANCE",
+        "market": "india",
+        "exchange": "NSE",
+        "asset_type": "equity",
+        "provider_symbol": "BSE:RELIANCE",
+    }
+    with pytest.raises(ValueError, match="EXCHANGE:SYMBOL"):
+        verify_instrument_mapping(wrong_prefix)
 
-def test_capabilities_differ_per_verified_market(resolver):
+
+def test_capabilities_reflect_the_single_tradingview_provider(resolver):
     india = resolver.capabilities("india:NSE:RELIANCE")
-    assert india["provider_key"] == "tejhq"
-    assert india["supported_intervals"] == ["1d"]
+    assert india["provider_key"] == "tradingview"
+    assert {"1d", "1h", "1m"} <= set(india["supported_intervals"])
     assert india["real_time_streaming"] is False
-    assert india["adjusted_history"] is False
-    # India backtesting is blocked until adjusted history is available.
-    assert india["backtesting_eligible"] is False
+    assert india["adjusted_history"] is True
+    assert india["backtesting_eligible"] is True
+    assert india["news"] is False
+    assert any("15 minutes delayed" in item for item in india["data_limitations"])
 
     global_caps = resolver.capabilities("global:NASDAQ:AAPL")
-    assert global_caps["provider_key"] == "yahoo"
+    assert global_caps["provider_key"] == "tradingview"
     assert global_caps["adjusted_history"] is True
     assert global_caps["backtesting_eligible"] is True
 
     crypto = resolver.capabilities("crypto:BINANCE:BTCUSDT")
-    assert crypto["provider_key"] == "binance"
-    assert crypto["real_time_streaming"] is True
+    assert crypto["provider_key"] == "tradingview"
+    assert crypto["real_time_streaming"] is False
     assert crypto["backtesting_eligible"] is True
     assert {"1m", "4h", "1d"} <= set(crypto["supported_intervals"])
     assert crypto["quantity"]["fractional"] is True
-    assert crypto["quantity"]["source"]
+    assert "TradingView symbol metadata" in crypto["quantity"]["source"]
 
 
-def test_india_backtesting_requires_configured_key(tmp_path):
-    resolver = make_resolver(tmp_path, tejhq_api_key="test-key")
+def test_india_history_is_always_split_adjusted(tmp_path):
+    resolver = make_resolver(tmp_path)
     capabilities = resolver.capabilities("india:NSE:RELIANCE")
     assert capabilities["adjusted_history"] is True
     assert capabilities["backtesting_eligible"] is True
+    assert capabilities["quote_freshness"] == "real_time_or_delayed"
 
 
 def test_inactive_instrument_is_recognized_but_unavailable(resolver):
@@ -303,7 +313,7 @@ def test_capabilities_are_explicit_for_equity_quantity_rules(resolver):
     capabilities = capabilities_for(instrument, resolver.settings)
     assert capabilities.quantity.quantity_step == 1
     assert capabilities.quantity.fractional is False
-    assert capabilities.quote_freshness == "end_of_day"
+    assert capabilities.quote_freshness == "real_time_or_delayed"
 
 
 # ----------------------------------------------------------------------
@@ -315,7 +325,11 @@ def instrument_api(tmp_path):
 
     original_db = app.state.db
     original_resolver = app.state.instrument_resolver
-    settings = Settings(database_path=str(tmp_path / "api.sqlite3"))
+    settings = Settings(
+        _env_file=None,
+        database_path=str(tmp_path / "api.sqlite3"),
+        tradingview_live_search_enabled=False,
+    )
     db = Database(tmp_path / "api.sqlite3")
     resolver = InstrumentResolver(settings, db)
     resolver.ensure_catalogue()
@@ -382,7 +396,7 @@ def test_api_capabilities_endpoint(instrument_api):
     )
     assert response.status_code == 200
     payload = response.json()
-    assert payload["provider_key"] == "binance"
+    assert payload["provider_key"] == "tradingview"
     assert payload["supported_intervals"]
     assert payload["instrument_id"] == "crypto:BINANCE:BTCUSDT"
 

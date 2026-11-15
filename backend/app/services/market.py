@@ -5,14 +5,17 @@ import time
 from collections import OrderedDict
 from collections.abc import Callable
 from concurrent.futures import Future
-from datetime import date, timedelta
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import pandas as pd
 
 from app.core.config import Settings
 from app.core.instruments import instrument_id_for, normalize_symbol, resolve_exchange
 from app.providers.base import MarketDataProvider, ProviderError, normalize_candles
-from app.providers.market_data import BinanceSpotProvider, TejHQProvider, YahooFinanceProvider
+from app.providers.tradingview import TradingViewProvider
+
+ALLOWED_PROVIDERS = {"auto", "tradingview"}
 
 
 class _CandleCache:
@@ -72,65 +75,80 @@ class _CandleCache:
 
 
 class MarketService:
+    """Single TradingView-backed market-data service for every instrument."""
+
     def __init__(self, settings: Settings):
         self.settings = settings
-        self.tejhq = TejHQProvider(settings)
-        self.yahoo = YahooFinanceProvider()
-        self.binance = BinanceSpotProvider(settings)
+        self.tradingview = TradingViewProvider(settings)
         self.cache = _CandleCache()
 
-    def candles(self, symbol: str, *, market: str, exchange: str | None = None,
-                interval: str = "1d", days: int = 365, provider: str = "auto") -> tuple[pd.DataFrame, str]:
+    def candles(
+        self,
+        symbol: str,
+        *,
+        market: str,
+        exchange: str | None = None,
+        interval: str = "1d",
+        days: int = 365,
+        provider: str = "auto",
+        full_history: bool = True,
+    ) -> tuple[pd.DataFrame, str]:
         if days < 1 or days > 3650:
             raise ValueError("days must be between 1 and 3650")
-        end = date.today()
-        start = end - timedelta(days=days)
-        if provider not in {"auto", "tejhq", "yahoo", "binance"}:
-            raise ValueError("provider must be auto, tejhq, yahoo or binance")
-        compatible_provider = {"india": "tejhq", "global": "yahoo", "crypto": "binance"}[market]
-        if provider != "auto" and provider != compatible_provider:
-            raise ValueError(f"{provider} is not compatible with the {market} market; use {compatible_provider}")
-        chain = []
-        if provider == "tejhq":
-            chain = [self.tejhq]
-        elif provider == "yahoo":
-            chain = [self.yahoo]
-        elif provider == "binance":
-            chain = [self.binance]
-        elif market == "india":
-            # India is always routed to TejHQ.  Raw candles remain visible when
-            # no key is configured, but downstream signal/backtest safeguards
-            # suppress actionable output until adjusted history is available.
-            chain = [self.tejhq]
-        elif market == "crypto":
-            chain = [self.binance]
+        if provider not in ALLOWED_PROVIDERS:
+            raise ValueError("provider must be auto or tradingview")
+        if full_history:
+            # Ask TradingView for every bar it exposes for this timeframe.
+            start = end = None
         else:
-            chain = [self.yahoo]
-
+            end = datetime.now(timezone.utc).date()
+            start = end - timedelta(days=days)
         canonical_id = instrument_id_for(
             normalize_symbol(symbol, market), market, resolve_exchange(market, exchange)
         )
 
         def fetch() -> tuple[pd.DataFrame, str]:
-            errors: list[str] = []
-            for adapter in chain:
-                try:
-                    frame = adapter.fetch_candles(
-                        symbol, market=market, exchange=exchange, interval=interval,
-                        start=start, end=end,
-                    )
-                    frame = normalize_candles(frame, max_candles=adapter.max_history_candles)
-                    frame.attrs.setdefault("source", adapter.name)
-                    frame.attrs.setdefault("is_adjusted", adapter.is_adjusted)
-                    return frame, adapter.name
-                except Exception as exc:
-                    errors.append(f"{adapter.name}: {exc}")
-            raise ProviderError("All configured providers failed. " + " | ".join(errors))
+            adapter: MarketDataProvider = self.tradingview
+            try:
+                frame = adapter.fetch_candles(
+                    symbol,
+                    market=market,
+                    exchange=exchange,
+                    interval=interval,
+                    start=start,
+                    end=end,
+                )
+                frame = normalize_candles(frame)
+                frame.attrs.setdefault("source", adapter.name)
+                frame.attrs.setdefault("is_adjusted", adapter.is_adjusted)
+                return frame, adapter.name
+            except ProviderError:
+                raise
+            except Exception as exc:
+                raise ProviderError(f"{adapter.name}: {exc}") from exc
 
-        adapter: MarketDataProvider = chain[0]
+        adapter = self.tradingview
         cache_key = (
             canonical_id, interval, adapter.is_adjusted,
             (adapter.__class__.__module__, adapter.__class__.__qualname__, adapter.name),
             start, end,
         )
         return self.cache.get_or_load(cache_key, self.settings.market_cache_seconds, fetch)
+
+    # ------------------------------------------------------------------
+    # Quotes and metadata (bridge-backed)
+    # ------------------------------------------------------------------
+    def quote(self, provider_symbol: str) -> dict[str, Any]:
+        return self.tradingview.bridge.quote(provider_symbol)
+
+    def quotes(self, provider_symbols: list[str]) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
+        return self.tradingview.quotes(provider_symbols)
+
+    def symbol_info(self, provider_symbol: str) -> dict[str, Any]:
+        return self.tradingview.symbol_info(provider_symbol)
+
+    def search(self, query: str, *, limit: int = 20) -> list[dict[str, Any]]:
+        return self.tradingview.search(query, limit=limit)
+
+    def bridge_health(self) -> dict[str, Any]:
+        return self.tradingview.bridge.health()

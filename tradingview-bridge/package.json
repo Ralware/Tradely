@@ -1,0 +1,13 @@
+{
+  "name": "tradely-tradingview-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Loopback HTTP bridge exposing the unofficial TradingView API to Tradely's Python backend.",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

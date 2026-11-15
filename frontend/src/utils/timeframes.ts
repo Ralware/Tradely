@@ -28,13 +28,14 @@ const CRYPTO_TIMEFRAMES: TimeframeOption[] = [
   { id: '2h', label: '2 Hours', days: 365 },
   { id: '4h', label: '4 Hours', days: 365 },
   { id: '1d', label: '1 Day', days: 3650 },
-  { id: '1w', label: '1 Week', days: 1825 },
-  { id: '1M', label: '1 Month', days: 3650 },
+  { id: '1wk', label: '1 Week', days: 1825 },
+  { id: '1mo', label: '1 Month', days: 3650 },
 ];
 
 /**
- * Intervals the backend providers actually serve. Yahoo (equities) does not
- * provide 2-hour or 4-hour bars, so they are not offered for equities.
+ * Intervals the TradingView backend actually serves. Weekly and monthly bars
+ * use the canonical `1wk`/`1mo` IDs so equity and crypto requests hit the same
+ * verified interval mapping.
  */
 export function timeframesFor(market: Market): TimeframeOption[] {
   if (market === 'india') return EQUITY_TIMEFRAMES.filter((option) => option.id === '1d');
@@ -66,10 +67,8 @@ export function normalizeIntervalForIntervals(
   }
   const supported = new Set(intervals);
   let normalized = interval;
-  if (supported.has('1w') && interval === '1wk') normalized = '1w';
-  else if (supported.has('1wk') && interval === '1w') normalized = '1wk';
-  else if (supported.has('1M') && interval === '1mo') normalized = '1M';
-  else if (supported.has('1mo') && interval === '1M') normalized = '1mo';
+  if (supported.has('1wk') && (interval === '1w' || interval === '1wk')) normalized = '1wk';
+  else if (supported.has('1mo') && (interval === '1M' || interval === '1mo')) normalized = '1mo';
   if (supported.has(normalized)) {
     return normalized;
   }
@@ -82,10 +81,7 @@ export function normalizeIntervalForIntervals(
 export function normalizeIntervalForMarket(market: Market, interval: string): string {
   const supported = timeframesFor(market);
   let normalized = interval;
-  if (market === 'crypto') {
-    if (interval === '1wk') normalized = '1w';
-    else if (interval === '1mo') normalized = '1M';
-  } else if (interval === '1w') {
+  if (interval === '1w') {
     normalized = '1wk';
   } else if (interval === '1M') {
     normalized = '1mo';

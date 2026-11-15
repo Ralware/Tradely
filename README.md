@@ -13,7 +13,7 @@
 
 ---
 
-## Current implementation status — 14 November 2026
+## Current implementation status — 16 November 2026
 
 This repository now contains a **runnable local application foundation**, not just a product proposal. The first implementation intentionally prioritises the data model, provider boundaries, indicator arithmetic, explainable strategy logic, portfolio accounting and tests. The browser UI has been migrated to a React + TypeScript + Vite + Tailwind application in `frontend/`; the legacy plain-HTML workbench remains at `/` as a fallback. All financial calculations, API contracts and provider integrations remain in the Python backend.
 
@@ -21,20 +21,20 @@ This repository now contains a **runnable local application foundation**, not ju
 
 - FastAPI backend bound to `127.0.0.1` by default, with a startup guard that rejects non-loopback hosts.
 - SQLite persistence for a single-owner watchlist, manual actual-holdings transactions, canonical instrument identities, cached quote snapshots and signal audit history. Existing databases are upgraded through additive migrations; no table is dropped or recreated.
-- Provider adapters for TejHQ daily Indian equity OHLCV, Yahoo Finance through `yfinance` for international equity prices, Binance public Spot candles and ticker quotes, GDELT news, and optional Yahoo Finance News through `yfinance`.
-- Canonical instrument resolution using `market:EXCHANGE:SYMBOL` identities. Symbol, name, market, exchange, currency, asset type, provider and provider-specific symbol are retained through the ledger and quote paths. Exchanges are not guessed beyond documented market defaults, and crypto pairs must include a supported quote asset.
-- A centralised quote service with provider routing, caching, rate-limit-aware backoff, request deduplication and explicit freshness labels. Crypto uses Binance REST plus one shared public WebSocket; Indian equities remain daily end-of-day TejHQ data; international quotes come from Yahoo Finance with their actual last-available/delayed timestamps.
-- OHLCV normalisation and validation, with provider/source and adjustment metadata.
-- Best-effort Yahoo Finance company profiles, valuation/quality ratios and quarterly financial statements where the provider supplies them.
+- **One market-data source:** the bundled unofficial TradingView API (`TradingView-API/TradingView-API-main`) for candles, quotes, symbol metadata, live market search and technical ratings. A loopback Node.js bridge (`tradingview-bridge/`) adapts the ESM library for the Python backend. TejHQ, Yahoo Finance, Binance REST/WebSocket and GDELT/Yahoo News integrations have been removed.
+- Canonical instrument resolution using `market:EXCHANGE:SYMBOL` identities. Symbol, name, market, exchange, currency, asset type, provider and provider-specific symbol are retained through the ledger and quote paths. Exchanges are not guessed beyond documented market defaults, crypto pairs must include a supported quote asset, and unknown symbols can be resolved through live TradingView search.
+- A centralised quote service with batched TradingView requests, caching, rate-limit-aware backoff, request deduplication and explicit freshness labels. TradingView's own delay/update-mode fields drive `real_time`/`delayed` labels; Indian equities are typically delayed 15 minutes for anonymous access. If a batch fails, the bridge retries each symbol individually.
+- OHLCV normalisation and validation, with provider/source and split-adjustment metadata. TradingView history is requested with split adjustment, and the final incomplete candle is dropped.
+- TradingView symbol metadata (`pricescale`/`minmov`, currency, session) and scanner technical ratings exposed through the bridge.
 - Deterministic SMA, EMA, Wilder-seeded RSI/ATR/ADX, MACD, Bollinger Bands, Donchian channels, relative volume, OBV, session VWAP (intraday bars only; deliberately unavailable on daily bars), MFI, CMF, CCI and Stochastic RSI calculations.
 - One versioned daily trend/Donchian strategy with selectable long-only, short-only and long/short research modes. `BUY` opens a long, `SELL` exits an existing long, `SELL_SHORT` opens a short research exposure, and `BUY_TO_COVER` exits an existing short. Signals use completed candles only and never place orders.
-- Signal suppression when daily strategy data is stale or Indian-equity history is not confirmed corporate-action-adjusted.
+- Signal suppression when daily strategy data is stale or TradingView does not confirm split-adjusted history.
 - Direction-aware ATR-based position sizing and a single-instrument daily backtest with next-bar-open execution assumptions, configurable aggregate basis-point costs and explicit LONG/SHORT trade records.
-- Stock/asset-specific news endpoint with GDELT discovery and optional Yahoo Finance News supplementation.
+- A news endpoint kept for client compatibility that explicitly returns an empty result because no news provider is bundled.
 - Manual exposure ledger with explicit BUY, SELL, SELL_SHORT and BUY_TO_COVER intents and separate FIFO long/short lots. Short rows are research/manual exposure only; the system makes no claim of exchange execution, borrowing, margin, collateral or funding. The owner enters a monetary reference notional; the backend validates a provider quote, derives quantity and stores the reference price. Invalid oversells, over-covers, reversals and deletions that would invalidate the ledger are rejected. No order placement or paper-trading account is provided.
 - Backend-computed live portfolio valuation: invested value, current market value, day change, unrealised P&L and return, realised P&L, fees and total P&L. Monetary summary totals are grouped by transaction currency; no INR/USD/USDT conversion is performed or implied.
 - Position detail with canonical identity, signed long/short quantity, side-aware cost/proceeds basis and P&L, latest quote, marked exposure, FIFO history/lots and a daily candle chart with direction-aware trade markers.
-- An SSE quote stream and shared frontend quote hub so watchlist, portfolio and analysis views use the same instrument identity, prices and timestamps without duplicate provider calls. Held instruments are added to the watchlist once, deduplicated by canonical identity.
+- An SSE quote stream and shared frontend quote hub so watchlist, portfolio and analysis views use the same instrument identity, prices and timestamps without duplicate provider calls. The stream replays the shared TradingView quote cache; it is not a socket feed. Held instruments are added to the watchlist once, deduplicated by canonical identity.
 - React + TypeScript frontend with dashboard, markets/watchlist, stock and crypto analysis, live portfolio valuation, backtesting and settings pages; candlestick/volume charts via Lightweight Charts and backend-computed indicator series; machine-readable API at `/docs`; automated backend and frontend tests.
 
 ### Not implemented yet (do not assume these features exist)
@@ -42,19 +42,19 @@ This repository now contains a **runnable local application foundation**, not ju
 - A statistically approved or profitable strategy. The included backtest is an initial single-instrument research implementation, not a full portfolio simulator, survivorship-free universe test or completed walk-forward/PBO/DSR validation programme.
 - Multiple strategy families as executable engines. Momentum ranking, pullback, mean reversion and intraday ORB remain research specifications until implemented and tested.
 - Full point-in-time NSE/BSE constituent history, delisted-equity coverage, exchange-calendar integration, complete Indian transaction-tax calculation or a broker-specific fill model.
-- Fundamental statements, filing feeds, corporate-action/event feeds and automatic issuer mapping. Symbol search uses locally known instruments; it is not a complete global security master.
-- Crypto project-event discovery, smart-contract/token unlock calendar or derivatives/funding data. Crypto candles and quotes are exchange-specific Binance Spot data.
+- Fundamental statements, filing feeds, corporate-action/event feeds and automatic issuer mapping. Symbol search uses the bundled catalogue plus live TradingView search; it is not a complete global security master.
+- News, crypto project-event discovery, smart-contract/token unlock calendar or derivatives/funding data. `/api/instruments/{symbol}/news` returns an explicit empty result rather than inventing headlines.
 - Currency conversion, cross-currency portfolio totals, broker account synchronisation or tax reporting. Portfolio summary values are reported separately per transaction currency.
 - Automated notifications or remote access. Provider feeds are not redistributed, and the app is not a public service.
 
-The implementation is deliberately honest about unavailable data: provider failures are surfaced, missing event data is not filled with guesses, and a data source is not silently treated as live or adjusted. Provider adapters are replaceable; the strategy engine never imports a vendor SDK.
+The implementation is deliberately honest about unavailable data: provider failures are surfaced, missing event data is not filled with guesses, and a data source is not silently treated as live or adjusted. The TradingView bridge is replaceable; the strategy engine never imports a vendor SDK.
 
 ### Run locally
 
 Requirements:
 
 - Python 3.11, 3.12, 3.13 or 3.14. Python 3.15 is **not** supported yet: `pandas<3.0` has no wheel for it, so `pip install -r requirements.txt` falls back to a source build and fails without a full C/C++ toolchain. The launcher scripts select a compatible interpreter automatically when one is installed.
-- Node.js 20 or newer, including npm. Node is required only for the React frontend.
+- Node.js 20 or newer, including npm. Node runs both the TradingView bridge and the React frontend.
 
 #### One-command Windows launcher
 
@@ -62,7 +62,7 @@ Requirements:
 run.bat
 ```
 
-`run.bat` checks Python and Node/npm, creates or reuses `.venv`, installs missing Python and frontend dependencies, starts FastAPI on `http://127.0.0.1:8000` and Vite on `http://localhost:5173` in separate windows, waits until both answer, then opens `http://localhost:5173`. It reuses an already-running backend or frontend instead of starting a duplicate, and prints a readable error (with `pause`) if any step fails.
+`run.bat` checks Python and Node/npm, creates or reuses `.venv`, installs missing Python and frontend dependencies, builds the bundled TradingView library if `dist/` is absent, starts the TradingView bridge on `http://127.0.0.1:8010`, FastAPI on `http://127.0.0.1:8000` and Vite on `http://localhost:5173`, waits until each answers, then opens `http://localhost:5173`. It reuses already-running services instead of starting duplicates, and prints a readable error (with `pause`) if any step fails.
 
 #### Manual setup
 
@@ -74,11 +74,19 @@ py -3.14 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 Copy-Item .env.example .env
-# Edit .env and add your TejHQ free key, if available.
+# Terminal 1: TradingView bridge
+cd tradingview-bridge
+npm start
+```
+
+In a second terminal, start FastAPI:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
 python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
 ```
 
-Then, in a second terminal:
+Then, in a third terminal:
 
 ```powershell
 cd frontend
@@ -94,11 +102,18 @@ python3.14 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 cp .env.example .env
-# Edit .env and add your TejHQ free key, if available.
+# Terminal 1: TradingView bridge
+cd tradingview-bridge && npm start
+```
+
+In a second terminal, start FastAPI:
+
+```bash
+source .venv/bin/activate
 python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
 ```
 
-Then, in a second terminal:
+Then, in a third terminal:
 
 ```bash
 cd frontend
@@ -106,9 +121,11 @@ npm install
 npm run dev
 ```
 
+If `TradingView-API/TradingView-API-main/dist/index.js` is missing, build the library once with `npm install && npm run build` inside that directory. The bridge imports the prebuilt `dist/` directly.
+
 Open `http://localhost:5173` for the React application. API documentation is at `http://127.0.0.1:8000/docs`; the legacy plain-HTML workbench remains at `http://127.0.0.1:8000/`.
 
-Set `TEJHQ_API_KEY` to use TejHQ's adjusted-price endpoint. Without it, Tradely uses TejHQ's keyless raw EOD endpoint and **suppresses Indian actionable signals and backtests because the history is unadjusted**. International prices use the unofficial Yahoo Finance adapter; crypto prices use Binance Spot public market-data endpoints. Provider keys stay in `.env` and must never be committed.
+All market data comes from the unofficial TradingView API through the local bridge. Anonymous access is delayed on many exchanges (NSE is typically 15 minutes delayed) and deep intraday history can be limited. Optional `TRADINGVIEW_SESSION`/`TRADINGVIEW_SIGNATURE` cookies can be exported to the bridge process for account data; leave them unset for anonymous access. Credentials stay in the environment and must never be committed.
 
 Run the backend tests (from the repository root):
 
@@ -132,14 +149,15 @@ The production bundle is written to `frontend/dist/`. On Windows PowerShell, if 
 | Method | Route | Purpose |
 |---|---|---|
 | `GET` | `/api/health` | Local app status and scope flags |
-| `GET` | `/api/providers/status` | Provider configuration and known limits |
+| `GET` | `/api/providers/status` | TradingView bridge health and known limits |
 | `GET` | `/api/market/candles` | Normalised OHLCV candles |
-| `GET` | `/api/instruments/search` | Search locally known canonical instruments |
+| `GET` | `/api/instruments/search` | Search the catalogue plus live TradingView market search |
 | `GET` | `/api/instruments/resolve` | Resolve a symbol and market to a canonical instrument identity |
+| `POST` | `/api/instruments/catalogue/refresh` | Import matching listings from live TradingView search (`q=...`) |
 | `GET` | `/api/instruments/{symbol}/analysis` | Latest indicators and strategy explanation |
 | `GET` | `/api/instruments/{symbol}/indicators` | Per-bar OHLCV plus every backend-computed indicator (additive; used for chart panes) |
 | `GET` | `/api/instruments/{symbol}/technicals` | Conventional Buy/Sell/Neutral labels for existing backend indicators (additive; drives the gauges and tables) |
-| `GET` | `/api/instruments/{symbol}/news` | GDELT discovery with optional Yahoo Finance News supplementation |
+| `GET` | `/api/instruments/{symbol}/news` | Explicit empty result; no news provider is bundled |
 | `GET` | `/api/scanner/watchlist` | Daily strategy scan of saved watchlist |
 | `POST` | `/api/backtests/trend-breakout` | Daily single-instrument backtest with selectable direction mode |
 | `POST` | `/api/risk/position-size` | Direction-aware risk-budget position sizing |
@@ -147,7 +165,7 @@ The production bundle is written to `frontend/dist/`. On Windows PowerShell, if 
 | `DELETE` | `/api/watchlist/{market}/{symbol}` | Remove a watchlist entry |
 | `GET` | `/api/watchlist/quotes` | Latest quotes for every watchlist instrument |
 | `GET` | `/api/market/quotes` | Deduplicated latest quotes by `instrument_id`, `symbol` or whole watchlist |
-| `GET` | `/api/market/quotes/stream` | Server-Sent Events quote stream backed by the shared quote cache and Binance WebSocket |
+| `GET` | `/api/market/quotes/stream` | Server-Sent Events quote stream backed by the shared TradingView quote cache |
 | `GET/POST` | `/api/portfolio/transactions` | Read/add explicit BUY, SELL, SELL_SHORT or BUY_TO_COVER manual exposure entries |
 | `POST` | `/api/portfolio/transactions/preview` | Server-authoritative notional-to-quantity preview with precision and long/short availability |
 | `DELETE` | `/api/portfolio/transactions/{transaction_id}` | Delete a transaction if the remaining ledger stays valid |
@@ -201,19 +219,19 @@ frontend/
 - FIFO is calculated in the backend with decimal arithmetic. BUY adds a lot and allocates its fees into per-unit cost. SELL validates available quantity, rejects oversell, consumes the oldest lots, allocates their buy fees, deducts sell fees and records realised P&L. A partial sale leaves the position open; a full sale removes it from open positions but preserves the ledger. Short positions are not supported.
 - Transaction entry is amount-based. The client sends `instrument_id`, `side`, `amount`, `currency`, `fees`, `trade_time`, `notes` and an `idempotency_key`. It never sends the accounting quantity or unit price. The backend resolves the instrument, fetches and validates its own quote, derives the quantity, reconciles the actual notional and persists both quantity and reference price for FIFO, cost basis and realised P&L.
 - `POST /api/portfolio/transactions/preview` returns the quantity, actual transaction amount, remainder, total cash cost (BUY) or net proceeds (SELL), available holdings, maximum sellable value and the trading-rule source. The React form debounces requests and renders this response; it does not implement accounting precision itself.
-- Derived quantity is always floored to the instrument quantity step, so a BUY never spends more than the requested amount. Binance Spot rules are read from the pair's `exchangeInfo`; crypto recording is rejected when those rules cannot be verified rather than guessing precision. Indian equities default to whole shares and the global-equity fallback is labelled as a fractional-share default.
+- Derived quantity is always floored to the instrument quantity step, so a BUY never spends more than the requested amount. Crypto steps are derived from TradingView symbol precision (`pricescale`/`minmov`) with a labelled conservative fallback; they are ledger estimates, not exchange order filters. Indian equities default to whole shares and the global-equity fallback is labelled as a fractional-share default.
 - Entries within the last ten minutes use a freshly refreshed provider quote. Older entries use provider candles at or before the selected transaction time and are stored as `historical`; the current price is never substituted for a backdated transaction. `stale`, `cached` and `unavailable` quotes are rejected, and recording is disabled while no usable quote exists.
 - Each row stores an immutable quote snapshot (`quote_provider`, `quote_time`, `quote_type`, `quote_status`, `quote_currency`) plus the requested and actual amounts. A unique partial index on non-empty `idempotency_key` makes retried submissions return the original row instead of duplicating it.
 - Existing `quantity` and `price` columns and all historical rows are preserved. Migrations are additive and backfill the new amount fields from `quantity × price`; no ledger table is recreated.
 - Open-position values are computed by the backend from remaining FIFO cost basis and the latest quote. If no usable quote exists, the position remains visible with null market value/unrealised P&L and an explicit quote error; no price is fabricated.
 - Summary values are grouped by transaction currency. There is no verified INR/USD/USDT conversion, so the app never adds different currencies into one total.
-- Quote labels distinguish provider states: Binance crypto ticks can be `real_time`/`live`, older crypto quotes become `delayed`, then `stale`; Indian equity closes are `end_of_day` (`eod`); Yahoo international quotes are `last_available`/`delayed`; cached fallbacks are `cached` or `stale`; failures are `unavailable`. Each quote carries provider, provider timestamp, retrieval time, age, market status and freshness.
-- Crypto quotes use the shared Binance public WebSocket with reconnect, plus REST fallback. Indian equity data is daily end-of-day and is never labelled real-time. Provider failures use exponential backoff (including a longer pause on rate limits), and manual `force=true` refreshes remain available.
+- Quote labels distinguish provider states: TradingView quotes are `real_time` when its payload reports no delay, otherwise `delayed`; cached fallbacks become `cached` or `stale`; failures are `unavailable`. Each quote carries provider, provider timestamp, retrieval time, age, delay seconds, update mode, market status and freshness.
+- Quotes are fetched in batches through the local bridge. TradingView rejects a whole batch if one symbol is invalid, so the bridge retries each symbol individually on failure. Provider failures use exponential backoff (including a longer pause on rate limits), and manual `force=true` refreshes remain available. The SSE endpoint polls this cache; it does not open a market-data socket.
 
 ### Data and execution semantics
 
 - The first strategy is daily-only. Intraday indicators can be inspected from sources that provide completed intraday candles, but the daily strategy is not applied to those intervals.
-- Binance's active, still-forming candle is excluded. Binance pagination fetches up to 2,500 candles (three 1,000-row pages maximum); if that cap is reached, the API marks the history as truncated. Yahoo intraday and current-session candles are filtered conservatively; provider timestamps and market sessions can still vary.
+- TradingView's active, still-forming candle is excluded. Analysis, chart and history requests load the maximum number of bars TradingView exposes for the chosen symbol and timeframe; the library pages through deep history until the server reports no more bars. Bars are requested split-adjusted, and provider timestamps and market sessions can still vary by exchange.
 - Session VWAP is only calculated when the input spacing is intraday. Daily OHLCV bars do not contain the intraday volume distribution, so daily session VWAP is returned as unavailable rather than approximated from typical price.
 - The single-instrument backtest evaluates completed daily signals and uses next-bar open entries/exits for close-based conditions. Protective stops are checked against candle ranges and gaps are filled at the bar open when that is worse than the stop. Intrabar path, queue position, liquidity impact and exchange-auction mechanics remain approximate.
 - Backtest costs are an aggregate configurable basis-point input, not a complete Indian broker/STT/GST/stamp-duty engine. Always run a broker-specific cost model before drawing conclusions.
@@ -1160,240 +1178,89 @@ Every instrument should have `asset_class` (`equity` or `crypto`), `market`, `ex
 
 ---
 
-## 10. Free and low-cost data-provider strategy
+## 10. Data source: TradingView (unofficial)
 
-Provider pricing, free quotas, terms and geographic availability can change. Re-check official pages before implementation and periodically while using the app. **Free to call does not mean unrestricted use, unlimited storage or permission to redistribute.** Tradely is owner-only, so public/commercial redistribution is out of scope; personal-use restrictions, rate limits, attribution, retention rules and exchange requirements still apply. Keep all provider integrations behind adapters and keep credentials on the backend.
+Tradely now has **one market-data source**: the bundled unofficial TradingView API in `TradingView-API/TradingView-API-main`, exposed to the Python backend by the loopback Node.js bridge in `tradingview-bridge/`. TejHQ, Yahoo Finance, Binance REST/WebSocket and GDELT/Yahoo News adapters have been removed. There is no hidden multi-vendor fallback: if TradingView cannot serve a request, the API reports the failure and marks the data unavailable or stale.
 
-### 10.1 Practical provider summary
+Provider terms, quotas and rate limits can change. This is an unofficial library, not a licensed exchange feed or an official TradingView API. Keep the deployment private, do not redistribute the data, and re-check TradingView's terms before relying on the integration.
 
-| Asset / feature | No-cost or free-tier option | What it is useful for | Important limitation |
-|---|---|---|---|
-| Indian equities EOD | Yahoo Finance through `yfinance`; TejHQ free-key tier for private use | Prototype historical bars, quotes/reference data and indicators | Yahoo data is unofficial and intended for personal use; TejHQ free terms are private/personal, not a free public-product licence; not a guaranteed licensed live feed |
-| International equities EOD | Yahoo Finance through `yfinance`; Alpha Vantage free tier; selected Twelve Data Basic symbols | US-first and other provider-covered global shares | Yahoo is personal-use only; Alpha Vantage free quota is 25 requests/day for most free datasets; Twelve Data Basic covers a limited set of markets and request credits |
-| US company filings | SEC EDGAR | Official filings, submissions and XBRL company facts | US issuer filings only; not an equity quote feed or complete forward corporate-events calendar |
-| Crypto exchange data | Binance public Spot REST/WebSocket market-data endpoints | Exchange-specific OHLCV, trades, ticker and order-book data | Venue-specific; endpoint weights, geographic availability and exchange terms apply |
-| Aggregate crypto data | CoinGecko Demo API | Asset discovery, market caps, aggregated prices and broad historical context | 10,000 call credits/month, 100 calls/minute, attribution required; Demo plan is limited and not a commercial redistribution licence |
-| Global/company news discovery | GDELT DOC API and GDELT datasets | Search news mentioning companies, sectors, countries and macro topics | Broad discovery/indexing, not an authoritative financial-news or issuer-disclosure service; article content remains subject to publisher rights |
-| Company news by ticker | Yahoo Finance news through `yfinance` for private/personal research; provider adapters such as Finnhub only after checking plan coverage | Convenient ticker-oriented article discovery | Yahoo personal-use restriction; coverage and free-plan rights vary by provider and ticker/exchange |
-| News publisher feeds | Publisher-provided RSS feeds | Headline, source, date and original article link | Per-publisher feed availability and terms apply; do not republish full articles without permission |
-| Development-only news API | NewsAPI Developer plan | Test a news-feed UI during development | 100 requests/day, 24-hour delay; developer plan is for development/testing only, not staging or production |
+### 10.1 What the source provides
 
-### 10.2 Yahoo Finance through `yfinance` — broad prototype source
+| Need | TradingView capability | Important limitation |
+|---|---|---|
+| Equity candles | NSE, BSE, NASDAQ, NYSE, AMEX and NYSEARCA symbols via `getCandles` | Unofficial access; anonymous data is delayed on many exchanges (NSE is typically 15 minutes delayed) |
+| Crypto candles | `BINANCE:PAIR` symbols via `getCandles` | Exchange-specific venue data, not a consolidated global crypto price |
+| Quotes | Batched `getQuotes`, with per-symbol `getAllSettled` fallback in the bridge | Delay/update mode is reported by TradingView and surfaced in every quote |
+| Symbol metadata | `getSymbolInfo` (`pricescale`, `minmov`, currency, session) | TradingView does not publish exchange order filters or lot sizes |
+| Search | `searchMarkets` for live symbol/name lookup | Results must still be filtered to supported exchanges and pair formats |
+| Technical ratings | `getTechnicalAnalysis` scanner ratings | Classification only; Tradely's own strategy logic remains authoritative |
 
-- Project: [yfinance documentation](https://ranaroussi.github.io/yfinance/) · [GitHub](https://github.com/ranaroussi/yfinance)
-- The library exposes historical prices, quote metadata, financial statements, corporate-action fields, calendars and news/search functions for symbols supported by Yahoo Finance.
-- Indian symbols commonly use `.NS` (NSE) and `.BO` (BSE) suffixes; US tickers commonly use their exchange ticker. Other international suffixes vary and must be resolved from provider search/metadata.
-- It is a community-maintained library that calls Yahoo's publicly available interfaces. It is **not an official Yahoo Finance API**, is not endorsed by Yahoo, and the project documentation says Yahoo Finance data is intended for **personal use only**.
-- There is no contractual uptime, stable public API SLA or guaranteed rate limit. Requests can be throttled, changed or temporarily fail. Do not build a high-frequency/live signal system on top of it.
-- Use it only for the owner's local/private personal research after checking Yahoo's current Terms of Service. Do not assume that an open-source library licence grants rights to the underlying market data. Tradely must not redistribute or expose this data to other users.
-- Classify data freshness from the actual returned timestamp/market status. Never label a Yahoo quote as real-time unless the provider explicitly confirms that for that instrument and entitlement.
+Deep intraday history can still be limited by TradingView's own access rules, but Tradely no longer imposes a bar cap: analysis, chart and history requests ask for the maximum bars the symbol/timeframe exposes and the bridge pages through history until the server reports no more bars. Date-bounded paths such as backtests and historical transaction prices still request only their selected window. Candles are requested with split adjustment; the active, still-forming candle is dropped so strategy signals use completed bars only.
 
-**Recommendation:** `yfinance` is the easiest broad-market starting adapter for the owner's private Tradely prototype, but it must be replaceable when a source becomes unavailable or its terms change. It is not an official Yahoo API and must not be used to redistribute Yahoo data.
+### 10.2 The loopback bridge
 
-### 10.3 India EOD data — TejHQ (private-use tier)
+The library is ESM/Node, so a small HTTP bridge runs separately from FastAPI:
 
-- Docs: [TejHQ API documentation](https://tejhq.dev/docs)
-- Free key: [TejHQ API key](https://tejhq.dev/keys)
-- Data terms: [What you can do with TejHQ data](https://tejhq.dev/data-terms)
+```text
+TradingView-API/TradingView-API-main/dist/index.js
+        ?
+        � direct ESM import
+tradingview-bridge/server.mjs   (127.0.0.1:8010)
+        ?
+        � HTTP, loopback only
+FastAPI TradingViewProvider / TradingViewBridge
+```
 
-The documented service provides Indian-equity EOD data and selected reference/corporate-action endpoints. Its published free-key quota has been listed as 1,000 calls/day and 300 calls/minute; confirm the current dashboard/terms when creating a key.
+Bridge endpoints are read-only: `/health`, `/candles`, `/quotes`, `/quote`, `/symbol`, `/search` and `/technical-analysis`. It never places orders or mutates a TradingView account. `run.bat`/`run.sh` build the library when `dist/` is missing and start the bridge before FastAPI.
 
-**Limitations:**
+Relevant `.env` settings:
 
-- EOD data is not an intraday feed.
-- TejHQ's terms state that its free access is for personal research/private dashboards within limits. Use in a product, for clients or inside a business may require a paid plan.
-- TejHQ states it does not hold an NSE/BSE licence that it can pass through to users. Exchange data rights apply independently; its software/code licence does not license market data.
-- Do not redistribute raw exchange data unless the applicable rights explicitly permit it.
+| Variable | Default | Meaning |
+|---|---|---|
+| `TRADINGVIEW_BRIDGE_URL` | `http://127.0.0.1:8010` | Bridge address used by Python |
+| `TRADINGVIEW_BRIDGE_TIMEOUT_SECONDS` | `60` | Overall HTTP timeout |
+| `TRADINGVIEW_CANDLES_TIMEOUT_SECONDS` | `50` | Candle request timeout |
+| `TRADINGVIEW_QUOTES_TIMEOUT_SECONDS` | `30` | Quote request timeout |
+| `TRADINGVIEW_SEARCH_TIMEOUT_SECONDS` | `15` | Search request timeout |
+| `TRADINGVIEW_LIVE_SEARCH_ENABLED` | `true` | Resolve unknown symbols through live TradingView search |
+| `TRADINGVIEW_SESSION` / `TRADINGVIEW_SIGNATURE` | empty | Optional session cookies for account data; leave empty for anonymous access |
 
-Use TejHQ as an optional private EOD adapter and cross-check it against another source. Do not make the entire application dependent on it.
+Optional bridge-only settings (`TRADINGVIEW_BRIDGE_PORT`, concurrency and per-request timeout overrides) are documented in `tradingview-bridge/README.md`.
 
-### 10.4 Official Indian exchange data — licensing boundary
+### 10.3 Freshness, adjustment and quantity rules
+
+- Quotes are labelled from TradingView's own `delay` and `update_mode` fields. A positive delay becomes `delayed`; zero delay becomes `real_time`. Cached fallbacks become `cached` or `stale`, and failures become `unavailable`.
+- The quote service batches symbols, reuses one response for all subscribers, applies per-market TTLs and exponential backoff, and never substitutes a newer current price for a backdated transaction.
+- Candles are split-adjusted (`is_adjusted=true`). If TradingView cannot confirm adjustment, actionable Indian signals and backtests are suppressed rather than silently treated as clean.
+- Crypto quantity steps are derived from `pricescale`/`minmov` plus two decimal places, capped at eight decimals. They are labelled ledger estimates, not Binance order filters; when metadata is missing, a conservative fallback is used and labelled as such.
+- News is not sourced at all. `GET /api/instruments/{symbol}/news` returns an explicit empty list with an explanation, so the frontend never invents headlines or implies complete coverage.
+
+### 10.4 Redistribution and official-source boundary
+
+TradingView's unofficial endpoints are not a licence to redistribute exchange data. Tradely remains owner-only and must not expose quotes, candles or derived feeds to other users. For authoritative corporate disclosures, use official sources directly:
 
 - NSE data policy: [NSE Data Sharing & Usage Policy](https://www.nseindia.com/static/market-data/nse-data-policy)
-- NSE corporate data: [Paid Corporate Data](https://www.nseindia.com/static/market-data/corporate-data-subscription)
 - BSE data access: [BSE Self Data Feed](https://marketdata.bseindia.com/)
-- BSE product pricing reference: [BSE Information Products Pricing Sheet](https://www.bseindia.com/downloads1/Information_Products_Pricing_Sheet.pdf)
+- US filings: [SEC EDGAR](https://www.sec.gov/search-filings/edgar-search-assistance/accessing-edgar-data)
 
-Official exchange pages are the preferred source for authoritative Indian announcements and licensed market data. However, NSE explicitly describes data usage/sharing rules and paid subscriptions for commercial market-data access; BSE's data-feed service uses registration, KYC, plan selection and commercial terms. Therefore, do **not** assume that a publicly viewable exchange page or an undocumented JSON endpoint is a free API that Tradely may scrape, store or redistribute.
+Do not bypass authentication, anti-bot controls, geographic restrictions or rate limits to obtain data.
 
-For the owner-only private build, link directly to official filings and use only permitted data sources. Do not bypass anti-bot controls, authentication, rate limits or exchange terms. Tradely will not serve exchange data to other users.
-
-### 10.5 International equities — Alpha Vantage and Twelve Data as constrained fallbacks
-
-**Alpha Vantage**
-
-- Docs: [Alpha Vantage API documentation](https://www.alphavantage.co/documentation/)
-- Free limits: [Alpha Vantage support](https://www.alphavantage.co/support/)
-- Its support page currently states 25 API requests/day for most free datasets. It covers multiple asset classes and global symbols, but each endpoint, symbol and entitlement must be checked.
-- Realtime and 15-minute delayed US stock market data are identified as premium-only. Do not assume the free plan provides live US quotes.
-- Alpha Vantage's news/sentiment and some calendar/intelligence functions may require paid access; confirm endpoint entitlement in the account before depending on them.
-
-**Twelve Data**
-
-- Pricing: [Twelve Data plans](https://twelvedata.com/pricing)
-- Docs: [Twelve Data documentation](https://twelvedata.com/docs)
-- Its Basic plan currently lists 8 API credits/minute and 800/day, with limited trial WebSocket credits and access to a limited number of markets. The pricing page lists real-time US equities, forex and crypto on Basic; global EOD equity coverage is shown on a paid tier.
-- Endpoint weights consume different credits. Check exact symbol/exchange support before relying on it for a market.
-
-These are optional adapters and quota-limited fallbacks, not a guarantee of free unrestricted global stock coverage. Do not hard-code any assumption that all country/exchange symbols are supported.
-
-### 10.6 US company filings — SEC EDGAR
-
-- Official guide: [Accessing EDGAR Data](https://www.sec.gov/search-filings/edgar-search-assistance/accessing-edgar-data)
-- SEC APIs: [data.sec.gov](https://www.sec.gov/edgar/sec-api-documentation)
-- The SEC provides free access to filings and JSON data for company submissions and XBRL company facts. The SEC currently states a maximum rate of 10 requests/second and requires a declared descriptive `User-Agent` header.
-- EDGAR is the authoritative source for US filings such as 10-K, 10-Q, 8-K and relevant ownership disclosures. It is not a general real-time quote API and does not guarantee a structured future earnings date for every issuer.
-- Keep requests efficient, cache within permitted rules, respect SEC fair-access guidance and link to the original filing.
-
-### 10.7 Crypto — Binance public market data
-
-- Official docs: [Binance Spot REST API](https://developers.binance.com/en/docs/products/spot/rest-api)
-- Market-data-only endpoints: [Binance market data only](https://github.com/binance/binance-spot-api-docs/blob/master/faqs/market_data_only.md)
-- Binance documents public market-data endpoints with security type `NONE`; the market-data-only REST/WebSocket hosts do not require an API key for those endpoints.
-- Useful endpoints include exchange information, klines/candles, ticker price, 24-hour ticker, recent trades and order-book depth.
-- Example public host: `https://data-api.binance.vision`; public WebSocket market data host: `wss://data-stream.binance.vision`.
-- This is Binance venue data, not a consolidated global crypto price. Store venue/pair and respect request weights, rate limits, geographic access and Binance terms.
-- Tradely does not need an API key for public market-data-only endpoints. Never request or store account/trading permissions for this project.
-
-### 10.8 Crypto — CoinGecko Demo as an aggregate fallback
-
-- Pricing: [CoinGecko API pricing](https://www.coingecko.com/en/api/pricing)
-- Docs: [CoinGecko API docs](https://docs.coingecko.com/)
-- The current Demo plan lists 10,000 call credits/month and 100 calls/minute, with attribution required and data freshness from 60 seconds. The free Demo plan is for limited testing/exploration; commercial licensing is listed on paid tiers.
-- Use it for asset discovery, metadata, market-cap/volume context and aggregate price reference. Check endpoint history depth and credit weights.
-- Do not present aggregate data as an exchange-executable quote. Do not assume that Demo permits commercial redistribution.
-
-### 10.9 News and company-event providers — global, stock-specific, no AI
-
-Tradely's news and event information must appear **inside the analysis page for the selected instrument**. Do not build a standalone news calendar, calendar grid or global events page. Support company-specific feeds for Indian and international equities, plus asset/project-specific news for crypto.
-
-**A. GDELT — first global news-discovery source**
-
-- Project: [GDELT](https://www.gdeltproject.org/)
-- Data/query guide: [GDELT data and querying](https://www.gdeltproject.org/data.html)
-- DOC API: [GDELT DOC 2.0 API](https://blog.gdeltproject.org/gdelt-doc-2-0-api-debuts/)
-- GDELT describes its underlying database as free and open. It can discover global coverage matching a company name, ticker-related keyword, industry, country, regulator or macro topic.
-- GDELT is a discovery/indexing source, not an authoritative issuer disclosure provider and not a guarantee of complete coverage. Matching must handle company aliases and ambiguous names.
-- Store headline/metadata and the original publisher URL. Do not copy or republish publisher article text or images unless permitted by the publisher's rights. The fact that GDELT is open does not make third-party article content public domain.
-
-**B. Official issuer and regulator sources**
-
-- India: NSE/BSE company announcements and filings, plus the listed company's investor-relations site. Verify permitted access and exchange data licences; official exchange market-data feeds are not automatically free.
-- United States: SEC EDGAR filings, issuer investor-relations news releases and the relevant exchange's official notices.
-- Other international markets: use the relevant national securities regulator/exchange disclosure page and the issuer's investor-relations/press-release feed. There is no single verified, free, universal API for every country's official corporate events.
-- Crypto: official exchange announcement pages and project/foundation blogs or RSS feeds. Match announcements to the correct asset, chain and contract; do not infer that an exchange listing notice applies to every token with a similar ticker.
-
-**C. Publisher RSS feeds**
-
-Use publisher-provided RSS/Atom feeds where available and permitted. A feed can provide the headline, canonical link, timestamp and sometimes a short description. Examples of publishers to evaluate include Reuters, CNBC, CNBC-TV18, Economic Times, Business Standard, Mint and other regional financial publishers. Feed availability and reuse rights vary by publisher. Do not assume a publisher permits full-text republication or unrestricted commercial use.
-
-**D. NewsAPI — development/testing only**
-
-- Pricing: [NewsAPI pricing](https://newsapi.org/pricing)
-- The Developer plan currently lists 100 requests/day and a 24-hour article delay, and its terms limit it to development and testing; it cannot be used in staging or production. Use it to prototype the news UI only, not as Tradely's production news provider.
-
-**E. Yahoo Finance news through `yfinance` — private prototype only**
-
-`yfinance` exposes news/search functions alongside market data. It inherits the same critical Yahoo Finance restriction: the project documentation says the underlying data is intended for personal use only and the library is unofficial. Use only for a private local prototype after checking Yahoo's terms; do not treat it as a public commercial news API.
-
-**F. Finnhub and other ticker-news API providers — optional, entitlement-gated**
-
-Finnhub documents company-news and market-news APIs, but Tradely must verify the chosen plan supports each required endpoint and the specific country/ticker, and obtain confirmation of caching/display/redistribution rights. Do not mark a provider as a free production dependency solely because it offers a free API key. Keep Finnhub disabled until these checks pass.
-
-#### Stock/instrument-page news and event presentation
-
-When a user opens a selected instrument, show a contextual panel:
-
-1. **Overview** — latest company/asset-specific headlines, relevant sector/industry/global market coverage and important official notices, each clearly labelled by relevance.
-2. **Company / project news** — issuer, company, project or protocol-specific news.
-3. **Official filings / announcements** — exchange, regulator, issuer or crypto-exchange announcements with the original source link.
-4. **Upcoming company events** — only dated events belonging to the currently selected equity (earnings/results, board meeting, dividend, split, AGM/EGM, investor meeting, etc.), as compact rows/cards rather than a calendar grid.
-5. **Past announcements** — prior event disclosures useful for understanding price/volume reaction.
-
-For Indian equities, use Asia/Kolkata for display. For international equities, use the instrument's exchange timezone and optionally show the viewer's local time. Store all timestamps internally in UTC. Distinguish `published_at`, `announced_at`, `scheduled_for`, `retrieved_at` and `last_verified_at`.
-
-For crypto assets, display news/announcements related to the exact asset/project, relevant chain upgrades, exchange listings/delistings, token unlock information only when a source provides a verifiable schedule, and security/governance notices. Do not create a universal crypto calendar for the initial release.
-
-#### News matching, deduplication and classification
-
-- Match equities by exchange + symbol and ISIN where available; retain company aliases and historical symbols. Match crypto by canonical asset ID, chain and contract address where applicable.
-- Do not match only on a common company or token name.
-- De-duplicate by canonical URL, normalized title, publisher and publication time, but preserve separate official filings.
-- Classify items as `instrument_specific`, `sector_relevant`, `market_wide`, `regulatory`, `official_filing` or `crypto_project_specific`.
-- Preserve source name, source URL, publisher, publication time, retrieval time and freshness state.
-- Do not use news sentiment, headline tone or article volume to generate a BUY/SELL signal. News is contextual information; all trade signals remain deterministic and indicator/strategy-based.
-
-#### Minimum news/event data model
-
-`news_articles`: `id`, `headline`, `snippet` (only where permitted), `publisher`, `canonical_url`, `published_at_utc`, `retrieved_at_utc`, `source_id`, `category`, `relevance_type`, `asset_class` and deduplication fingerprint.
-
-`instrument_news_links`: `article_id`, `instrument_id`, `market`, `exchange_or_venue`, `symbol`, `ISIN` (nullable), `provider_asset_id` (nullable), `match_method` and `match_confidence` (only if a deterministic matching score is implemented).
-
-`instrument_events`: `id`, `instrument_id`, `market`, `exchange_or_venue`, `event_type`, `title`, `description`, `announced_at_utc`, `scheduled_at_utc` (nullable), `date_precision`, `status`, `source_name`, `source_url`, `retrieved_at_utc` and `last_verified_at_utc`.
-
-Recommended backend routes:
+### 10.5 Code boundaries
 
 ```text
-GET /api/instruments/{instrument_id}/news
-GET /api/instruments/{instrument_id}/events?status=upcoming
-GET /api/instruments/{instrument_id}/announcements
-GET /api/instruments/{instrument_id}/intelligence
-GET /api/markets/providers/status
+TradingViewBridge          (Python HTTP client for the loopback bridge)
+  +-- TradingViewProvider  (candles, quotes, symbol metadata, search, technicals)
+        +-- MarketService  (interval routing, candle validation, source metadata)
+              +-- QuoteService (cache, freshness, backoff, portfolio quotes)
 ```
 
-Paginate feeds, cache only within provider terms and show a visible source/freshness badge. If no verified event exists, show `No verified upcoming events found` rather than infer a date.
+No news provider, no Binance socket and no Yahoo/TejHQ adapter remain in the codebase. If a future source is added, it must sit behind an explicit adapter, expose its own freshness/adjustment metadata and never silently blend with TradingView bars.
 
-### 10.10 Recommended zero-subscription configuration for a private Tradely build
+### 10.6 When TradingView is unavailable
 
-For the first version running locally for one person, use the following practical combination and make every provider replaceable:
-
-| Need | First choice | Fallback / enrichment | Display policy |
-|---|---|---|---|
-| Indian equity historical/EOD prices | TejHQ keyless/free-key endpoints, subject to its personal-use terms | Yahoo Finance via `yfinance` (`.NS` / `.BO`) | Label EOD; compare sources; do not redistribute raw data |
-| International equity historical prices | Yahoo Finance via `yfinance` for covered tickers | Alpha Vantage (25/day) or Twelve Data Basic for supported symbols | Label source and delay; no promise of full global coverage |
-| US issuer disclosures | SEC EDGAR | Issuer investor-relations releases | Link original filings; honour SEC fair-access rules |
-| Crypto exchange candles | Binance public Spot market-data endpoints | CoinGecko Demo for aggregate context | Label the Binance market pair or CoinGecko aggregate separately |
-| Company/global news | GDELT discovery + publisher RSS feeds that permit use | Yahoo Finance news via `yfinance` only for private/personal use | Store headline/metadata/link; do not republish article text |
-| Indian company events | Official NSE/BSE filing pages and issuer IR sources, through permitted access | Provider adapter only after confirming exchange rights | Show source-backed event rows on the relevant stock page |
-| International company events | SEC filings for US names + issuer IR/regulator/exchange sources for other markets | Finnhub/other calendar API only after plan and rights verification | Never infer unannounced dates; show `not available` where no source exists |
-| Crypto project/exchange news | Official project and exchange announcement feeds + GDELT | A crypto-news API only after confirming its free-tier endpoint access and reuse terms | Match by canonical asset/chain, not ticker string alone |
-
-**Practical implementation order:**
-
-1. Implement the `yfinance` adapter for quick cross-market equity search/history in a private local development environment.
-2. Add TejHQ for better Indian EOD history and adjusted-price/symbol information, while respecting the personal-use boundary.
-3. Add Binance public Spot REST/WebSocket candles for crypto. No trading-enabled API key is needed for the documented public market-data-only endpoints.
-4. Add CoinGecko Demo only for aggregate crypto metadata/market context; cache responsibly within its plan and show attribution.
-5. Add GDELT + permitted publisher RSS as the default general-news discovery layer, then SEC EDGAR and official issuer/exchange disclosures for event/filing verification.
-6. Add Alpha Vantage or Twelve Data only for symbols/endpoints that are missing from the primary providers and only while within the free quotas.
-
-This setup can be implemented without a recurring API subscription for private experimentation, but it is not a guarantee of institutional-quality live data, universal symbol coverage, or rights to publish data to other users. Do not make a free-tier provider a hard dependency: display provider health and freshness, allow a source to be disabled, and fail closed when data is stale or unavailable.
-
-### 10.11 Provider-adapter architecture
-
-```text
-MarketDataProvider
-  ├── YahooFinancePersonalProvider   (yfinance; private prototype only)
-  ├── IndiaEodProvider               (TejHQ; private-use tier)
-  ├── AlphaVantageProvider           (quota-limited fallback)
-  ├── TwelveDataProvider              (limited free-tier coverage)
-  ├── SecEdgarProvider                (US filings/fundamentals, not price feed)
-  ├── BinanceSpotProvider             (public crypto venue data)
-  └── CoinGeckoAggregateProvider      (aggregate crypto data)
-
-NewsProvider
-  ├── GdeltNewsProvider               (global discovery)
-  ├── PublisherRssProvider            (publisher feeds subject to terms)
-  ├── IssuerDisclosureProvider        (exchange/regulator/IR sources)
-  ├── SecEdgarFilingsProvider         (US issuer filings)
-  ├── YahooNewsPersonalProvider       (private prototype only)
-  └── FinnhubNewsProvider             (disabled until plan/rights verified)
-```
-
-If a provider is unavailable, the application must show that data source as unavailable/stale and fall back only to an explicitly configured alternative. Never silently blend sources with different adjustments, timezones, currencies or candle definitions.
+`/api/providers/status` reports the bridge health and the known delay limits. Requests fail with an explicit provider error; cached quotes may be returned as `cached`/`stale`, but no price is fabricated. Start the bridge with `npm start` inside `tradingview-bridge/` (or use `run.bat`/`run.sh`) and retry.
 
 ---
-
 ## 11. Tradely application modules
 
 Recommended navigation:
@@ -1555,8 +1422,8 @@ This allows Tradely to explain exactly why a signal appeared and to investigate 
 
 ### Phase 1 — Reliable EOD research foundation
 
-- Add provider abstraction and instrument master for NSE/BSE, US-first international equities and crypto spot.
-- Add a private-prototype EOD provider adapter (yfinance) and an optional India EOD adapter (TejHQ, subject to terms).
+- Add provider abstraction and instrument master for NSE/BSE, US-first international equities and crypto spot. **(Implemented with TradingView.)**
+- Add the loopback TradingView bridge and single provider adapter for candles, quotes, metadata and search. **(Implemented.)**
 - Create historical OHLCV storage with market-specific calendars.
 - Add corporate-action handling and data-quality checks.
 - Implement indicator formulas and unit tests.
@@ -1586,8 +1453,8 @@ This allows Tradely to explain exactly why a signal appeared and to investigate 
 
 ### Phase 4 — Multi-market news, alerts and actual portfolio tracking
 
-- Add instrument-specific news panels for Indian equities, international equities and crypto assets.
-- Add GDELT global news discovery, permitted publisher RSS feeds, US SEC filing ingestion and official Indian exchange/issuer links.
+- Add instrument-specific news panels only after a permitted provider is selected and its caching/display rights are verified. Until then, the news route returns an explicit empty result.
+- Add official filing/announcement ingestion and issuer links as a separate, explicitly sourced feature; do not fold it into market-data quotes.
 - Add stock-specific corporate-event rows inside each equity analysis page; do not create a calendar page.
 - Add deterministic price/indicator alerts with source freshness checks.
 - Add actual-holdings portfolio tracking via manual transactions or CSV import; no simulated holdings, simulated fills or paper-trading account.
@@ -1597,11 +1464,10 @@ This allows Tradely to explain exactly why a signal appeared and to investigate 
 
 ### Phase 5 — International and crypto data adapters
 
-- Add US-first international equity coverage through the selected permitted source(s); add further countries only after verifying their symbol coverage, calendars, corporate actions and data rights.
-- Add SEC EDGAR company filings and issuer investor-relations release links for US companies.
-- Add Binance public crypto market data and CoinGecko aggregate fallback with provider/venue labels.
-- Add a 24/7 UTC crypto candle scheduler and venue-aware cost/liquidity model.
-- Add optional Twelve Data and Alpha Vantage adapters with hard quota limits and endpoint entitlement checks.
+- Expand international equity coverage through TradingView exchanges only after verifying symbol metadata, calendars and data rights.
+- Add SEC EDGAR company filings and issuer investor-relations release links for US companies as a separate filings feature.
+- Add a 24/7 UTC crypto candle scheduler and venue-aware cost/liquidity model on top of TradingView `BINANCE:` pairs.
+- Add another market-data adapter only if TradingView stops meeting the private-use requirement; it must expose its own provenance, adjustment and freshness metadata.
 
 **Exit criterion:** data freshness and provider provenance are always visible; international and crypto strategies are independently validated; unsupported symbols fail clearly rather than returning misleading data.
 
@@ -1636,9 +1502,9 @@ This allows Tradely to explain exactly why a signal appeared and to investigate 
 9. **No paper trading or order execution:** Tradely is an analysis, signal, backtesting and actual-holdings tracking tool in this scope.
 10. **Version everything:** data, indicator conventions, strategy code, parameters and cost models must be traceable.
 11. **Multi-market identity:** distinguish NSE/BSE, international exchanges and individual crypto venues; do not conflate duplicate tickers.
-12. **Instrument-specific news:** show company news, filings and upcoming/recent events only inside the relevant equity's analysis page; show project/exchange news inside the matching crypto asset page. No standalone calendar page.
-13. **Source traceability:** every news item and event must retain its publisher/official source, original URL, timestamps, relevance classification and freshness state.
-14. **No news-driven automatic signals:** news and event information is contextual; deterministic trading rules remain responsible for BUY/SELL/EXIT signals.
+12. **No invented news:** the current build bundles no news provider and returns an explicit empty result. If news is added later, show it only inside the relevant instrument page and never create a standalone calendar page.
+13. **Source traceability:** every future news item or event must retain its publisher/official source, original URL, timestamps, relevance classification and freshness state.
+14. **No news-driven automatic signals:** if contextual news is added later, deterministic trading rules remain solely responsible for BUY/SELL/EXIT signals.
 15. **Free-provider honesty:** a free key, public endpoint or open-source wrapper does not automatically grant data ownership, redistribution or commercial display rights.
 16. **Owner-only privacy:** Tradely is a private single-user application. Do not expose it publicly or provide provider data to other users.
 17. **Provider terms still apply:** private use does not waive personal-use terms, rate limits, attribution, retention rules, geographic restrictions or exchange requirements.
@@ -1673,23 +1539,15 @@ Tradely is intended solely for its owner's private quantitative research, analys
 
 ### Market-data providers
 
-11. TejHQ. **API documentation.** [Docs](https://tejhq.dev/docs) · [Free API key](https://tejhq.dev/keys) · [Data terms](https://tejhq.dev/data-terms)
-12. CoinGecko. **API pricing and Demo plan.** [Pricing](https://www.coingecko.com/en/api/pricing) · [API docs](https://docs.coingecko.com/)
-13. Binance. **Spot REST API.** [Official developer documentation](https://developers.binance.com/en/docs/products/spot/rest-api)
+11. TradingView API (`@mathieuc/tradingview`, unofficial). **Bundled library source** in `TradingView-API/TradingView-API-main`; used through the local `tradingview-bridge/`. [GitHub project](https://github.com/Mathieu2301/TradingView-API)
+12. TradingView. **Website terms and data usage.** [Terms of Use](https://www.tradingview.com/policies/)
+13. Binance. **Spot market-data documentation**, used only as the TradingView exchange identifier for crypto pairs. [Official developer documentation](https://developers.binance.com/en/docs/products/spot/rest-api)
 
+### Current licensing references
 
-### Current data, news and licensing references
-
-14. yfinance. **Yahoo Finance data access and personal-use disclaimer.** [Documentation](https://ranaroussi.github.io/yfinance/) · [GitHub](https://github.com/ranaroussi/yfinance)
-15. Binance. **Public market-data-only REST and WebSocket endpoints.** [Market-data-only documentation](https://github.com/binance/binance-spot-api-docs/blob/master/faqs/market_data_only.md) · [Spot REST API](https://developers.binance.com/en/docs/products/spot/rest-api)
-16. CoinGecko. **Demo API pricing, monthly call credits, rate limit and attribution.** [Pricing](https://www.coingecko.com/en/api/pricing) · [Documentation](https://docs.coingecko.com/)
-17. Alpha Vantage. **Free request limit and API endpoint documentation.** [Support](https://www.alphavantage.co/support/) · [Documentation](https://www.alphavantage.co/documentation/)
-18. Twelve Data. **Basic plan quotas and market coverage.** [Pricing](https://twelvedata.com/pricing) · [Documentation](https://twelvedata.com/docs)
-19. U.S. Securities and Exchange Commission. **Free EDGAR access, fair-access limit and User-Agent requirements.** [Accessing EDGAR Data](https://www.sec.gov/search-filings/edgar-search-assistance/accessing-edgar-data) · [SEC API documentation](https://www.sec.gov/edgar/sec-api-documentation)
-20. GDELT Project. **Open global news/event data and query tools.** [Project data page](https://www.gdeltproject.org/data.html) · [DOC API introduction](https://blog.gdeltproject.org/gdelt-doc-2-0-api-debuts/)
-21. NewsAPI. **Developer plan restrictions: 100 requests/day, 24-hour delay and development/testing-only use.** [Pricing](https://newsapi.org/pricing)
-22. NSE India. **Data sharing/usage policy and paid corporate data access.** [NSE Data Policy](https://www.nseindia.com/static/market-data/nse-data-policy) · [Corporate Data Subscription](https://www.nseindia.com/static/market-data/corporate-data-subscription)
-23. BSE India. **Market-data and corporate-data feed access.** [BSE Self Data Feed](https://marketdata.bseindia.com/) · [Information Products Pricing Sheet](https://www.bseindia.com/downloads1/Information_Products_Pricing_Sheet.pdf)
+14. U.S. Securities and Exchange Commission. **Free EDGAR access, fair-access limit and User-Agent requirements.** [Accessing EDGAR Data](https://www.sec.gov/search-filings/edgar-search-assistance/accessing-edgar-data) · [SEC API documentation](https://www.sec.gov/edgar/sec-api-documentation)
+15. NSE India. **Data sharing/usage policy and paid corporate data access.** [NSE Data Policy](https://www.nseindia.com/static/market-data/nse-data-policy) · [Corporate Data Subscription](https://www.nseindia.com/static/market-data/corporate-data-subscription)
+16. BSE India. **Market-data and corporate-data feed access.** [BSE Self Data Feed](https://marketdata.bseindia.com/) · [Information Products Pricing Sheet](https://www.bseindia.com/downloads1/Information_Products_Pricing_Sheet.pdf)
 
 ---
 

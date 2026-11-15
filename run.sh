@@ -54,12 +54,46 @@ if [ ! -d frontend/node_modules ]; then
   (cd frontend && npm install --no-fund --no-audit)
 fi
 
+# The Python backend talks to the unofficial TradingView Node.js library
+# through a loopback HTTP bridge.
+TV_LIB="TradingView-API/TradingView-API-main"
+if [ ! -f "$TV_LIB/dist/index.js" ]; then
+  echo "[Tradely] Building the bundled TradingView library (first run)..."
+  (cd "$TV_LIB" && npm install --no-fund --no-audit && npm run build)
+elif [ ! -d "$TV_LIB/node_modules/ws" ]; then
+  echo "[Tradely] Installing the TradingView library runtime dependency..."
+  (cd "$TV_LIB" && npm install --omit=dev --no-fund --no-audit)
+fi
+
 cleanup() {
   if [ -n "${API_PID:-}" ]; then
     kill "$API_PID" 2>/dev/null || true
   fi
+  if [ -n "${BRIDGE_PID:-}" ]; then
+    kill "$BRIDGE_PID" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT INT TERM
+
+BRIDGE_PID=""
+if curl -fsS http://127.0.0.1:8010/health >/dev/null 2>&1; then
+  echo "[Tradely] TradingView bridge is already running on http://127.0.0.1:8010 - reusing it."
+else
+  echo "[Tradely] Starting the TradingView bridge on http://127.0.0.1:8010 ..."
+  (cd tradingview-bridge && npm start) &
+  BRIDGE_PID=$!
+  for _ in $(seq 1 40); do
+    if curl -fsS http://127.0.0.1:8010/health >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.75
+  done
+  if ! curl -fsS http://127.0.0.1:8010/health >/dev/null 2>&1; then
+    echo "[Tradely] The TradingView bridge did not become ready on port 8010." >&2
+    exit 1
+  fi
+  echo "[Tradely] TradingView bridge is ready."
+fi
 
 echo "[Tradely] Starting FastAPI on http://127.0.0.1:8000 ..."
 "$VENV_PY" -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000 --reload &
@@ -79,6 +113,6 @@ fi
 
 echo "[Tradely] FastAPI is ready."
 echo "[Tradely] Starting Vite on http://localhost:5173 ..."
-echo "[Tradely] Press Ctrl+C to stop both servers."
+echo "[Tradely] Press Ctrl+C to stop the bridge, API and UI."
 cd frontend
 npm run dev

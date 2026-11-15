@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.instruments import (
+    TRADINGVIEW_PROVIDER,
     canonical_instrument,
     instrument_id_for,
     normalize_symbol,
@@ -536,6 +537,70 @@ class Database:
                 (status, _utc_now_iso(), instrument_id),
             )
         return cursor.rowcount > 0
+
+    def backfill_tradingview_metadata(self) -> int:
+        """Idempotently move stored provider metadata to TradingView identities.
+
+        Ledger quantities, prices and historical ``quote_provider`` audit fields
+        are never rewritten. Only the forward-looking instrument provider and
+        its exchange-qualified symbol are migrated.
+        """
+        legacy = (
+            "TejHQ",
+            "Yahoo Finance (yfinance; unofficial)",
+            "Binance Spot Public Market Data",
+        )
+        now = _utc_now_iso()
+        updated = 0
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """UPDATE instruments
+                   SET provider=?,
+                       provider_symbol=CASE
+                         WHEN instr(provider_symbol, ':') = 0 AND exchange <> '' AND symbol <> ''
+                           THEN exchange || ':' || symbol
+                         ELSE provider_symbol
+                       END,
+                       provider_instrument_id=CASE
+                         WHEN instr(COALESCE(provider_instrument_id, ''), ':') = 0
+                              AND exchange <> '' AND symbol <> ''
+                           THEN exchange || ':' || symbol
+                         ELSE provider_instrument_id
+                       END,
+                       updated_at=?
+                   WHERE provider IN (?,?,?)
+                      OR (instr(provider_symbol, ':') = 0 AND exchange <> '' AND symbol <> '')""",
+                (TRADINGVIEW_PROVIDER, now, *legacy),
+            )
+            updated += cursor.rowcount
+            cursor = connection.execute(
+                """UPDATE watchlist
+                   SET provider=?,
+                       provider_symbol=CASE
+                         WHEN instr(provider_symbol, ':') = 0 AND exchange <> '' AND symbol <> ''
+                           THEN exchange || ':' || symbol
+                         ELSE provider_symbol
+                       END
+                   WHERE provider IN (?,?,?, '')
+                      OR (instr(provider_symbol, ':') = 0 AND exchange <> '' AND symbol <> '')""",
+                (TRADINGVIEW_PROVIDER, *legacy),
+            )
+            updated += cursor.rowcount
+            cursor = connection.execute(
+                """UPDATE holding_transactions
+                   SET provider=?,
+                       provider_symbol=CASE
+                         WHEN instr(provider_symbol, ':') = 0 AND exchange <> '' AND symbol <> ''
+                           THEN exchange || ':' || symbol
+                         ELSE provider_symbol
+                       END
+                   WHERE instrument_id <> ''
+                     AND (provider IN (?,?,?) OR provider = ''
+                          OR (instr(provider_symbol, ':') = 0 AND exchange <> '' AND symbol <> ''))""",
+                (TRADINGVIEW_PROVIDER, *legacy),
+            )
+            updated += cursor.rowcount
+        return updated
 
     def resolve_instrument(
         self,

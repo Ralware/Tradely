@@ -4,6 +4,8 @@ import re
 
 from app.core.models import Instrument, Market
 
+TRADINGVIEW_PROVIDER = "TradingView (unofficial)"
+
 # Exchange and provider routing is deliberately explicit. A symbol is never
 # looked up on a different exchange merely because it exists there.
 MARKET_DEFAULTS: dict[str, dict[str, str]] = {
@@ -11,19 +13,19 @@ MARKET_DEFAULTS: dict[str, dict[str, str]] = {
         "exchange": "NSE",
         "currency": "INR",
         "asset_type": "equity",
-        "provider": "TejHQ",
+        "provider": TRADINGVIEW_PROVIDER,
     },
     "global": {
         "exchange": "NASDAQ",
         "currency": "USD",
         "asset_type": "equity",
-        "provider": "Yahoo Finance (yfinance; unofficial)",
+        "provider": TRADINGVIEW_PROVIDER,
     },
     "crypto": {
         "exchange": "BINANCE",
         "currency": "USDT",
         "asset_type": "crypto",
-        "provider": "Binance Spot Public Market Data",
+        "provider": TRADINGVIEW_PROVIDER,
     },
 }
 
@@ -83,10 +85,8 @@ def provider_for(market: Market, exchange: str) -> str:
 
 
 def provider_symbol_for(symbol: str, market: Market, exchange: str) -> str:
-    """Provider-specific symbol without silently changing the canonical symbol."""
-    if market == "crypto":
-        return symbol
-    return symbol
+    """TradingView uses one exchange-qualified ``EXCHANGE:SYMBOL`` identity."""
+    return f"{exchange.upper()}:{symbol.upper()}"
 
 
 def instrument_id_for(symbol: str, market: Market, exchange: str) -> str:

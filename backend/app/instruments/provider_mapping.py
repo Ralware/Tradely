@@ -2,38 +2,25 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.core.instruments import ALLOWED_EXCHANGES
+from app.core.instruments import ALLOWED_EXCHANGES, TRADINGVIEW_PROVIDER
 
-# A provider is selected from the resolved instrument, never from a symbol that
-# happens to exist somewhere. Each entry has one verified primary adapter.
+# One verified read-only provider serves every supported market. The adapter is
+# selected from the resolved instrument, never from a symbol that happens to
+# exist somewhere else.
 PROVIDER_ADAPTERS: dict[str, dict[str, Any]] = {
-    "tejhq": {
-        "name": "TejHQ",
-        "markets": {"india"},
-        "exchanges": {"NSE", "BSE"},
-        "asset_types": {"equity"},
-        "purpose": "Indian NSE/BSE daily OHLCV",
-    },
-    "yahoo": {
-        "name": "Yahoo Finance (yfinance; unofficial)",
-        "markets": {"global"},
-        "exchanges": {"NASDAQ", "NYSE", "AMEX", "NYSEARCA"},
-        "asset_types": {"equity"},
-        "purpose": "International equity prices through an unofficial adapter",
-    },
-    "binance": {
-        "name": "Binance Spot Public Market Data",
-        "markets": {"crypto"},
-        "exchanges": {"BINANCE"},
-        "asset_types": {"crypto"},
-        "purpose": "Public Binance Spot market data",
+    "tradingview": {
+        "name": TRADINGVIEW_PROVIDER,
+        "markets": {"india", "global", "crypto"},
+        "exchanges": {"NSE", "BSE", "NASDAQ", "NYSE", "AMEX", "NYSEARCA", "BINANCE"},
+        "asset_types": {"equity", "crypto"},
+        "purpose": "Exchange-qualified OHLCV, quotes and symbol metadata",
     },
 }
 
 _PROVIDER_KEY_BY_MARKET: dict[str, str] = {
-    "india": "tejhq",
-    "global": "yahoo",
-    "crypto": "binance",
+    "india": "tradingview",
+    "global": "tradingview",
+    "crypto": "tradingview",
 }
 
 
@@ -70,14 +57,19 @@ def verify_instrument_mapping(instrument: dict[str, Any] | Any) -> None:
     provider_symbol = str(_get(instrument, "provider_symbol") or "").strip()
     if not provider_symbol:
         raise ValueError("Instrument has no provider-specific symbol")
+    prefix, _, symbol = provider_symbol.partition(":")
+    if not symbol or prefix.upper() != exchange:
+        raise ValueError(
+            "TradingView provider symbols must use the instrument's "
+            f"EXCHANGE:SYMBOL identity (expected {exchange}:SYMBOL)"
+        )
 
 
 def provider_chain(instrument: dict[str, Any] | Any) -> list[str]:
     """Verified adapters for this exact instrument.
 
-    The fallback list is intentionally single-entry. None of the configured
-    providers is verified to return the exact same instrument and capability
-    set, so substituting a different provider would be a silent identity change.
+    The fallback list is intentionally single-entry: substituting another
+    provider would silently change the exchange-qualified identity.
     """
     verify_instrument_mapping(instrument)
     return [provider_key_for(instrument)]

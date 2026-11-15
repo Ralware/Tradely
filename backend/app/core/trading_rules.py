@@ -14,21 +14,20 @@ def _decimal(value: Any) -> Decimal:
 
 
 def default_trading_rules(instrument: Instrument | dict[str, Any]) -> TradingRules:
-    """Conservative ledger rules where a broker-specific rule set is unavailable.
+    """Conservative ledger rules where provider metadata is unavailable.
 
-    Crypto quotes route through Binance, whose exchange rules are fetched by the
-    quote service. For equities there is no public per-broker order filter in the
-    configured free feeds, so the source is labelled honestly rather than
-    pretending these are broker execution rules.
+    Crypto quotes route through TradingView, whose symbol metadata provides a
+    price scale but not exchange order filters. The live rules are therefore
+    derived and labelled as such, never presented as broker execution rules.
     """
     market = instrument.market if isinstance(instrument, Instrument) else instrument.get("market")
     if market == "crypto":
         return TradingRules(
             quantity_step=0.00000001,
             min_quantity=0.00000001,
-            min_notional=5.0,
+            min_notional=1.0,
             fractional=True,
-            source="Binance Pair Rules Unavailable; Conservative Fallback",
+            source="TradingView Symbol Metadata Unavailable; Conservative Fallback",
             is_fallback=True,
         )
     if market == "india":
@@ -48,46 +47,36 @@ def default_trading_rules(instrument: Instrument | dict[str, Any]) -> TradingRul
     )
 
 
-def binance_rules_from_exchange_info(
-    payload: dict[str, Any], symbol: str,
+def tradingview_rules_from_symbol_info(
+    payload: dict[str, Any], symbol: str = "",
 ) -> TradingRules:
-    """Extract quantity and notional filters for one exact Binance Spot pair."""
-    symbols = payload.get("symbols")
-    if not isinstance(symbols, list):
-        raise ValueError("Binance exchangeInfo response did not contain symbols")
-    match = next(
-        (
-            item for item in symbols
-            if isinstance(item, dict) and str(item.get("symbol") or "").upper() == symbol.upper()
-        ),
-        None,
-    )
-    if not match:
-        raise ValueError(f"Binance exchangeInfo did not include {symbol}")
+    """Derive a conservative quantity step from TradingView symbol metadata.
 
-    filters = {
-        str(item.get("filterType")): item
-        for item in match.get("filters", [])
-        if isinstance(item, dict) and item.get("filterType")
-    }
-    lot = filters.get("LOT_SIZE") or filters.get("MARKET_LOT_SIZE")
-    if not lot:
-        raise ValueError(f"Binance did not publish LOT_SIZE rules for {symbol}")
-    step = _decimal(lot.get("stepSize") or "0")
-    minimum = _decimal(lot.get("minQty") or step)
-    maximum_value = lot.get("maxQty")
-    maximum = _decimal(maximum_value) if maximum_value not in (None, "") else None
-    notional_filter = filters.get("NOTIONAL") or filters.get("MIN_NOTIONAL") or {}
-    minimum_notional = _decimal(notional_filter.get("minNotional") or "0")
-    if step <= _ZERO:
-        raise ValueError(f"Binance returned an invalid quantity step for {symbol}")
+    TradingView publishes a price scale (``pricescale``/``minmov``), not the
+    exchange's lot-size filter. Two extra decimal places beyond the price scale
+    keep the ledger useful without inventing exchange precision.
+    """
+    try:
+        pricescale = int(payload.get("pricescale") or 0)
+        minmov = int(payload.get("minmov") or 1)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("TradingView symbol metadata has no usable price scale") from exc
+    if pricescale < 1:
+        raise ValueError("TradingView symbol metadata has no usable price scale")
+    price_decimals = max(0, len(str(pricescale)) - 1)
+    quantity_decimals = min(8, price_decimals + 2)
+    step = Decimal(1).scaleb(-quantity_decimals)
     return TradingRules(
         quantity_step=float(step),
-        min_quantity=float(max(minimum, step)),
-        max_quantity=float(maximum) if maximum is not None else None,
-        min_notional=float(max(minimum_notional, _ZERO)),
-        fractional=step < Decimal("1"),
-        source="Binance Spot Exchange Rules",
+        min_quantity=float(step),
+        min_notional=1.0,
+        fractional=True,
+        source=(
+            f"TradingView symbol precision (pricescale={pricescale}, minmov={minmov})"
+            + (f" for {symbol}" if symbol else "")
+            + "; derived estimate, not exchange order filters"
+        ),
+        is_fallback=False,
     )
 
 

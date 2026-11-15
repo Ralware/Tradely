@@ -66,7 +66,7 @@ class FakeQuoteService:
                 min_quantity=0.00001,
                 min_notional=5,
                 fractional=True,
-                source="Test Binance Spot Exchange Rules",
+                source="Test TradingView Symbol Precision",
             )
         if payload.get("market") == "india":
             return TradingRules(
@@ -97,12 +97,6 @@ class FakeQuoteService:
         return output
 
     def invalidate(self, instrument_id):
-        return None
-
-    def subscribe_stream(self, instruments):
-        return "token"
-
-    def unsubscribe_stream(self, token):
         return None
 
     def shutdown(self):
@@ -148,7 +142,7 @@ def test_instrument_resolution_returns_canonical_identity(api):
     instrument = response.json()["instrument"]
     assert instrument["instrument_id"] == "india:NSE:RELIANCE"
     assert instrument["currency"] == "INR"
-    assert instrument["provider_symbol"] == "RELIANCE"
+    assert instrument["provider_symbol"] == "NSE:RELIANCE"
 
     bad = api.client.get("/api/instruments/resolve", params={
         "symbol": "BTC", "market": "crypto",

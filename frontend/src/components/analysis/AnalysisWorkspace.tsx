@@ -110,7 +110,7 @@ export function AnalysisWorkspace() {
   const indicatorSeries = useApi(
     (signal) =>
       analysisService.getIndicatorSeries(
-        { instrumentId, interval, days, limit: 2500 },
+        { instrumentId, interval, days },
         signal,
       ),
     [instrumentId, interval, days],

@@ -22,7 +22,7 @@ if settings.host not in {"127.0.0.1", "localhost", "::1"}:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # The shared quote service owns the only Binance public WebSocket connection.
+    # TradingView connections are owned by the local Node.js bridge.
     yield
     try:
         app.state.quote_service.shutdown()
@@ -38,6 +38,7 @@ app = FastAPI(
 )
 app.state.settings = settings
 app.state.db = Database(settings.database_file)
+app.state.db.backfill_tradingview_metadata()
 app.state.instrument_resolver = InstrumentResolver(settings, app.state.db)
 app.state.instrument_resolver.ensure_catalogue()
 app.state.market_service = MarketService(settings)

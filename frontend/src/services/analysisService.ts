@@ -166,18 +166,18 @@ export const analysisService = {
   },
 
   getIndicatorSeries(
-    query: AnalysisQuery & { limit?: number },
+    query: AnalysisQuery,
     signal?: AbortSignal,
   ): Promise<IndicatorSeriesResponse> {
     return cachedResponse<IndicatorSeriesResponse>(
       'indicators',
       query,
-      String(query.limit ?? 2500),
+      '',
       signal,
       () => apiRequest<IndicatorSeriesResponse>(
         `/api/instruments/${identityPath(query)}/indicators`,
         {
-          query: { ...identityQuery(query), limit: query.limit ?? 2500 },
+          query: identityQuery(query),
           signal,
           timeoutMs: LONG_TIMEOUT,
         },

@@ -29,9 +29,6 @@ from app.instruments.resolver import (
     InstrumentUnavailableError,
 )
 from app.providers.base import ProviderError
-from app.providers.news import (
-    GDELTNewsProvider, YahooFinanceNewsProvider,
-)
 from app.services.backtest import run_trend_breakout_backtest
 from app.services.indicators import compute_indicators
 from app.services.market import MarketService
@@ -49,8 +46,10 @@ def _clean_symbol(symbol: str) -> str:
     return value
 
 
-def _to_json_records(frame: pd.DataFrame, limit: int = 500) -> list[dict[str, Any]]:
-    selected = frame.tail(limit).copy()
+def _to_json_records(
+    frame: pd.DataFrame, limit: int | None = None
+) -> list[dict[str, Any]]:
+    selected = (frame.tail(limit) if limit is not None else frame).copy()
     selected.index = selected.index.strftime("%Y-%m-%dT%H:%M:%SZ")
     selected = selected.replace({float("nan"): None})
     return selected.reset_index(names="timestamp").to_dict(orient="records")
@@ -128,22 +127,30 @@ def health() -> dict[str, Any]:
 
 @router.get("/providers/status")
 def provider_status(request: Request) -> dict[str, Any]:
-    settings = request.app.state.settings
+    bridge: dict[str, Any] | None = None
+    bridge_error: str | None = None
+    try:
+        bridge = request.app.state.market_service.bridge_health()
+    except Exception as exc:
+        bridge_error = str(exc)
+    available = bool(bridge and bridge.get("status") == "ok")
     providers = [
-        {"name": "TejHQ Adjusted OHLCV", "configured": bool(settings.tejhq_api_key), "available": bool(settings.tejhq_api_key),
-         "purpose": "Indian NSE/BSE daily adjusted OHLCV", "note": "Requires TEJHQ_API_KEY."},
-        {"name": "TejHQ Raw OHLCV", "configured": True, "available": True,
-         "purpose": "Indian NSE/BSE daily unadjusted OHLCV", "note": "Keyless; unadjusted history suppresses Indian actionable signals and backtests."},
-        {"name": "Yahoo Finance (yfinance)", "configured": True, "available": True,
-         "purpose": "International equity prices", "note": "Unofficial adapter; availability and freshness vary."},
-        {"name": "Binance Spot", "configured": True, "available": True,
-         "purpose": "Public crypto prices and OHLCV", "note": "Public market-data endpoints only; no API key or trading access."},
-        {"name": "GDELT", "configured": bool(settings.gdelt_enabled), "available": bool(settings.gdelt_enabled),
-         "purpose": "Global news discovery", "note": "Results require source verification."},
-        {"name": "Yahoo Finance News", "configured": bool(settings.yahoo_news_enabled), "available": bool(settings.yahoo_news_enabled),
-         "purpose": "Supplementary news discovery", "note": "Optional unofficial feed."},
+        {
+            "name": "TradingView (unofficial)",
+            "configured": True,
+            "available": available,
+            "purpose": "OHLCV, quotes, symbol metadata, technical ratings and market search",
+            "note": (
+                "Served by the local tradingview-bridge; anonymous access is delayed "
+                "on many exchanges (NSE typically 15 minutes) and deep intraday history may be limited."
+            ),
+        },
     ]
-    return {"providers": providers, "checked_at": datetime.now(timezone.utc).isoformat()}
+    return {
+        "providers": providers,
+        "bridge": bridge or {"status": "unavailable", "error": bridge_error},
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 @router.get("/market/candles")
@@ -179,9 +186,8 @@ def candles(
         "is_stale": stale, "history_truncated": bool(frame.attrs.get("history_truncated", False)),
         "history_pages": frame.attrs.get("history_pages"),
         "last_candle_at": latest.isoformat(), "count": len(frame),
-        "candles": _to_json_records(frame, limit=2500),
-        "warnings": (["Provider history was capped at 2,500 candles; the requested date range may not be fully covered."]
-                     if frame.attrs.get("history_truncated", False) else []),
+        "candles": _to_json_records(frame),
+        "warnings": [],
     }
 
 
@@ -244,31 +250,22 @@ def analyze(
     for column, value in latest.items():
         if column not in {"open", "high", "low", "close", "volume"}:
             values[column] = None if pd.isna(value) else float(value)
-    if interval != "1d":
-        signal = evaluate_trend_breakout(
-            frame.iloc[:0], symbol=symbol, market=market, source=source,
-            direction_mode=direction_mode,
-        )
-        signal.explanation = "This strategy is currently calibrated for completed daily candles only. Indicator values are still shown for the selected interval."
-    else:
-        position_side = request.app.state.db.position_side_at(
-            instrument["instrument_id"],
-            instrument["currency"],
-            datetime.now(timezone.utc),
-        )
-        signal = evaluate_trend_breakout(
-            frame,
-            symbol=symbol,
-            market=market,
-            source=source,
-            direction_mode=direction_mode,
-            position_side=position_side,
-        )
+    position_side = request.app.state.db.position_side_at(
+        instrument["instrument_id"],
+        instrument["currency"],
+        datetime.now(timezone.utc),
+    )
+    signal = evaluate_trend_breakout(
+        frame,
+        symbol=symbol,
+        market=market,
+        source=source,
+        direction_mode=direction_mode,
+        position_side=position_side,
+    )
     adjusted = bool(frame.attrs.get("is_adjusted", False))
     stale = _is_stale(frame, market)
     warnings = []
-    if frame.attrs.get("history_truncated", False):
-        warnings.append("Provider history was capped at 2,500 candles; the requested date range may not be fully covered.")
     if stale:
         warnings.append("Latest candle is stale for this market; actionable signal output is suppressed.")
         signal.state = "STALE_DATA"
@@ -284,7 +281,7 @@ def analyze(
         signal.stop_reference = None
         signal.risk_per_unit = None
         signal.direction = None
-        signal.explanation = "Signal suppressed because the available Indian equity history is not confirmed as corporate-action-adjusted. Configure a TejHQ free key or use adjusted Yahoo history."
+        signal.explanation = "Signal suppressed because TradingView did not confirm split-adjusted history for this instrument."
     signal_payload = signal.model_dump(mode="json")
     request.app.state.db.save_signal(signal_payload)
     return {
@@ -298,7 +295,7 @@ def analyze(
         "indicators": values,
         "strategy": signal_payload,
         "warnings": warnings,
-        "candles": _to_json_records(frame, limit=2500),
+        "candles": _to_json_records(frame),
     }
 
 
@@ -312,7 +309,7 @@ def indicator_series(
     interval: str = "1d",
     days: int = Query(3650, ge=1, le=3650),
     provider: str = "auto",
-    limit: int = Query(2500, ge=50, le=2500),
+    limit: int | None = Query(None, ge=1),
 ) -> dict[str, Any]:
     """Per-bar indicator values for chart rendering.
 
@@ -419,36 +416,21 @@ def instrument_news(
         symbol = _clean_symbol(symbol)
     else:
         raise HTTPException(status_code=404, detail="No Supported Instrument Found")
-    query = f'"{company_name}" OR {symbol}' if company_name else symbol
-    cache_key = f"news:{market}:{symbol}:{company_name or ''}:{limit}"
-    cached = request.app.state.response_cache.get(cache_key)
-    if cached is not None:
-        return cached
-    gdelt = GDELTNewsProvider(request.app.state.settings)
-    items = gdelt.search(query, symbol, limit=limit)
-    yahoo_provider = YahooFinanceNewsProvider()
-    if request.app.state.settings.yahoo_news_enabled:
-        items += yahoo_provider.search(symbol, market)
-    # Deduplicate by canonical URL; never fabricate news when providers return nothing.
-    unique: dict[str, Any] = {}
-    for item in items:
-        unique[item.url.rstrip("/")] = item
-    sorted_items = sorted(
-        unique.values(), key=lambda item: item.published_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True
-    )[:limit]
-    result = {
+    # News is intentionally not sourced. Tradely now reads market data from
+    # TradingView only, so the route stays for client compatibility and returns
+    # an explicit empty result rather than fabricating headlines.
+    return {
         "symbol": symbol, "market": market, "instrument": instrument,
-        "items": [item.model_dump(mode="json") for item in sorted_items],
-        "count": len(sorted_items),
-        "providers": {
-            "GDELT": {"enabled": request.app.state.settings.gdelt_enabled, "error": gdelt.last_error},
-            "Yahoo Finance News": {"enabled": request.app.state.settings.yahoo_news_enabled,
-                                   "note": "Optional unofficial personal-use feed; errors may appear as an empty result."},
-        },
-        "note": "News discovery can return false ticker matches. Open and verify each original publisher item. An empty list is not proof that no news exists.",
+        "items": [],
+        "count": 0,
+        "providers": {},
+        "requested_limit": limit,
+        "note": (
+            "News discovery is not configured. Tradely uses TradingView for market data "
+            "and does not bundle a news provider, so this endpoint returns an explicit "
+            "empty result. An empty list is not proof that no news exists."
+        ),
     }
-    request.app.state.response_cache.set(cache_key, result, request.app.state.settings.news_cache_seconds)
-    return result
 
 
 @router.post("/backtests/trend-breakout")
@@ -468,7 +450,7 @@ def backtest_trend_breakout(request: Request, payload: BacktestRequest) -> dict[
     try:
         frame, source = request.app.state.market_service.candles(
             symbol, market=market, exchange=exchange, interval=payload.interval,
-            days=payload.days, provider=payload.provider,
+            days=payload.days, provider=payload.provider, full_history=False,
         )
         if _is_stale(frame, market):
             raise HTTPException(
@@ -478,7 +460,7 @@ def backtest_trend_breakout(request: Request, payload: BacktestRequest) -> dict[
         if market == "india" and not bool(frame.attrs.get("is_adjusted", False)):
             raise HTTPException(
                 status_code=409,
-                detail="Backtest refused: Indian equity history is not confirmed corporate-action-adjusted. Configure the TejHQ free key or use adjusted Yahoo data.",
+                detail="Backtest refused: TradingView did not confirm split-adjusted Indian equity history.",
             )
         result = run_trend_breakout_backtest(
             frame, initial_capital=payload.initial_capital, risk_fraction=payload.risk_fraction,
@@ -589,10 +571,14 @@ def resolve_instrument(
 
 
 @router.post("/instruments/catalogue/refresh")
-def refresh_instrument_catalogue(request: Request) -> dict[str, Any]:
-    """Best-effort refresh from legitimate public provider/exchange sources."""
+def refresh_instrument_catalogue(
+    request: Request,
+    q: str | None = Query(None, min_length=1),
+    limit: int = Query(50, ge=1, le=50),
+) -> dict[str, Any]:
+    """Best-effort import of supported listings from live TradingView search."""
     report = refresh_catalogue(
-        request.app.state.db, request.app.state.settings
+        request.app.state.db, request.app.state.settings, query=q, limit=limit
     )
     request.app.state.instrument_resolver.invalidate_cache()
     report["catalogue_version"] = request.app.state.db.catalogue_version()
@@ -812,15 +798,14 @@ async def quote_stream(
     instrument_id: list[str] = Query(default=[]),
     watchlist: bool = False,
 ) -> StreamingResponse:
-    """Server-Sent Events feed backed by the same quote cache and Binance stream.
+    """Server-Sent Events feed backed by the shared TradingView quote cache.
 
-    Crypto ticks are pushed by one shared public WebSocket. Equity quotes stay
-    end-of-day/delayed and are replayed with their provider timestamp so the UI
-    never labels them real-time.
+    Every tick replays the latest cached or refreshed quote with its provider
+    timestamp, so delayed exchanges are never labelled real-time. A single
+    bridge batch is reused for all subscribers instead of opening a socket.
     """
     instruments = _stream_instruments(request, instrument_id, watchlist)
     quote_service = request.app.state.quote_service
-    token = quote_service.subscribe_stream(instruments)
     interval = max(1.0, float(request.app.state.settings.quote_stream_interval_seconds))
 
     async def events() -> AsyncIterator[str]:
@@ -844,8 +829,6 @@ async def quote_stream(
                 await asyncio.sleep(interval)
         except asyncio.CancelledError:
             raise
-        finally:
-            quote_service.unsubscribe_stream(token)
 
     headers = {
         "Cache-Control": "no-cache, no-transform",
@@ -1026,14 +1009,6 @@ def _prepare_amount_transaction(
     if rules is None:
         from app.core.trading_rules import default_trading_rules
         rules = default_trading_rules(instrument)
-    if instrument["market"] == "crypto" and getattr(rules, "is_fallback", False):
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "Binance quantity rules could not be verified. Recording is disabled to "
-                "avoid an incorrect quantity precision."
-            ),
-        )
     intent = payload.intent
     position_side = db.position_side_at(
         instrument["instrument_id"], instrument["currency"], payload.trade_time
@@ -1273,7 +1248,7 @@ def portfolio_position_detail(
     try:
         frame, candle_source = request.app.state.market_service.candles(
             account.symbol, market=account.market, exchange=account.exchange or None,
-            interval="1d", days=days, provider="auto",
+            interval="1d", days=days, provider="auto", full_history=False,
         )
         candles = _to_json_records(frame.tail(500))
     except (ProviderError, ValueError) as exc:

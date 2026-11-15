@@ -6,8 +6,8 @@ import pytest
 
 from app.core.models import TradingRules
 from app.core.trading_rules import (
-    binance_rules_from_exchange_info,
     calculate_amount_transaction,
+    tradingview_rules_from_symbol_info,
 )
 
 
@@ -16,7 +16,7 @@ CRYPTO_RULES = TradingRules(
     min_quantity=0.00001,
     min_notional=5,
     fractional=True,
-    source="Binance Spot Exchange Rules",
+    source="TradingView symbol precision",
 )
 
 
@@ -62,21 +62,25 @@ def test_amount_rejects_below_step_or_minimum_notional():
         )
 
 
-def test_binance_exchange_info_rules_are_parsed_for_exact_pair():
-    payload = {
-        "symbols": [{
-            "symbol": "BTCUSDT",
-            "filters": [
-                {"filterType": "LOT_SIZE", "stepSize": "0.00001000", "minQty": "0.00001000",
-                 "maxQty": "9000.00000000"},
-                {"filterType": "NOTIONAL", "minNotional": "5.00000000"},
-            ],
-        }],
-    }
-    rules = binance_rules_from_exchange_info(payload, "BTCUSDT")
-    assert rules.quantity_step == 0.00001
-    assert rules.min_quantity == 0.00001
-    assert rules.max_quantity == 9000
-    assert rules.min_notional == 5
-    assert rules.source == "Binance Spot Exchange Rules"
-    assert Decimal(str(rules.quantity_step)) == Decimal("0.00001")
+def test_tradingview_symbol_precision_derives_a_conservative_step():
+    rules = tradingview_rules_from_symbol_info(
+        {"pricescale": 100, "minmov": 1}, "BINANCE:BTCUSDT"
+    )
+    assert rules.quantity_step == 0.0001
+    assert rules.min_quantity == 0.0001
+    assert rules.min_notional == 1
+    assert rules.is_fallback is False
+    assert "TradingView symbol precision" in rules.source
+    assert "BINANCE:BTCUSDT" in rules.source
+    assert Decimal(str(rules.quantity_step)) == Decimal("0.0001")
+
+
+def test_tradingview_symbol_precision_is_capped_at_eight_decimals():
+    rules = tradingview_rules_from_symbol_info({"pricescale": 1000000000, "minmov": 1})
+    assert rules.quantity_step == 0.00000001
+    assert rules.is_fallback is False
+
+
+def test_tradingview_symbol_precision_requires_a_usable_scale():
+    with pytest.raises(ValueError, match="usable price scale"):
+        tradingview_rules_from_symbol_info({"pricescale": 0})

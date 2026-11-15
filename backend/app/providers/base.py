@@ -5,18 +5,21 @@ from datetime import date
 
 import pandas as pd
 
-MAX_HISTORY_CANDLES = 2500
-
 
 def normalize_candles(
     frame: pd.DataFrame,
     *,
-    max_candles: int = MAX_HISTORY_CANDLES,
+    max_candles: int | None = None,
 ) -> pd.DataFrame:
-    """Return unique, chronological OHLCV candles without inventing missing bars."""
+    """Return unique, chronological OHLCV candles without inventing missing bars.
+
+    ``max_candles`` is an optional safety limit for callers that explicitly need
+    one. By default nothing is truncated, so the full requested provider range is
+    preserved.
+    """
     if frame is None or frame.empty:
         raise ProviderError("Provider returned no candles")
-    if max_candles < 1:
+    if max_candles is not None and max_candles < 1:
         raise ValueError("max_candles must be >= 1")
     missing = {"open", "high", "low", "close"} - set(frame.columns)
     if missing:
@@ -32,7 +35,7 @@ def normalize_candles(
     result = result.dropna(subset=["open", "high", "low", "close"])
     result = result.loc[~result.index.duplicated(keep="last")]
     result = result.sort_index(kind="stable")
-    truncated = len(result) > max_candles
+    truncated = max_candles is not None and len(result) > max_candles
     if truncated:
         result = result.tail(max_candles)
     if result.empty:
@@ -46,7 +49,6 @@ def normalize_candles(
 
 class MarketDataProvider(ABC):
     name: str
-    max_history_candles = MAX_HISTORY_CANDLES
 
     @property
     def is_adjusted(self) -> bool:

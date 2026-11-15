@@ -78,7 +78,57 @@ if errorlevel 1 (
 if not exist .env copy .env.example .env >nul
 
 rem ---------------------------------------------------------------------------
-rem 5. Frontend dependencies (installed only when node_modules is absent).
+rem 5. TradingView library + local bridge (Python talks to Node over loopback).
+rem ---------------------------------------------------------------------------
+set "TV_LIB=TradingView-API\TradingView-API-main"
+if not exist "%TV_LIB%\dist\index.js" (
+    echo [Tradely] Building the bundled TradingView library ^(first run^)...
+    pushd "%TV_LIB%"
+    call npm install --no-fund --no-audit
+    if errorlevel 1 (
+        popd
+        echo [Tradely] ERROR: TradingView library dependency installation failed.
+        goto :fail
+    )
+    call npm run build
+    if errorlevel 1 (
+        popd
+        echo [Tradely] ERROR: TradingView library build failed.
+        goto :fail
+    )
+    popd
+) else if not exist "%TV_LIB%\node_modules\ws" (
+    echo [Tradely] Installing the TradingView library runtime dependency...
+    pushd "%TV_LIB%"
+    call npm install --omit=dev --no-fund --no-audit
+    if errorlevel 1 (
+        popd
+        echo [Tradely] ERROR: TradingView library dependency installation failed.
+        goto :fail
+    )
+    popd
+)
+
+set "BRIDGE_ALREADY=0"
+powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8010/health' -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode -eq 200) { exit 0 } } catch {}; exit 1" >nul 2>&1
+if not errorlevel 1 set "BRIDGE_ALREADY=1"
+
+if "%BRIDGE_ALREADY%"=="1" (
+    echo [Tradely] TradingView bridge is already running on http://127.0.0.1:8010 - reusing it.
+) else (
+    echo [Tradely] Starting the TradingView bridge on http://127.0.0.1:8010 ...
+    start "Tradely Bridge" /d "%~dp0tradingview-bridge" cmd /k "npm start"
+    call :wait_for "http://127.0.0.1:8010/health" 40
+    if errorlevel 1 (
+        echo [Tradely] ERROR: the TradingView bridge did not become ready on port 8010.
+        echo [Tradely] Open the "Tradely Bridge" window to read the error.
+        goto :fail
+    )
+    echo [Tradely] TradingView bridge is ready.
+)
+
+rem ---------------------------------------------------------------------------
+rem 6. Frontend dependencies (installed only when node_modules is absent).
 rem ---------------------------------------------------------------------------
 if not exist "frontend\package.json" (
     echo [Tradely] ERROR: frontend\package.json is missing.
@@ -97,7 +147,7 @@ if not exist "frontend\node_modules" (
 )
 
 rem ---------------------------------------------------------------------------
-rem 6. Start FastAPI on 127.0.0.1:8000 unless a healthy instance is already up.
+rem 7. Start FastAPI on 127.0.0.1:8000 unless a healthy instance is already up.
 rem ---------------------------------------------------------------------------
 set "API_ALREADY=0"
 powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8000/api/health' -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode -eq 200) { exit 0 } } catch {}; exit 1" >nul 2>&1
@@ -119,7 +169,7 @@ if "%API_ALREADY%"=="1" (
 )
 
 rem ---------------------------------------------------------------------------
-rem 7. Start the Vite dev server on 127.0.0.1:5173 unless it is already up.
+rem 8. Start the Vite dev server on 127.0.0.1:5173 unless it is already up.
 rem ---------------------------------------------------------------------------
 set "UI_ALREADY=0"
 powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:5173/' -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode -eq 200) { exit 0 } } catch {}; exit 1" >nul 2>&1
@@ -140,12 +190,12 @@ if "%UI_ALREADY%"=="1" (
 )
 
 rem ---------------------------------------------------------------------------
-rem 8. Open the app.
+rem 9. Open the app.
 rem ---------------------------------------------------------------------------
 echo.
 echo [Tradely] Application ready: http://localhost:5173
 echo [Tradely] API docs:         http://127.0.0.1:8000/docs
-echo [Tradely] Close the "Tradely API" and "Tradely UI" windows to stop.
+echo [Tradely] Close the "Tradely Bridge", "Tradely API" and "Tradely UI" windows to stop.
 echo.
 start "" "http://localhost:5173"
 goto :eof

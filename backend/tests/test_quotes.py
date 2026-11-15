@@ -1,19 +1,16 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
 
-import httpx
 import pandas as pd
 import pytest
 
 from app.core.config import Settings
+from app.core.instruments import TRADINGVIEW_PROVIDER
+from app.providers.base import ProviderError
 from app.services.quotes import (
-    BinanceStreamManager,
-    QuoteInvalidInstrument,
-    QuoteRateLimited,
-    QuoteService,
     QuoteError,
+    QuoteService,
     _present_quote,
     market_status_for,
 )
@@ -28,8 +25,8 @@ CRYPTO = {
     "exchange": "BINANCE",
     "currency": "USDT",
     "asset_type": "crypto",
-    "provider": "Binance Spot Public Market Data",
-    "provider_symbol": "BTCUSDT",
+    "provider": TRADINGVIEW_PROVIDER,
+    "provider_symbol": "BINANCE:BTCUSDT",
 }
 
 INDIA = {
@@ -40,8 +37,8 @@ INDIA = {
     "exchange": "NSE",
     "currency": "INR",
     "asset_type": "equity",
-    "provider": "TejHQ",
-    "provider_symbol": "RELIANCE",
+    "provider": TRADINGVIEW_PROVIDER,
+    "provider_symbol": "NSE:RELIANCE",
 }
 
 
@@ -57,54 +54,77 @@ class FakeDb:
         return dict(snapshot) if snapshot else None
 
 
-class FakeResponse:
-    def __init__(self, status_code=200, payload=None, text=""):
-        self.status_code = status_code
-        self._payload = payload if payload is not None else {}
-        self.text = text
-
-    def json(self):
-        return self._payload
-
-
 class FakeMarket:
-    def __init__(self, frame=None, error=None):
-        self.frame = frame
+    def __init__(self, quote_map=None, *, error=None, info=None, frame=None):
+        self.quote_map = quote_map or {}
         self.error = error
-        self.binance = SimpleNamespace(base_url="https://example.test")
-        self.calls = 0
+        self.info = info or {}
+        self.frame = frame
+        self.quote_calls: list[list[str]] = []
+        self.candle_calls = 0
 
-    def candles(self, symbol, **kwargs):
-        self.calls += 1
+    def quotes(self, symbols):
+        self.quote_calls.append(list(symbols))
         if self.error:
             raise self.error
-        return self.frame, "Fake EOD Provider"
+        found = {
+            symbol: self.quote_map[symbol]
+            for symbol in symbols
+            if symbol in self.quote_map
+        }
+        errors = {
+            symbol: f"TradingView returned no quote for {symbol}"
+            for symbol in symbols
+            if symbol not in self.quote_map
+        }
+        return found, errors
+
+    def symbol_info(self, symbol):
+        if isinstance(self.info, Exception):
+            raise self.info
+        return self.info
+
+    def candles(self, symbol, **kwargs):
+        self.candle_calls += 1
+        if isinstance(self.frame, Exception):
+            raise self.frame
+        return self.frame, TRADINGVIEW_PROVIDER
 
 
 def build_service(*, market=None, db=None, **overrides):
     settings = Settings(
-        binance_stream_enabled=False,
+        _env_file=None,
         quote_crypto_ttl_seconds=10,
         quote_global_ttl_seconds=300,
         quote_india_ttl_seconds=600,
         quote_backoff_base_seconds=5,
         quote_backoff_max_seconds=300,
-        http_timeout_seconds=1,
         **overrides,
     )
     return QuoteService(settings, market or FakeMarket(), db or FakeDb())
 
 
-def binance_payload(price=100.5):
+def tv_quote(
+    price=100.5,
+    *,
+    delay=0,
+    update_mode="streaming",
+    time=NOW,
+    currency="USDT",
+    previous_close=95.0,
+):
     return {
-        "lastPrice": str(price),
-        "openPrice": "95",
-        "priceChange": "5.5",
-        "priceChangePercent": "5.789",
-        "highPrice": "102",
-        "lowPrice": "94",
-        "volume": "1234",
-        "closeTime": int(NOW.timestamp() * 1000),
+        "lp": price,
+        "prev_close_price": previous_close,
+        "ch": price - previous_close,
+        "chp": (price - previous_close) / previous_close * 100,
+        "high_price": price + 2,
+        "low_price": price - 2,
+        "volume": 1234,
+        "lp_time": int(time.timestamp()),
+        "delay": delay,
+        "update_mode": update_mode,
+        "currency_code": currency,
     }
 
 
@@ -125,46 +145,34 @@ def candle_frame(price=2500.0, previous=2450.0, adjusted=True):
     return frame
 
 
-def test_crypto_quote_success_and_ttl_deduplicates_calls(monkeypatch):
-    calls = []
-
-    def fake_get(url, params=None, timeout=None):
-        calls.append(params)
-        return FakeResponse(200, binance_payload())
-
-    monkeypatch.setattr("app.services.quotes.httpx.get", fake_get)
-    service = build_service()
+def test_crypto_quote_success_and_ttl_deduplicates_calls():
+    market = FakeMarket({"BINANCE:BTCUSDT": tv_quote()})
+    service = build_service(market=market)
 
     first = service.quote_for(CRYPTO)
     second = service.quote_for(CRYPTO)
 
     assert first["price"] == 100.5
     assert first["quote_type"] == "real_time"
-    assert first["freshness"] == "delayed" or first["freshness"] == "live"
+    assert first["freshness"] == "live"
+    assert first["provider"] == TRADINGVIEW_PROVIDER
+    assert first["delay_seconds"] == 0
     assert second["price"] == 100.5
-    assert len(calls) == 1
+    assert len(market.quote_calls) == 1
 
 
-def test_quotes_for_deduplicates_instrument_identity(monkeypatch):
-    calls = []
-
-    def fake_get(url, params=None, timeout=None):
-        calls.append(params)
-        return FakeResponse(200, binance_payload())
-
-    monkeypatch.setattr("app.services.quotes.httpx.get", fake_get)
-    service = build_service()
+def test_quotes_for_deduplicates_instrument_identity():
+    market = FakeMarket({"BINANCE:BTCUSDT": tv_quote()})
+    service = build_service(market=market)
     quotes = service.quotes_for([CRYPTO, dict(CRYPTO), CRYPTO])
     assert len(quotes) == 1
-    assert len(calls) == 1
+    assert len(market.quote_calls) == 1
+    assert market.quote_calls[0] == ["BINANCE:BTCUSDT"]
 
 
-def test_provider_failure_returns_unavailable_without_losing_cached_snapshot(monkeypatch):
-    def failing_get(url, params=None, timeout=None):
-        raise httpx.ConnectError("network down")
-
-    monkeypatch.setattr("app.services.quotes.httpx.get", failing_get)
-    service = build_service()
+def test_provider_failure_returns_unavailable_without_losing_cached_snapshot():
+    market = FakeMarket(error=ProviderError("bridge offline"))
+    service = build_service(market=market)
     service.db.snapshots[CRYPTO["instrument_id"]] = {
         **CRYPTO,
         "price": 99.0,
@@ -180,31 +188,21 @@ def test_provider_failure_returns_unavailable_without_losing_cached_snapshot(mon
     assert quote["freshness"] in {"cached", "live", "delayed", "stale"}
 
 
-def test_failed_provider_is_not_retried_during_backoff(monkeypatch):
-    calls = []
-
-    def failing_get(url, params=None, timeout=None):
-        calls.append(1)
-        raise httpx.ConnectError("network down")
-
-    monkeypatch.setattr("app.services.quotes.httpx.get", failing_get)
-    service = build_service()
+def test_failed_provider_is_not_retried_during_backoff():
+    market = FakeMarket(error=ProviderError("bridge offline"))
+    service = build_service(market=market)
 
     first = service.quote_for(CRYPTO)
     second = service.quote_for(CRYPTO)
 
     assert first["price"] is None
     assert second["price"] is None
-    assert len(calls) == 1
+    assert len(market.quote_calls) == 1
     assert service._failures[CRYPTO["instrument_id"]].failures == 1
 
 
-def test_rate_limit_uses_extended_backoff(monkeypatch):
-    def rate_limited(url, params=None, timeout=None):
-        return FakeResponse(429, {"msg": "Too many requests"})
-
-    monkeypatch.setattr("app.services.quotes.httpx.get", rate_limited)
-    service = build_service()
+def test_rate_limit_uses_extended_backoff():
+    service = build_service(market=FakeMarket(error=ProviderError("rate limit exceeded")))
     quote = service.quote_for(CRYPTO)
     assert quote["price"] is None
     state = service._failures[CRYPTO["instrument_id"]]
@@ -212,41 +210,40 @@ def test_rate_limit_uses_extended_backoff(monkeypatch):
     assert state.message
 
 
-def test_invalid_crypto_symbol_reports_provider_rejection(monkeypatch):
-    def rejected(url, params=None, timeout=None):
-        return FakeResponse(400, {"msg": "Invalid symbol."})
-
-    monkeypatch.setattr("app.services.quotes.httpx.get", rejected)
-    service = build_service()
+def test_invalid_crypto_symbol_reports_provider_rejection():
+    service = build_service(market=FakeMarket({}))
     quote = service.quote_for(CRYPTO)
     assert quote["price"] is None
-    assert "BTCUSDT" in quote["error"]
+    assert "BINANCE:BTCUSDT" in quote["error"]
 
 
-def test_indian_equity_quote_is_end_of_day_never_real_time():
-    service = build_service(market=FakeMarket(candle_frame()))
+def test_indian_equity_quote_is_delayed_never_real_time():
+    market = FakeMarket({
+        "NSE:RELIANCE": tv_quote(
+            price=2500.0, delay=900, update_mode="delayed", currency="INR",
+            previous_close=2450.0,
+        )
+    })
+    service = build_service(market=market)
     quote = service.quote_for(INDIA)
     assert quote["price"] == 2500.0
-    assert quote["quote_type"] == "end_of_day"
+    assert quote["quote_type"] == "delayed"
+    assert quote["freshness"] == "delayed"
     assert quote["previous_close"] == 2450.0
     assert quote["day_change"] == 50.0
-    assert quote["is_adjusted"] is True
+    assert quote["delay_seconds"] == 900
+    assert quote["currency"] == "INR"
 
 
-def test_international_equity_quote_is_last_available():
-    instrument = {
-        **INDIA,
-        "instrument_id": "global:NASDAQ:AAPL",
-        "symbol": "AAPL",
-        "market": "global",
-        "exchange": "NASDAQ",
-        "currency": "USD",
-        "provider": "Yahoo Finance (yfinance; unofficial)",
-    }
-    service = build_service(market=FakeMarket(candle_frame(price=190, previous=188)))
-    quote = service.quote_for(instrument)
-    assert quote["quote_type"] == "last_available"
-    assert quote["freshness"] == "delayed"
+def test_realtime_quote_within_delay_is_labelled_live():
+    service = build_service(
+        market=FakeMarket({
+            "BINANCE:BTCUSDT": tv_quote(update_mode="streaming", delay=0)
+        })
+    )
+    quote = service.quote_for(CRYPTO)
+    assert quote["freshness"] == "live"
+    assert quote["quote_type"] == "real_time"
 
 
 def test_stale_live_quote_is_downgraded_to_stale():
@@ -264,7 +261,7 @@ def test_stale_live_quote_is_downgraded_to_stale():
     assert stale["quote_type"] == "stale"
 
 
-def test_newer_stream_tick_is_not_overwritten_by_older_tick():
+def test_newer_quote_is_not_overwritten_by_older_quote():
     service = build_service()
     newer = {
         "price": 101,
@@ -280,28 +277,21 @@ def test_newer_stream_tick_is_not_overwritten_by_older_tick():
         "day_change": 4,
         "day_change_pct": 4.2,
     }
-    assert service.apply_stream_tick(CRYPTO, newer)["price"] == 101
-    assert service.apply_stream_tick(CRYPTO, older) is None
-    assert service.quote_for(CRYPTO)["price"] == 101
+    service._store(CRYPTO, newer)
+    service._store(CRYPTO, older)
+    assert service._fallback(CRYPTO, "test")["price"] == 101
 
 
-def test_binance_stream_message_parsing_and_tick_normalisation():
-    parsed = BinanceStreamManager.parse_message(
-        '{"stream":"btcusdt@ticker","data":{"s":"BTCUSDT","c":"101.5","o":"95",'
-        '"p":"6.5","P":"6.8","h":"103","l":"94","v":"10","E":1760000000000}}'
-    )
-    assert parsed is not None
-    symbol, data = parsed
-    assert symbol == "BTCUSDT"
-    tick = BinanceStreamManager.tick_from_payload(data)
-    assert tick["price"] == 101.5
-    assert tick["day_change"] == 6.5
-    assert tick["quote_time"].endswith("+00:00")
-
-
-def test_stream_manager_uses_one_stream_url_for_all_pairs():
-    url = BinanceStreamManager.stream_url(["BTCUSDT", "ETHUSDT"])
-    assert url == "wss://data-stream.binance.vision/stream?streams=btcusdt@ticker/ethusdt@ticker"
+def test_quotes_for_batches_stale_instruments(monkeypatch):
+    market = FakeMarket({
+        "NSE:RELIANCE": tv_quote(price=2500.0, currency="INR", delay=900),
+    })
+    service = build_service(market=market)
+    quotes = service.quotes_for([INDIA, CRYPTO])
+    assert len(quotes) == 2
+    assert quotes[0]["price"] == 2500.0
+    assert quotes[1]["price"] is None
+    assert market.quote_calls == [["NSE:RELIANCE", "BINANCE:BTCUSDT"]]
 
 
 def test_market_status_distinguishes_sessions():
@@ -312,8 +302,10 @@ def test_market_status_distinguishes_sessions():
     assert market_status_for("india", india_closed) == "closed"
 
 
-def test_historical_transaction_quote_uses_provider_history_not_current_price():
-    index = pd.DatetimeIndex([NOW - timedelta(days=2), NOW - timedelta(days=1)], tz="UTC")
+def historical_frame():
+    first = (NOW - timedelta(days=2)).replace(hour=0, minute=0, second=0, microsecond=0)
+    second = first + timedelta(days=1)
+    index = pd.DatetimeIndex([first, second], tz="UTC")
     frame = pd.DataFrame(
         {
             "open": [95, 195],
@@ -325,8 +317,14 @@ def test_historical_transaction_quote_uses_provider_history_not_current_price():
         index=index,
     )
     frame.attrs["is_adjusted"] = True
-    service = build_service(market=FakeMarket(frame))
-    trade_time = (NOW - timedelta(days=1)).replace(hour=12)
+    return frame, second
+
+
+def test_historical_transaction_quote_uses_provider_history_not_current_price():
+    frame, trade_day = historical_frame()
+    service = build_service(market=FakeMarket(frame=frame))
+    # 17:30 IST, after the Indian cash close, so the same-day close is final.
+    trade_time = trade_day.replace(hour=12)
     quote = service.quote_for_transaction(INDIA, trade_time, now=NOW)
     assert quote["price"] == 200
     assert quote["quote_type"] == "historical"
@@ -335,60 +333,46 @@ def test_historical_transaction_quote_uses_provider_history_not_current_price():
 
 
 def test_historical_intraday_equity_does_not_use_same_day_close_before_session_end():
-    index = pd.DatetimeIndex([NOW - timedelta(days=2), NOW - timedelta(days=1)], tz="UTC")
-    frame = pd.DataFrame(
-        {
-            "open": [95, 195],
-            "high": [105, 205],
-            "low": [94, 194],
-            "close": [100, 200],
-            "volume": [1000, 1200],
-        },
-        index=index,
-    )
-    frame.attrs["is_adjusted"] = True
-    service = build_service(market=FakeMarket(frame))
+    frame, trade_day = historical_frame()
+    service = build_service(market=FakeMarket(frame=frame))
     # 10:30 IST, before the Indian cash close, so the same-day close is not yet
     # knowable. The provider's previous completed close must be used.
-    trade_time = (NOW - timedelta(days=1)).replace(hour=5)
+    trade_time = trade_day.replace(hour=5)
     quote = service.quote_for_transaction(INDIA, trade_time, now=NOW)
     assert quote["price"] == 100
     assert quote["quote_type"] == "historical"
 
 
 def test_recent_transaction_quote_uses_live_quote_path():
-    service = build_service(market=FakeMarket(candle_frame(price=2500.0)))
+    service = build_service(market=FakeMarket({
+        "NSE:RELIANCE": tv_quote(price=2500.0, currency="INR", delay=900),
+    }))
     quote = service.quote_for_transaction(INDIA, NOW - timedelta(minutes=1), now=NOW)
     assert quote["price"] == 2500.0
-    assert quote["quote_type"] == "end_of_day"
+    assert quote["quote_type"] == "delayed"
 
 
-def test_binance_trading_rules_use_exchange_info(monkeypatch):
-    def fake_get(url, params=None, timeout=None):
-        assert params == {"symbol": "BTCUSDT"}
-        return FakeResponse(200, {"symbols": [{
-            "symbol": "BTCUSDT",
-            "filters": [
-                {"filterType": "LOT_SIZE", "stepSize": "0.00001000",
-                 "minQty": "0.00001000", "maxQty": "9000"},
-                {"filterType": "NOTIONAL", "minNotional": "5"},
-            ],
-        }]})
-
-    monkeypatch.setattr("app.services.quotes.httpx.get", fake_get)
-    service = build_service()
+def test_trading_rules_use_tradingview_symbol_precision():
+    service = build_service(market=FakeMarket(info={
+        "pricescale": 100, "minmov": 1, "currency_code": "USDT",
+    }))
     rules = service.trading_rules_for(CRYPTO)
-    assert rules.quantity_step == 0.00001
-    assert rules.min_notional == 5
+    assert rules.quantity_step == 0.0001
     assert rules.is_fallback is False
+    assert "TradingView symbol precision" in rules.source
 
 
-def test_binance_trading_rules_fallback_is_explicit(monkeypatch):
-    def failing_get(url, params=None, timeout=None):
-        raise httpx.ConnectError("network down")
-
-    monkeypatch.setattr("app.services.quotes.httpx.get", failing_get)
-    service = build_service()
+def test_trading_rules_fallback_is_explicit():
+    service = build_service(
+        market=FakeMarket(info=ProviderError("symbol metadata unavailable"))
+    )
     rules = service.trading_rules_for(CRYPTO)
     assert rules.is_fallback is True
     assert "Fallback" in rules.source
+
+
+def test_historical_quote_error_is_raised_when_no_candle_is_eligible():
+    frame = candle_frame()
+    service = build_service(market=FakeMarket(frame=frame))
+    with pytest.raises(QuoteError, match="Historical price unavailable"):
+        service.historical_quote_for(INDIA, NOW - timedelta(days=10), now=NOW)
