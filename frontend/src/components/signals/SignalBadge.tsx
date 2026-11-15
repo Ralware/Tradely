@@ -5,6 +5,8 @@ import type { SignalState } from '../../types/api';
 const meta: Record<SignalState, { label: string; tone: BadgeTone }> = {
   BUY: { label: 'Buy', tone: 'positive' },
   SELL: { label: 'Sell · Exit Long', tone: 'negative' },
+  SELL_SHORT: { label: 'Sell Short', tone: 'negative' },
+  BUY_TO_COVER: { label: 'Buy To Cover', tone: 'positive' },
   WAIT: { label: 'Wait', tone: 'warning' },
   NO_SIGNAL: { label: 'No Signal', tone: 'neutral' },
   INSUFFICIENT_DATA: { label: 'Insufficient Data', tone: 'neutral' },

@@ -250,7 +250,7 @@ function CandidateRow({
       onClick={onChoose}
       className={cn(
         'flex w-full items-center justify-between gap-2 px-2 py-1 text-left hover:bg-white/[0.05] disabled:opacity-60',
-        primary && 'bg-[#17202e]',
+        primary && 'bg-black',
       )}
     >
       <span className="min-w-0">

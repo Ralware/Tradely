@@ -1,27 +1,56 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useApi } from '../hooks/useApi';
-import { useQuotes } from '../hooks/useQuotes';
-import { portfolioService } from '../services/portfolioService';
-import type { AddTransactionResponse, Position, Transaction } from '../types/api';
-import { notifyWatchlistChanged } from '../utils/events';
-import { Button } from '../components/common/Button';
-import { Card } from '../components/common/Card';
-import { PageHeader } from '../components/common/PageHeader';
-import { ErrorState, LoadingPanel, Notice } from '../components/common/States';
-import { PositionsTable } from '../components/tables/PositionsTable';
-import { TransactionsTable } from '../components/tables/TransactionsTable';
-import { PortfolioSummaryCards } from '../components/portfolio/PortfolioSummaryCards';
-import { PositionDetailPanel } from '../components/portfolio/PositionDetailPanel';
-import { TransactionForm } from '../components/portfolio/TransactionForm';
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useApi } from "../hooks/useApi";
+import { useQuotes } from "../hooks/useQuotes";
+import { portfolioService } from "../services/portfolioService";
+import type {
+  AddTransactionResponse,
+  Position,
+  Transaction,
+} from "../types/api";
+import { notifyWatchlistChanged } from "../utils/events";
+import { Button } from "../components/common/Button";
+import { Card } from "../components/common/Card";
+import { PageHeader } from "../components/common/PageHeader";
+import { ErrorState, LoadingPanel, Notice } from "../components/common/States";
+import { PositionsTable } from "../components/tables/PositionsTable";
+import { TransactionsTable } from "../components/tables/TransactionsTable";
+import { PortfolioSummaryCards } from "../components/portfolio/PortfolioSummaryCards";
+import { PositionDetailPanel } from "../components/portfolio/PositionDetailPanel";
+import { TransactionForm } from "../components/portfolio/TransactionForm";
 
 function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : 'Request failed';
+  return error instanceof Error ? error.message : "Request failed";
+}
+
+function intentLabel(transaction: Transaction): string {
+  switch (transaction.intent ?? transaction.side) {
+    case "BUY":
+      return "Buy";
+    case "SELL":
+      return "Sell";
+    case "SELL_SHORT":
+      return "Sell Short";
+    case "BUY_TO_COVER":
+      return "Buy To Cover";
+  }
 }
 
 export function PortfolioPage() {
-  const positions = useApi((signal) => portfolioService.getPositions(signal), []);
-  const summary = useApi((signal) => portfolioService.getSummary(signal), []);
-  const transactions = useApi((signal) => portfolioService.getTransactions(signal), []);
+  const positions = useApi(
+    (signal) => portfolioService.getPositions(signal),
+    [],
+    { keepPreviousData: true },
+  );
+  const summary = useApi(
+    (signal) => portfolioService.getSummary(signal),
+    [],
+    { keepPreviousData: true },
+  );
+  const transactions = useApi(
+    (signal) => portfolioService.getTransactions(signal),
+    [],
+    { keepPreviousData: true },
+  );
 
   const positionRows = positions.data?.positions ?? [];
   const positionRefs = useMemo(
@@ -39,9 +68,13 @@ export function PortfolioPage() {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const detail = useApi(
-    (signal) => portfolioService.getPositionDetail(selectedId ?? '', signal),
+    (signal) => portfolioService.getPositionDetail(selectedId ?? "", signal),
     [selectedId],
-    { enabled: Boolean(selectedId) },
+    {
+      enabled: Boolean(selectedId),
+      keepPreviousData: true,
+      keepPreviousDataKey: selectedId,
+    },
   );
 
   const [deleting, setDeleting] = useState<number | null>(null);
@@ -52,8 +85,10 @@ export function PortfolioPage() {
   // rate. React never recalculates FIFO or P&L itself.
   const lastValuationRefresh = useRef(0);
   const quoteSignature = [...quotes.values()]
-    .map((quote) => `${quote.instrument_id}:${quote.price}:${quote.retrieved_at}`)
-    .join('|');
+    .map(
+      (quote) => `${quote.instrument_id}:${quote.price}:${quote.retrieved_at}`,
+    )
+    .join("|");
   useEffect(() => {
     if (!quoteSignature) {
       return;
@@ -75,7 +110,10 @@ export function PortfolioPage() {
       }
       return;
     }
-    if (!selectedId || !positionRows.some((row) => row.instrument_id === selectedId)) {
+    if (
+      !selectedId ||
+      !positionRows.some((row) => row.instrument_id === selectedId)
+    ) {
       setSelectedId(positionRows[0].instrument_id);
     }
   }, [positionRows, selectedId]);
@@ -100,9 +138,10 @@ export function PortfolioPage() {
   }
 
   async function deleteTransaction(transaction: Transaction) {
+    const sideLabel = intentLabel(transaction);
     if (
       !window.confirm(
-        `Delete the ${transaction.side} of ${transaction.symbol} recorded ${transaction.trade_time}? The ledger will be revalidated.`,
+        `Delete the ${sideLabel} of ${transaction.symbol} recorded ${transaction.trade_time}? The ledger will be revalidated.`,
       )
     ) {
       return;
@@ -112,7 +151,9 @@ export function PortfolioPage() {
     setMessage(null);
     try {
       await portfolioService.deleteTransaction(transaction.id);
-      setMessage(`${transaction.side} ${transaction.symbol} deleted; remaining ledger revalidated`);
+      setMessage(
+        `${sideLabel} ${transaction.symbol} deleted; remaining ledger revalidated`,
+      );
       notifyWatchlistChanged();
       reloadPortfolio();
     } catch (caught) {
@@ -127,10 +168,10 @@ export function PortfolioPage() {
   }
 
   return (
-    <div>
+    <div className="w-full px-4 py-4 lg:px-6">
       <PageHeader
         title="Portfolio"
-        subtitle="Amount-Based Entry · Live Valuation · FIFO Accounting"
+        subtitle=""
         actions={
           <Button size="sm" icon="refresh" onClick={reloadPortfolio}>
             Refresh
@@ -152,10 +193,11 @@ export function PortfolioPage() {
       <Card
         className="mb-3"
         title="Portfolio Summary"
-        subtitle="Backend FIFO Values · No Cross-Currency Totals"
+        subtitle=""
         actions={
           <span className="text-2xs text-terminal-muted">
-            {positionRows.length} Open · {transactions.data?.transactions.length ?? 0} Ledger Rows
+            {positionRows.length} Open ·{" "}
+            {transactions.data?.transactions.length ?? 0} Ledger Rows
           </span>
         }
       >
@@ -169,10 +211,10 @@ export function PortfolioPage() {
       <Card
         className="mb-3"
         title="Open Positions"
-        subtitle="Invested Value, Market Value and P&L Calculated by the Backend"
+        subtitle=""
         actions={
           <span className="text-2xs text-terminal-muted">
-            {positions.data ? `${positionRows.length} Positions` : 'Loading'}
+            {positions.data ? `${positionRows.length} Positions` : "Loading"}
           </span>
         }
       >
@@ -189,11 +231,7 @@ export function PortfolioPage() {
         )}
       </Card>
 
-      <Card
-        className="mb-3"
-        title="Position Details"
-        subtitle="FIFO Lots · Trade History · Actual Candles"
-      >
+      <Card className="mb-3" title="Position Details" subtitle="">
         <PositionDetailPanel
           detail={detail.data}
           loading={detail.loading}
@@ -209,17 +247,22 @@ export function PortfolioPage() {
         <Card
           className="xl:col-span-8"
           title="Transaction Ledger"
-          subtitle="Immutable Trade History · Deletion Revalidates FIFO"
+          subtitle=""
           actions={
             <span className="text-2xs text-terminal-muted">
-              {transactions.data ? `${transactions.data.transactions.length} Rows` : 'Loading'}
+              {transactions.data
+                ? `${transactions.data.transactions.length} Rows`
+                : "Loading"}
             </span>
           }
         >
           {transactions.loading && !transactions.data ? (
             <LoadingPanel label="Loading Transactions" rows={5} />
           ) : transactions.error ? (
-            <ErrorState message={transactions.error} onRetry={transactions.reload} />
+            <ErrorState
+              message={transactions.error}
+              onRetry={transactions.reload}
+            />
           ) : (
             <TransactionsTable
               transactions={transactions.data?.transactions ?? []}
@@ -229,12 +272,6 @@ export function PortfolioPage() {
               deleting={deleting}
             />
           )}
-          <p className="mt-2 text-2xs leading-relaxed text-terminal-muted">
-            Realized P&amp;L uses FIFO: buy fees are added to lot cost basis and sell fees reduce
-            proceeds. Fully sold instruments disappear from Open Positions but remain in this ledger.
-            Transaction amounts are the gross asset notional entered at recording time; quantities
-            and reference prices are stored per row for accounting.
-          </p>
         </Card>
       </div>
     </div>

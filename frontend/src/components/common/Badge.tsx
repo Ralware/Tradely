@@ -4,12 +4,12 @@ import { cn } from '../../utils/format';
 export type BadgeTone = 'neutral' | 'positive' | 'negative' | 'warning' | 'accent' | 'violet';
 
 const tones: Record<BadgeTone, string> = {
-  neutral: 'border-terminal-border text-terminal-muted bg-white/[0.02]',
-  positive: 'border-[#1f4d43] text-terminal-green bg-[#10201d]',
-  negative: 'border-[#4d2424] text-terminal-red bg-[#201313]',
-  warning: 'border-[#4d3d1f] text-terminal-amber bg-[#201b10]',
-  accent: 'border-[#254a8f] text-terminal-accent bg-[#121c2c]',
-  violet: 'border-[#3f3560] text-terminal-violet bg-[#171327]',
+  neutral: 'border-terminal-border text-terminal-muted bg-black',
+  positive: 'border-[#1f4d43] text-terminal-green bg-black',
+  negative: 'border-[#4d2424] text-terminal-red bg-black',
+  warning: 'border-[#4d3d1f] text-terminal-amber bg-black',
+  accent: 'border-[#254a8f] text-terminal-accent bg-black',
+  violet: 'border-[#3f3560] text-terminal-violet bg-black',
 };
 
 interface BadgeProps {

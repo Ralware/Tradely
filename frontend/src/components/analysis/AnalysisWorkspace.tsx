@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
@@ -6,7 +6,7 @@ import { useSelectedInstrument } from '../../contexts/SelectedInstrumentContext'
 import { analysisService } from '../../services/analysisService';
 import { newsService } from '../../services/newsService';
 import { portfolioService } from '../../services/portfolioService';
-import type { Instrument } from '../../types/api';
+import type { DirectionMode, Instrument } from '../../types/api';
 import { changeDigits, cn, formatDate, formatNumber, formatPercent, formatSignedFixed, toneForNumber } from '../../utils/format';
 import { defaultDaysFor, intervalLabel, isIntradayInterval } from '../../utils/timeframes';
 import { notifyWatchlistChanged } from '../../utils/events';
@@ -14,6 +14,7 @@ import { instrumentPath } from '../../utils/navigation';
 import { Badge } from '../common/Badge';
 import { Button } from '../common/Button';
 import { Card } from '../common/Card';
+import { Select } from '../common/Field';
 import { EmptyState, ErrorState, LoadingPanel, Notice } from '../common/States';
 import { KeyValue } from '../common/Stat';
 import { Tabs } from '../common/Tabs';
@@ -29,10 +30,6 @@ import { NewsList } from '../tables/NewsList';
 import { TechnicalGauge } from './TechnicalGauge';
 import { TechnicalTable } from './TechnicalTable';
 import { TimeframeSelector } from './TimeframeSelector';
-
-interface AnalysisWorkspaceProps {
-  variant: 'stocks' | 'crypto';
-}
 
 function ToggleChip({
   active,
@@ -72,7 +69,7 @@ function marketLabel(market: string, assetType: string | undefined): string {
   return market === 'india' ? 'India' : 'Global';
 }
 
-export function AnalysisWorkspace({ variant }: AnalysisWorkspaceProps) {
+export function AnalysisWorkspace() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const selected = useSelectedInstrument();
@@ -81,13 +78,15 @@ export function AnalysisWorkspace({ variant }: AnalysisWorkspaceProps) {
   const enabled = selected.enabled;
 
   const [overlays, setOverlays] = useState<OverlayToggles>({
-    sma: true,
+    sma: false,
     ema: false,
     bollinger: false,
   });
-  const [showRsi, setShowRsi] = useState(true);
-  const [showMacd, setShowMacd] = useState(true);
+  const [showRsi, setShowRsi] = useState(false);
+  const [showMacd, setShowMacd] = useState(false);
+  const [directionMode, setDirectionMode] = useState<DirectionMode>('long_only');
   const [tab, setTab] = useState('signal');
+  const [prefetchError, setPrefetchError] = useState<string | null>(null);
   const [watchState, setWatchState] = useState<{
     loading: boolean;
     message: string | null;
@@ -95,25 +94,33 @@ export function AnalysisWorkspace({ variant }: AnalysisWorkspaceProps) {
   }>({ loading: false, message: null, error: null });
 
   const analysis = useApi(
-    (signal) => analysisService.getAnalysis({ instrumentId, interval, days }, signal),
-    [instrumentId, interval, days],
-    { enabled },
+    (signal) =>
+      analysisService.getAnalysis(
+        { instrumentId, interval, days, directionMode },
+        signal,
+      ),
+    [instrumentId, interval, days, directionMode],
+    {
+      enabled,
+      keepPreviousData: true,
+      keepPreviousDataKey: `${instrumentId}:${directionMode}`,
+    },
   );
 
   const indicatorSeries = useApi(
     (signal) =>
       analysisService.getIndicatorSeries(
-        { instrumentId, interval, days, limit: 300 },
+        { instrumentId, interval, days, limit: 2500 },
         signal,
       ),
     [instrumentId, interval, days],
-    { enabled },
+    { enabled, keepPreviousData: true, keepPreviousDataKey: instrumentId },
   );
 
   const technicals = useApi(
     (signal) => analysisService.getTechnicals({ instrumentId, interval, days }, signal),
     [instrumentId, interval, days],
-    { enabled },
+    { enabled, keepPreviousData: true, keepPreviousDataKey: instrumentId },
   );
 
   const news = useApi(
@@ -126,6 +133,39 @@ export function AnalysisWorkspace({ variant }: AnalysisWorkspaceProps) {
   const intraday = isIntradayInterval(interval);
   const data = analysis.data;
   const quote = selected.quote;
+
+  useEffect(() => {
+    if (!enabled || !instrumentId || !data || data.interval !== interval) {
+      return undefined;
+    }
+
+    const activeIndex = selected.timeframes.findIndex((timeframe) => timeframe.id === interval);
+    if (activeIndex < 0 || selected.timeframes.length < 2) {
+      return undefined;
+    }
+
+    const orderedTimeframes = [
+      ...selected.timeframes.slice(activeIndex + 1),
+      ...selected.timeframes.slice(0, activeIndex).reverse(),
+    ].map((timeframe) => timeframe.id);
+    const controller = new AbortController();
+    setPrefetchError(null);
+    void analysisService
+      .prefetchTimeframes(
+        { instrumentId, interval, days, directionMode },
+        orderedTimeframes,
+        controller.signal,
+      )
+      .catch((caught: unknown) => {
+        if (!controller.signal.aborted) {
+          setPrefetchError(
+            caught instanceof Error ? caught.message : 'Unable To Cache Alternate Timeframes',
+          );
+        }
+      });
+
+    return () => controller.abort();
+  }, [data, days, directionMode, enabled, instrumentId, interval, selected.timeframes]);
 
   const last = quote?.last ?? data?.latest.close ?? null;
   const previousClose =
@@ -151,6 +191,7 @@ export function AnalysisWorkspace({ variant }: AnalysisWorkspaceProps) {
   }
 
   function refreshAll() {
+    analysisService.invalidateInstrumentCache(instrumentId);
     selected.reload();
     analysis.reload();
     indicatorSeries.reload();
@@ -214,16 +255,17 @@ export function AnalysisWorkspace({ variant }: AnalysisWorkspaceProps) {
             Watchlist
           </Button>
         </div>
+        {prefetchError ? (
+          <Notice tone="warning">
+            Alternate Timeframe Cache Unavailable · {prefetchError}
+          </Notice>
+        ) : null}
       </div>
 
       {!instrumentId ? (
         <EmptyState
           title="No Instrument Selected"
-          description={
-            variant === 'crypto'
-              ? 'Search a crypto pair or asset name above.'
-              : 'Search a ticker or company name above.'
-          }
+          description="Search a ticker, crypto pair, or asset name above."
           icon="search"
         />
       ) : analysis.loading && !data ? (
@@ -282,11 +324,23 @@ export function AnalysisWorkspace({ variant }: AnalysisWorkspaceProps) {
               </div>
             </div>
 
-            <TimeframeSelector
-              options={selected.timeframes}
-              value={interval}
-              onChange={changeTimeframe}
-            />
+            <div className="flex flex-wrap items-end gap-2">
+              <Select
+                label="Strategy Direction"
+                value={directionMode}
+                onChange={(event) => setDirectionMode(event.target.value as DirectionMode)}
+                options={[
+                  { value: 'long_only', label: 'Long Only' },
+                  { value: 'short_only', label: 'Short Only' },
+                  { value: 'long_short', label: 'Long + Short' },
+                ]}
+              />
+              <TimeframeSelector
+                options={selected.timeframes}
+                value={interval}
+                onChange={changeTimeframe}
+              />
+            </div>
           </div>
 
           <section className="panel-surface">
@@ -372,7 +426,6 @@ export function AnalysisWorkspace({ variant }: AnalysisWorkspaceProps) {
               <PriceChart
                 candles={data.candles}
                 series={indicatorSeries.data?.series ?? null}
-                latest={data.indicators}
                 overlays={overlays}
                 showRsi={showRsi}
                 showMacd={showMacd}
@@ -391,7 +444,7 @@ export function AnalysisWorkspace({ variant }: AnalysisWorkspaceProps) {
 
           {activeTab === 'signal' ? (
             <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-              <SignalCard signal={data.strategy} currency={currency} />
+              <SignalCard signal={data.strategy} />
               <Card title="Latest Bar" subtitle={intervalLabel(interval)}>
                 <dl className="divide-y divide-terminal-borderSoft">
                   <KeyValue label="Open" value={formatNumber(data.latest.open, priceDigits(last))} />
@@ -411,6 +464,7 @@ export function AnalysisWorkspace({ variant }: AnalysisWorkspaceProps) {
             <RiskCalculator
               entry={data.strategy.entry_reference ?? data.latest.close}
               stop={data.strategy.stop_reference}
+              direction={data.strategy.direction ?? 'LONG'}
               currency={currency}
             />
           ) : null}

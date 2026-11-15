@@ -59,7 +59,7 @@ function HistoryTable({
 }) {
   return (
     <div className="min-w-0">
-      <p className="mb-1 text-2xs font-medium uppercase tracking-wide text-terminal-muted">{title}</p>
+      <p className="mb-1 text-2xs font-medium tracking-wide text-terminal-muted">{title}</p>
       {rows.length === 0 ? (
         <p className="rounded-sm border border-dashed border-terminal-border px-2 py-3 text-center text-2xs text-terminal-muted">
           {empty}
@@ -70,19 +70,31 @@ function HistoryTable({
             <thead>
               <tr className="border-b border-terminal-border text-left text-terminal-muted">
                 <th className="py-1 pr-2 font-medium">Time</th>
+                <th className="py-1 pr-2 font-medium">Intent</th>
                 <th className="py-1 pr-2 text-right font-medium">Amount</th>
                 <th className="py-1 pr-2 text-right font-medium">Quantity</th>
                 <th className="py-1 pr-2 text-right font-medium">Price</th>
                 <th className="py-1 pr-2 text-right font-medium">Fees</th>
                 <th className="py-1 text-right font-medium">
-                  {title === 'Sale History' ? 'Realized P&L' : 'Unit Cost'}
+                  {title === 'Purchase History' ? 'Unit Cost' : 'Realized P&L'}
                 </th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {rows.map((row) => {
+                const intent = row.intent ?? row.side;
+                return (
                 <tr key={row.id} className="border-b border-terminal-borderSoft last:border-0">
                   <td className="num py-1 pr-2 text-terminal-muted">{formatDateTime(row.trade_time)}</td>
+                  <td className="py-1 pr-2 text-terminal-muted">
+                    {intent === 'SELL_SHORT'
+                      ? 'Sell Short'
+                      : intent === 'BUY_TO_COVER'
+                        ? 'Buy To Cover'
+                        : intent === 'SELL'
+                          ? 'Sell'
+                          : 'Buy'}
+                  </td>
                   <td className="num py-1 pr-2 text-right text-terminal-text">
                     {formatNumber(row.amount ?? row.quantity * row.price, 2)}
                   </td>
@@ -98,15 +110,16 @@ function HistoryTable({
                   <td
                     className={cn(
                       'num py-1 text-right font-medium',
-                      title === 'Sale History' ? toneClass(row.realised_pnl) : 'text-terminal-text',
+                      title === 'Purchase History' ? 'text-terminal-text' : toneClass(row.realised_pnl),
                     )}
                   >
-                    {title === 'Sale History'
-                      ? formatSignedFixed(row.realised_pnl ?? null, 2)
-                      : formatNumber(row.unit_cost ?? null, 4)}
+                    {title === 'Purchase History'
+                      ? formatNumber(row.unit_cost ?? null, 4)
+                      : formatSignedFixed(row.realised_pnl ?? null, 2)}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -146,6 +159,19 @@ export function PositionDetailPanel({
 
   const position = detail.position;
   const totals = detail.totals;
+  const isShort = position.position_side === 'SHORT' || position.quantity < 0;
+  const shortHistory =
+    detail.short_history ??
+    detail.transactions.filter(
+      (transaction) =>
+        transaction.intent === 'SELL_SHORT' || transaction.intent === 'BUY_TO_COVER',
+    );
+  const chartEntries = isShort
+    ? shortHistory.filter((transaction) => transaction.intent === 'SELL_SHORT')
+    : detail.purchase_history;
+  const chartExits = isShort
+    ? shortHistory.filter((transaction) => transaction.intent === 'BUY_TO_COVER')
+    : detail.sale_history;
   return (
     <div className="space-y-3">
       <header className="flex flex-wrap items-start justify-between gap-2">
@@ -154,6 +180,7 @@ export function PositionDetailPanel({
             <h3 className="text-sm font-semibold text-terminal-text">{position.symbol}</h3>
             <Badge tone="accent">{position.exchange}</Badge>
             <Badge>{position.market}</Badge>
+            <Badge tone={isShort ? 'negative' : 'positive'}>{isShort ? 'Short' : 'Long'}</Badge>
             <span className="truncate text-2xs text-terminal-muted">{position.name}</span>
           </div>
           <p className="mt-0.5 text-2xs text-terminal-muted">
@@ -181,10 +208,18 @@ export function PositionDetailPanel({
       ) : null}
 
       <div className="grid grid-cols-2 gap-y-2 sm:grid-cols-3 xl:grid-cols-6">
-        <Metric label="Held Quantity" value={formatNumber(position.quantity, 6)} hint="Open Units" />
-        <Metric label="Average Cost" value={formatNumber(position.average_cost, 4)} hint="Includes Buy Fees" />
         <Metric
-          label="Remaining Cost Basis"
+          label="Open Quantity"
+          value={formatNumber(position.absolute_quantity ?? Math.abs(position.quantity), 6)}
+          hint="Manual Exposure"
+        />
+        <Metric
+          label={isShort ? 'Average Opening Proceeds' : 'Average Cost'}
+          value={formatNumber(position.average_cost, 4)}
+          hint={isShort ? 'Net Of Opening Fees' : 'Includes Buy Fees'}
+        />
+        <Metric
+          label={isShort ? 'Remaining Proceeds Basis' : 'Remaining Cost Basis'}
           value={formatNumber(position.cost_basis, 2)}
           hint={`${position.lot_count} Open Lots`}
         />
@@ -208,8 +243,16 @@ export function PositionDetailPanel({
           tone={toneClass(position.unrealized_pnl)}
           hint="Mark-to-Market"
         />
-        <Metric label="Total Bought" value={formatNumber(totals.total_bought, 6)} hint={position.currency} />
-        <Metric label="Total Sold" value={formatNumber(totals.total_sold, 6)} hint={position.currency} />
+        <Metric
+          label={isShort ? 'Total Covered' : 'Total Bought'}
+          value={formatNumber(totals.total_bought, 6)}
+          hint={position.currency}
+        />
+        <Metric
+          label={isShort ? 'Total Shorted' : 'Total Sold'}
+          value={formatNumber(totals.total_sold, 6)}
+          hint={position.currency}
+        />
         <Metric
           label="Realized P&L"
           value={formatSignedFixed(totals.realised_pnl, 2)}
@@ -223,7 +266,7 @@ export function PositionDetailPanel({
 
       <div>
         <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-          <p className="text-2xs font-medium uppercase tracking-wide text-terminal-muted">
+          <p className="text-2xs font-medium tracking-wide text-terminal-muted">
             Price History and Trade Markers
           </p>
           <p className="text-2xs text-terminal-muted">
@@ -235,27 +278,34 @@ export function PositionDetailPanel({
         ) : null}
         <PositionChart
           candles={detail.candles}
-          purchases={detail.purchase_history}
-          sales={detail.sale_history}
+          purchases={chartEntries}
+          sales={chartExits}
+          positionSide={isShort ? 'SHORT' : 'LONG'}
           averageCost={position.average_cost}
           currentPrice={position.current_price}
         />
         <div className="mt-1 flex flex-wrap gap-3 text-2xs text-terminal-muted">
-          <span className="text-terminal-amber">— Average Cost</span>
+          <span className="text-terminal-amber">— {isShort ? 'Average Proceeds' : 'Average Cost'}</span>
           <span className="text-terminal-accent">— Current Price</span>
-          <span className="text-terminal-green">▲ Buy</span>
-          <span className="text-terminal-red">▼ Sell</span>
+          <span className="text-terminal-green">▲ {isShort ? 'Cover' : 'Buy'}</span>
+          <span className="text-terminal-red">▼ {isShort ? 'Sell Short' : 'Sell'}</span>
         </div>
       </div>
 
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-        <HistoryTable title="Purchase History" rows={detail.purchase_history} empty="No Purchases Recorded" />
-        <HistoryTable title="Sale History" rows={detail.sale_history} empty="No Sales Recorded" />
+        {isShort ? (
+          <HistoryTable title="Short History" rows={shortHistory} empty="No Short Exposure History" />
+        ) : (
+          <>
+            <HistoryTable title="Purchase History" rows={detail.purchase_history} empty="No Purchases Recorded" />
+            <HistoryTable title="Sale History" rows={detail.sale_history} empty="No Sales Recorded" />
+          </>
+        )}
       </div>
 
       {detail.remaining_lots.length > 0 ? (
         <div>
-          <p className="mb-1 text-2xs font-medium uppercase tracking-wide text-terminal-muted">
+          <p className="mb-1 text-2xs font-medium tracking-wide text-terminal-muted">
             Remaining FIFO Lots
           </p>
           <div className="overflow-x-auto">
@@ -265,8 +315,12 @@ export function PositionDetailPanel({
                   <th className="py-1 pr-2 font-medium">Acquired</th>
                   <th className="py-1 pr-2 text-right font-medium">Original Quantity</th>
                   <th className="py-1 pr-2 text-right font-medium">Remaining Quantity</th>
-                  <th className="py-1 pr-2 text-right font-medium">Unit Cost</th>
-                  <th className="py-1 text-right font-medium">Remaining Cost Basis</th>
+                  <th className="py-1 pr-2 text-right font-medium">
+                    {isShort ? 'Unit Proceeds' : 'Unit Cost'}
+                  </th>
+                  <th className="py-1 text-right font-medium">
+                    {isShort ? 'Remaining Proceeds Basis' : 'Remaining Cost Basis'}
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -280,7 +334,7 @@ export function PositionDetailPanel({
                       {formatNumber(lot.remaining_quantity, 6)}
                     </td>
                     <td className="num py-1 pr-2 text-right text-terminal-text">
-                      {formatNumber(lot.unit_cost, 4)}
+                      {formatNumber(isShort ? lot.unit_proceeds ?? lot.unit_cost : lot.unit_cost, 4)}
                     </td>
                     <td className="num py-1 text-right text-terminal-text">
                       {formatNumber(lot.remaining_cost_basis, 2)}

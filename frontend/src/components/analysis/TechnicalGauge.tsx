@@ -59,7 +59,7 @@ export function TechnicalGauge({ label, summary, size = 'default' }: TechnicalGa
         {summary.action}
       </p>
 
-      <div className="mt-2 grid w-full grid-cols-3 rounded-sm bg-[#17191d] px-2 py-1.5 text-center">
+      <div className="mt-2 grid w-full grid-cols-3 rounded-sm bg-black px-2 py-1.5 text-center">
         <div>
           <p className="text-2xs text-terminal-muted">Sell</p>
           <p className="num text-xs font-medium text-terminal-text">{summary.sell}</p>

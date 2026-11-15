@@ -14,6 +14,8 @@ def validate_ohlcv(frame: pd.DataFrame) -> pd.DataFrame:
     for column in REQUIRED_COLUMNS:
         result[column] = pd.to_numeric(result[column], errors="coerce")
     result = result.dropna(subset=["open", "high", "low", "close"])
+    result = result.loc[~result.index.duplicated(keep="last")]
+    result = result.sort_index(kind="stable")
     if result.empty:
         raise ValueError("No valid OHLCV rows")
     finite = pd.Series(
@@ -29,7 +31,7 @@ def validate_ohlcv(frame: pd.DataFrame) -> pd.DataFrame:
     )
     if invalid.any():
         raise ValueError(f"Invalid OHLCV rows detected: {int(invalid.sum())}")
-    return result.sort_index()
+    return result
 
 
 def sma(series: pd.Series, period: int) -> pd.Series:
@@ -226,9 +228,9 @@ def stochastic_rsi(close: pd.Series, rsi_period: int = 14, stoch_period: int = 1
 def compute_indicators(frame: pd.DataFrame) -> pd.DataFrame:
     data = validate_ohlcv(frame)
     result = data.copy()
-    for period in (20, 50, 200):
+    for period in (20, 50, 100, 200):
         result[f"sma_{period}"] = sma(data["close"], period)
-    for period in (9, 20, 50, 200):
+    for period in (9, 20, 50, 100, 200):
         result[f"ema_{period}"] = ema(data["close"], period)
     result["rsi_14"] = rsi(data["close"], 14)
     result = result.join(macd(data["close"]))

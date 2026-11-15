@@ -31,7 +31,7 @@ export function SettingsPage() {
   );
 
   return (
-    <div>
+    <div className="w-full px-4 py-4 lg:px-6">
       <PageHeader
         title="Settings"
         subtitle="Runtime · Providers · Signal Audits"

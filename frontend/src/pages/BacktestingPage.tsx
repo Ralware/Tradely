@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { backtestService } from '../services/backtestService';
-import type { BacktestRequest, BacktestResult, Market } from '../types/api';
+import type { BacktestRequest, BacktestResult, DirectionMode, Market } from '../types/api';
 import { formatNumber, formatPercent } from '../utils/format';
 import { Button } from '../components/common/Button';
 import { Card } from '../components/common/Card';
@@ -35,7 +35,8 @@ export function BacktestingPage() {
   const [symbol, setSymbol] = useState('RELIANCE');
   const [market, setMarket] = useState<Market>('india');
   const [exchange, setExchange] = useState('NSE');
-  const [days, setDays] = useState('1825');
+  const [days, setDays] = useState('3650');
+  const [directionMode, setDirectionMode] = useState<DirectionMode>('long_only');
   const [capital, setCapital] = useState('100000');
   const [riskPercent, setRiskPercent] = useState('0.5');
   const [costBps, setCostBps] = useState('15');
@@ -97,6 +98,7 @@ export function BacktestingPage() {
       risk_fraction: parsedRisk,
       cost_bps_per_side: parsedCost,
       max_position_fraction: parsedMaxPosition,
+      direction_mode: directionMode,
     };
 
     setLoading(true);
@@ -140,7 +142,7 @@ export function BacktestingPage() {
         : formatNumber(result.profit_factor, 2);
 
   return (
-    <div>
+    <div className="w-full px-4 py-4 lg:px-6">
       <PageHeader title="Backtesting" subtitle="Trend Breakout · Daily Bars · Costs Included" />
 
       <Card className="mb-3" title="Configuration">
@@ -165,6 +167,16 @@ export function BacktestingPage() {
               onChange={(event) => setExchange(event.target.value)}
               options={exchangeOptions[market]}
               disabled={market === 'crypto'}
+            />
+            <Select
+              label="Strategy Direction"
+              value={directionMode}
+              onChange={(event) => setDirectionMode(event.target.value as DirectionMode)}
+              options={[
+                { value: 'long_only', label: 'Long Only' },
+                { value: 'short_only', label: 'Short Only' },
+                { value: 'long_short', label: 'Long + Short' },
+              ]}
             />
             <Input
               label="History (Days)"
@@ -262,7 +274,13 @@ export function BacktestingPage() {
             <Card
               className="xl:col-span-7"
               title="Equity Curve"
-              subtitle={`${result.strategy} · ${result.strategy_version} · ${result.source}`}
+              subtitle={`${result.strategy} · ${
+                result.direction_mode === 'short_only'
+                  ? 'Short Only'
+                  : result.direction_mode === 'long_short'
+                    ? 'Long + Short'
+                    : 'Long Only'
+              } · ${result.strategy_version} · ${result.source}`}
             >
               <TimeSeriesChart
                 points={equityPoints}

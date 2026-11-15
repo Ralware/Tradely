@@ -1,13 +1,15 @@
-from datetime import date, datetime, timezone
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, date, datetime
 
 import pandas as pd
 import pytest
-
 from app.core.config import Settings
 from app.providers.base import ProviderError
-from app.providers.market_data import BinanceSpotProvider, TejHQProvider
+from app.providers.market_data import BinanceSpotProvider, TejHQProvider, YahooFinanceProvider
 from app.providers.news import GDELTNewsProvider
-from app.services.market import MarketService
+from app.services.market import MarketService, _CandleCache
 
 
 class FakeResponse:
@@ -121,6 +123,103 @@ def test_binance_paginates_beyond_1000_candles(monkeypatch):
     assert frame.attrs["history_truncated"] is False
 
 
+def test_binance_history_request_is_bounded_to_2500_candles(monkeypatch):
+    first_open = int(pd.Timestamp("2020-01-01T00:00:00Z").timestamp() * 1000)
+    minute = 60_000
+    calls = []
+
+    def fake_get(url, **kwargs):
+        params = kwargs["params"]
+        calls.append(params.copy())
+        offset = sum(call["limit"] for call in calls[:-1])
+        rows = [
+            [first_open + (offset + i) * minute, "100", "101", "99", "100.5", "1000",
+             first_open + (offset + i + 1) * minute - 1]
+            for i in range(params["limit"])
+        ]
+        return FakeResponse(rows)
+
+    monkeypatch.setattr("app.providers.market_data.httpx.get", fake_get)
+    frame = BinanceSpotProvider(Settings(_env_file=None)).fetch_candles(
+        "BTCUSDT", market="crypto", exchange="BINANCE", interval="1m",
+        start=date(2020, 1, 1), end=None,
+    )
+    assert [call["limit"] for call in calls] == [1000, 1000, 501]
+    assert len(frame) == 2500
+    assert frame.attrs["history_truncated"] is True
+
+
+def test_market_cache_normalizes_identity_and_returns_copies(monkeypatch):
+    service = MarketService(Settings(_env_file=None))
+    calls = []
+    index = pd.to_datetime(["2025-01-02", "2025-01-01", "2025-01-02"], utc=True)
+    source_frame = pd.DataFrame({
+        "open": [2, 1, 3], "high": [3, 2, 4], "low": [1, 0, 2],
+        "close": [2, 1, 3], "volume": [20, 10, 30],
+    }, index=index)
+
+    def fetch(*args, **kwargs):
+        calls.append(kwargs)
+        return source_frame
+
+    monkeypatch.setattr(service.yahoo, "fetch_candles", fetch)
+    first, source = service.candles("AAPL", market="global", exchange="NASDAQ")
+    first.iloc[0, first.columns.get_loc("close")] = -1
+    second, _ = service.candles("aapl", market="global", exchange="nasdaq", provider="yahoo")
+    assert len(calls) == 1
+    assert source == service.yahoo.name
+    assert second.index.is_monotonic_increasing
+    assert not second.index.has_duplicates
+    assert second.iloc[-1]["close"] == 3
+    assert second.iloc[0]["close"] == 1
+    assert second.attrs["is_adjusted"] is True
+
+
+def test_market_cache_deduplicates_concurrent_provider_requests(monkeypatch):
+    service = MarketService(Settings(_env_file=None))
+    entered = threading.Event()
+    release = threading.Event()
+    calls = []
+    index = pd.date_range("2025-01-01", periods=1, tz="UTC")
+    frame = pd.DataFrame({
+        "open": [1], "high": [2], "low": [0.5], "close": [1.5], "volume": [10],
+    }, index=index)
+
+    def fetch(*args, **kwargs):
+        calls.append(1)
+        entered.set()
+        release.wait(timeout=2)
+        return frame
+
+    monkeypatch.setattr(service.yahoo, "fetch_candles", fetch)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(service.candles, "AAPL", market="global")
+        assert entered.wait(timeout=2)
+        second = pool.submit(service.candles, "AAPL", market="global")
+        time.sleep(0.05)
+        release.set()
+        assert len(first.result(timeout=2)[0]) == 1
+        assert len(second.result(timeout=2)[0]) == 1
+    assert len(calls) == 1
+
+
+def test_market_cache_evicts_entries_at_its_capacity():
+    cache = _CandleCache(max_entries=1)
+    frame = pd.DataFrame({
+        "open": [1], "high": [2], "low": [0.5], "close": [1.5], "volume": [10],
+    }, index=pd.date_range("2025-01-01", periods=1, tz="UTC"))
+    calls = []
+
+    def load():
+        calls.append(1)
+        return frame, "source"
+
+    cache.get_or_load(("first",), 60, load)
+    cache.get_or_load(("second",), 60, load)
+    cache.get_or_load(("first",), 60, load)
+    assert len(calls) == 3
+
+
 def test_yahoo_crypto_symbol_is_normalized_without_double_hyphen(monkeypatch):
     import sys
     from types import SimpleNamespace
@@ -146,6 +245,36 @@ def test_yahoo_crypto_symbol_is_normalized_without_double_hyphen(monkeypatch):
     assert frame.attrs["is_adjusted"] is True
 
 
+def test_yahoo_clamps_intraday_history_to_provider_window(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    captured = {}
+    download_frame = pd.DataFrame({
+        "Open": [100], "High": [105], "Low": [99], "Close": [103], "Volume": [1000],
+    }, index=pd.DatetimeIndex(["2025-04-24T10:00:00Z"]))
+
+    def fake_download(ticker, **kwargs):
+        captured.update(kwargs)
+        return download_frame
+
+    monkeypatch.setitem(sys.modules, "yfinance", SimpleNamespace(download=fake_download))
+    frame = YahooFinanceProvider().fetch_candles(
+        "AAPL", market="global", exchange="NASDAQ", interval="1m",
+        start=date(2025, 1, 1), end=date(2025, 4, 30),
+    )
+    assert captured["start"] == "2025-04-24"
+    assert frame.attrs["history_truncated"] is True
+
+
+def test_yahoo_rejects_unsupported_intervals():
+    with pytest.raises(ProviderError, match="Unsupported Yahoo Finance interval"):
+        YahooFinanceProvider().fetch_candles(
+            "AAPL", market="global", exchange="NASDAQ", interval="4h",
+            start=None, end=None,
+        )
+
+
 def test_gdelt_article_timestamp_normalization(monkeypatch):
     payload = {"articles": [{
         "title": "Example company filing", "url": "https://example.com/story",
@@ -155,7 +284,7 @@ def test_gdelt_article_timestamp_normalization(monkeypatch):
     provider = GDELTNewsProvider(Settings(_env_file=None))
     items = provider.search('"Example Company"', "EXAMPLE")
     assert len(items) == 1
-    assert items[0].published_at == datetime(2026, 11, 11, 12, 0, tzinfo=timezone.utc)
+    assert items[0].published_at == datetime(2026, 11, 11, 12, 0, tzinfo=UTC)
     assert items[0].url == "https://example.com/story"
 
 

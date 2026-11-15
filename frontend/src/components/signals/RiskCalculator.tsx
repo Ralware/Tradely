@@ -1,25 +1,27 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { riskService } from '../../services/riskService';
-import type { RiskResult } from '../../types/api';
+import type { PositionDirection, RiskResult } from '../../types/api';
 import { formatNumber } from '../../utils/format';
 import { Button } from '../common/Button';
 import { Card } from '../common/Card';
-import { Field, Input } from '../common/Field';
+import { Field, Input, Select } from '../common/Field';
 import { ErrorState, Notice } from '../common/States';
 import { KeyValue } from '../common/Stat';
 
 interface RiskCalculatorProps {
   entry: number | null;
   stop: number | null;
+  direction?: PositionDirection;
   currency?: string | null;
 }
 
-export function RiskCalculator({ entry, stop, currency }: RiskCalculatorProps) {
+export function RiskCalculator({ entry, stop, direction = 'LONG', currency }: RiskCalculatorProps) {
   const [capital, setCapital] = useState('100000');
   const [riskPercent, setRiskPercent] = useState('0.5');
   const [entryPrice, setEntryPrice] = useState(entry === null ? '' : String(entry));
   const [stopPrice, setStopPrice] = useState(stop === null ? '' : String(stop));
+  const [positionDirection, setPositionDirection] = useState(direction);
   const [lotSize, setLotSize] = useState('1');
   const [result, setResult] = useState<RiskResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -30,10 +32,9 @@ export function RiskCalculator({ entry, stop, currency }: RiskCalculatorProps) {
     if (entry !== null) {
       setEntryPrice(String(entry));
     }
-    if (stop !== null) {
-      setStopPrice(String(stop));
-    }
-  }, [entry, stop]);
+    setStopPrice(stop === null ? '' : String(stop));
+    setPositionDirection(direction);
+  }, [entry, stop, direction]);
 
   function fail(message: string) {
     setErrorKind('validation');
@@ -50,6 +51,7 @@ export function RiskCalculator({ entry, stop, currency }: RiskCalculatorProps) {
       risk_fraction: Number(riskPercent) / 100,
       entry: Number(entryPrice),
       stop: Number(stopPrice),
+      direction: positionDirection,
       lot_size: Number(lotSize),
       max_position_fraction: 1,
     };
@@ -80,8 +82,15 @@ export function RiskCalculator({ entry, stop, currency }: RiskCalculatorProps) {
       fail('Stop price must be above zero.');
       return;
     }
-    if (payload.stop >= payload.entry) {
-      fail('Stop price must be below the entry price.');
+    if (
+      (payload.direction === 'LONG' && payload.stop >= payload.entry) ||
+      (payload.direction === 'SHORT' && payload.stop <= payload.entry)
+    ) {
+      fail(
+        payload.direction === 'LONG'
+          ? 'Stop price must be below the entry price.'
+          : 'Stop price must be above the entry price.',
+      );
       return;
     }
     if (payload.lot_size < 1) {
@@ -104,6 +113,15 @@ export function RiskCalculator({ entry, stop, currency }: RiskCalculatorProps) {
     <Card title="Position Sizing" subtitle="Backend Risk Calculation">
       <form onSubmit={submit} className="space-y-2">
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          <Select
+            label="Direction"
+            value={positionDirection}
+            onChange={(event) => setPositionDirection(event.target.value as PositionDirection)}
+            options={[
+              { value: 'LONG', label: 'Long' },
+              { value: 'SHORT', label: 'Short' },
+            ]}
+          />
           <Field label="Account Capital">
             <Input
               type="number"
@@ -167,6 +185,7 @@ export function RiskCalculator({ entry, stop, currency }: RiskCalculatorProps) {
 
       {result ? (
         <dl className="mt-2 divide-y divide-terminal-borderSoft border-y border-terminal-borderSoft">
+          <KeyValue label="Direction" value={result.direction === 'SHORT' ? 'Short' : 'Long'} />
           <KeyValue label="Risk Budget" value={formatNumber(result.risk_budget, 2)} />
           <KeyValue label="Risk per Unit" value={formatNumber(result.risk_per_unit, 2)} />
           <KeyValue label="Quantity" value={formatNumber(result.quantity, 0)} />

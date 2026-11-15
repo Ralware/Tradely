@@ -10,60 +10,55 @@ interface NavItem {
   end?: boolean;
 }
 
-const navigation: NavItem[] = [
-  { to: '/', label: 'Dashboard', icon: 'dashboard', end: true },
-  { to: '/markets', label: 'Markets', icon: 'markets' },
-  { to: '/stocks', label: 'Stock Analysis', icon: 'chart' },
-  { to: '/crypto', label: 'Crypto Analysis', icon: 'crypto' },
+const navItems: NavItem[] = [
+  { to: '/', label: 'Watchlist', icon: 'dashboard', end: true },
+  { to: '/analysis', label: 'Analysis', icon: 'chart' },
   { to: '/portfolio', label: 'Portfolio', icon: 'portfolio' },
   { to: '/backtesting', label: 'Backtesting', icon: 'flask' },
-  { to: '/settings', label: 'Settings', icon: 'settings' },
 ];
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   return (
-    <div className="flex h-full flex-col border-r border-terminal-border bg-terminal-panel">
-      <div className="flex items-center gap-2 border-b border-terminal-border px-3 py-3">
-        <span className="flex h-6 w-6 items-center justify-center rounded-sm bg-terminal-accent text-white">
-          <Icon name="chart" size={14} />
-        </span>
-        <div className="min-w-0">
-          <p className="text-xs font-semibold text-terminal-text">Tradely</p>
-          <p className="text-2xs text-terminal-muted">Market Terminal</p>
-        </div>
-      </div>
-
-      <nav className="flex-1 space-y-0.5 overflow-y-auto p-2" aria-label="Main Navigation">
-        {navigation.map((item) => (
+    <aside
+      className="flex h-12 sm:h-screen w-full sm:w-[60px] shrink-0 flex-row sm:flex-col items-center justify-around sm:justify-start border-t sm:border-t-0 sm:border-r border-terminal-border bg-black py-0 sm:py-4 select-none z-30"
+      aria-label="Application Navigation"
+    >
+      <nav className="flex w-full sm:w-auto flex-row sm:flex-col items-center justify-around sm:justify-start gap-1 sm:gap-2" aria-label="Main Navigation">
+        {navItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
             end={item.end}
             onClick={onNavigate}
+            title={item.label}
             className={({ isActive }) =>
               cn(
-                'flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs font-medium transition-colors',
+                'group relative flex h-10 w-10 items-center justify-center rounded-sm transition-colors',
                 isActive
-                  ? 'bg-[#20242b] text-terminal-text'
-                  : 'text-terminal-muted hover:bg-white/[0.04] hover:text-terminal-text',
+                  ? 'bg-black text-terminal-accent after:absolute after:bottom-0 sm:after:bottom-auto after:left-2 sm:after:left-0 sm:after:top-2 sm:after:bottom-2 after:right-2 sm:after:right-auto after:h-[2px] sm:after:h-auto sm:after:w-[3px] after:bg-terminal-accent'
+                  : 'text-terminal-muted hover:bg-white/[0.05] hover:text-white',
               )
             }
           >
             {({ isActive }) => (
               <>
-                <span className={isActive ? 'text-terminal-accent' : 'text-terminal-muted'}>
-                  <Icon name={item.icon} size={14} />
+                <Icon
+                  name={item.icon}
+                  size={19}
+                  className={cn(
+                    'transition-colors',
+                    isActive ? 'text-terminal-accent' : 'text-terminal-muted group-hover:text-white',
+                  )}
+                />
+                {/* Floating Tooltip on Desktop */}
+                <span className="pointer-events-none absolute left-full ml-2 z-50 hidden rounded bg-black border border-terminal-border px-2 py-1 text-2xs font-medium text-white shadow-lg whitespace-nowrap group-hover:block">
+                  {item.label}
                 </span>
-                <span className="truncate">{item.label}</span>
               </>
             )}
           </NavLink>
         ))}
       </nav>
-
-      <div className="border-t border-terminal-border px-3 py-2">
-        <p className="text-2xs text-terminal-muted">Research Only · No Order Execution</p>
-      </div>
-    </div>
+    </aside>
   );
 }

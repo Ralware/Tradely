@@ -11,7 +11,7 @@ import {
   type ISeriesApi,
   type UTCTimestamp,
 } from 'lightweight-charts';
-import type { Candle, IndicatorSeriesRow, IndicatorValues } from '../../types/api';
+import type { Candle, IndicatorSeriesRow } from '../../types/api';
 import { EmptyState } from '../common/States';
 
 export interface OverlayToggles {
@@ -23,7 +23,6 @@ export interface OverlayToggles {
 interface PriceChartProps {
   candles: Candle[];
   series: IndicatorSeriesRow[] | null;
-  latest: IndicatorValues | null;
   overlays: OverlayToggles;
   showRsi: boolean;
   showMacd: boolean;
@@ -40,6 +39,7 @@ const overlayGroups: Array<{
     lines: [
       { field: 'sma_20', title: 'SMA 20', color: '#d6a45a' },
       { field: 'sma_50', title: 'SMA 50', color: '#2f6feb' },
+      { field: 'sma_100', title: 'SMA 100', color: '#8b909a' },
       { field: 'sma_200', title: 'SMA 200', color: '#8f7ee7' },
     ],
   },
@@ -48,6 +48,7 @@ const overlayGroups: Array<{
     lines: [
       { field: 'ema_20', title: 'EMA 20', color: '#26a69a' },
       { field: 'ema_50', title: 'EMA 50', color: '#38bdf8' },
+      { field: 'ema_100', title: 'EMA 100', color: '#fbbf24' },
       { field: 'ema_200', title: 'EMA 200', color: '#f472b6' },
     ],
   },
@@ -76,7 +77,6 @@ function numeric(value: number | string | null | undefined): number | null {
 export function PriceChart({
   candles,
   series,
-  latest,
   overlays,
   showRsi,
   showMacd,
@@ -94,7 +94,7 @@ export function PriceChart({
     const chart: IChartApi = createChart(element, {
       autoSize: true,
       layout: {
-        background: { type: ColorType.Solid, color: '#0e1012' },
+        background: { type: ColorType.Solid, color: '#000000' },
         textColor: '#8b909a',
         fontSize: 11,
         fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
@@ -113,17 +113,17 @@ export function PriceChart({
       },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: '#3a3f4a', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#20242b' },
-        horzLine: { color: '#3a3f4a', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#20242b' },
+        vertLine: { color: '#3a3f4a', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#000000' },
+        horzLine: { color: '#3a3f4a', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#000000' },
       },
     });
 
     const candleSeries: ISeriesApi<'Candlestick'> = chart.addSeries(CandlestickSeries, {
-      upColor: '#26a69a',
-      downColor: '#ef5350',
+      upColor: '#2f6feb',
+      downColor: '#ffffff',
       borderVisible: false,
-      wickUpColor: '#26a69a',
-      wickDownColor: '#ef5350',
+      wickUpColor: '#2f6feb',
+      wickDownColor: '#ffffff',
       priceLineVisible: false,
     });
 
@@ -166,30 +166,39 @@ export function PriceChart({
             time,
             value: candle.volume,
             color:
-              candle.close >= candle.open ? 'rgba(38, 166, 154, 0.28)' : 'rgba(239, 83, 80, 0.28)',
+              candle.close >= candle.open
+                ? 'rgba(47, 111, 235, 0.28)'
+                : 'rgba(255, 255, 255, 0.28)',
           },
         ];
       }),
     );
 
-    if (latest) {
+    if (series && series.length > 0) {
       for (const group of overlayGroups) {
         if (!overlays[group.key]) {
           continue;
         }
         for (const line of group.lines) {
-          const price = numeric(latest[line.field]);
-          if (price === null || price <= 0) {
-            continue;
-          }
-          candleSeries.createPriceLine({
-            price,
-            color: line.color,
-            lineWidth: 1,
-            lineStyle: line.dashed ? LineStyle.Dashed : LineStyle.Solid,
-            axisLabelVisible: true,
-            title: line.title,
-          });
+          const overlaySeries = chart.addSeries(
+            LineSeries,
+            {
+              color: line.color,
+              lineWidth: 1,
+              lineStyle: line.dashed ? LineStyle.Dashed : LineStyle.Solid,
+              priceLineVisible: false,
+              lastValueVisible: false,
+              title: line.title,
+            },
+            0,
+          );
+          overlaySeries.setData(
+            series.flatMap((row) => {
+              const time = toSeconds(row.timestamp);
+              const value = numeric(row[line.field]);
+              return time === null || value === null ? [] : [{ time, value }];
+            }),
+          );
         }
       }
     }
@@ -288,7 +297,7 @@ export function PriceChart({
     return () => {
       chart.remove();
     };
-  }, [candles, series, latest, overlays, showRsi, showMacd, intraday]);
+  }, [candles, series, overlays, showRsi, showMacd, intraday]);
 
   if (candles.length === 0) {
     return <EmptyState title="No candles available" icon="chart" />;

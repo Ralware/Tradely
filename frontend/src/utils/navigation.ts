@@ -1,9 +1,5 @@
 import type { Instrument, Market } from '../types/api';
 
-function pathFor(market: Market): string {
-  return market === 'crypto' ? '/crypto' : '/stocks';
-}
-
 export function instrumentPath(
   instrument: Instrument | { instrument_id: string; market: Market },
   options: { interval?: string; days?: number } = {},
@@ -15,7 +11,7 @@ export function instrumentPath(
   if (options.days) {
     params.set('days', String(options.days));
   }
-  return `${pathFor(instrument.market)}?${params.toString()}`;
+  return `/analysis?${params.toString()}`;
 }
 
 export function instrumentIdFromLegacy(
@@ -48,5 +44,5 @@ export function analysisPath(
   if (options.days) {
     params.set('days', String(options.days));
   }
-  return `${pathFor(market)}?${params.toString()}`;
+  return `/analysis?${params.toString()}`;
 }

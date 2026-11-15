@@ -51,7 +51,8 @@ function CurrencyPanel({ bucket }: { bucket: CurrencySummary }) {
         <div className="flex items-center gap-2">
           <Badge tone="accent">{currency}</Badge>
           <span className="text-2xs text-terminal-muted">
-            {bucket.open_positions} Open · {bucket.closed_positions} Closed
+            {bucket.long_positions ?? bucket.open_positions - (bucket.short_positions ?? 0)} Long ·{' '}
+            {bucket.short_positions ?? 0} Short · {bucket.closed_positions} Closed
           </span>
           {bucket.unpriced_positions > 0 ? (
             <Badge tone="warning">{bucket.unpriced_positions} Unpriced</Badge>
@@ -63,9 +64,9 @@ function CurrencyPanel({ bucket }: { bucket: CurrencySummary }) {
           ) : '—'}
         </span>
       </header>
-      <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3 xl:grid-cols-5">
+      <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3 xl:grid-cols-4">
         <Metric
-          label="Total Invested"
+          label="Long Cost Basis"
           value={`${currency} ${formatNumber(bucket.total_invested, 2)}`}
           hint={
             bucket.unpriced_invested > 0
@@ -74,13 +75,32 @@ function CurrencyPanel({ bucket }: { bucket: CurrencySummary }) {
           }
         />
         <Metric
-          label="Current Portfolio Value"
+          label="Short Proceeds Basis"
+          value={`${currency} ${formatNumber(bucket.short_proceeds_basis ?? 0, 2)}`}
+          hint="Net Opening Proceeds"
+        />
+        <Metric
+          label="Long Market Value"
           value={
-            bucket.priced_positions > 0
+            (bucket.long_positions ?? bucket.open_positions - (bucket.short_positions ?? 0)) > 0
               ? `${currency} ${formatNumber(bucket.market_value, 2)}`
               : 'Unavailable'
           }
-          hint={`${bucket.priced_positions} Priced / ${bucket.open_positions} Open`}
+          hint={`${bucket.long_positions ?? bucket.open_positions - (bucket.short_positions ?? 0)} Long Positions`}
+        />
+        <Metric
+          label="Short Market Exposure"
+          value={
+            (bucket.short_positions ?? 0) > 0
+              ? `${currency} ${formatNumber(bucket.short_market_value ?? 0, 2)}`
+              : '—'
+          }
+          hint="Marked Exposure · Not Cash"
+        />
+        <Metric
+          label="Gross Market Exposure"
+          value={`${currency} ${formatNumber(bucket.gross_market_value ?? bucket.market_value, 2)}`}
+          hint="Long + Short Marked Value"
         />
         <Metric
           label="Unrealized P&L"
@@ -90,7 +110,7 @@ function CurrencyPanel({ bucket }: { bucket: CurrencySummary }) {
               : 'Unavailable'
           }
           tone={toneClass(bucket.unrealized_pnl)}
-          hint="Open Positions Only"
+          hint="Long + Short Open Exposures"
         />
         <Metric
           label="Realized P&L"
@@ -128,7 +148,7 @@ export function PortfolioSummaryCards({
     return (
       <EmptyState
         title="No Portfolio Valuation"
-        description="Record a BUY transaction to calculate invested value and P&L."
+        description="Record a BUY or SELL SHORT intent to begin manual exposure tracking."
         icon="portfolio"
       />
     );
@@ -137,7 +157,7 @@ export function PortfolioSummaryCards({
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-2xs uppercase tracking-wide text-terminal-muted">
+        <p className="text-2xs tracking-wide text-terminal-muted">
           Portfolio Summary by Transaction Currency
         </p>
         <div className="flex items-center gap-2">
@@ -152,7 +172,8 @@ export function PortfolioSummaryCards({
       ))}
       <p className="text-2xs leading-relaxed text-terminal-muted">
         INR, USD and USDT amounts are shown separately. No verified conversion source is configured,
-        so totals are never added across currencies.
+        so totals are never added across currencies. Short exposure is manual accounting only; no
+        borrowing, margin, collateral, funding, or order execution is implied.
       </p>
     </div>
   );

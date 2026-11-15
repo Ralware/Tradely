@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -18,20 +19,28 @@ def run_trend_breakout_backtest(
     initial_stop_atr: float = 2.0,
     trailing_stop_atr: float = 3.0,
     market: str = "global",
+    direction_mode: Literal["long_only", "short_only", "long_short"] = "long_only",
 ) -> dict:
-    """Single-instrument long-only research backtest.
+    """Single-instrument directional research backtest.
 
     Signal is evaluated on a completed close; entry/market exit is next bar open.
     Existing protective stop is checked against the current bar's range. If the
     market gaps through the stop, fill is conservatively modelled at the open.
-    This is an approximation, not a broker/exchange execution simulator.
+    Short exposure is a research simulation only and is not an exchange order.
     """
+    excluded_incomplete = False
+    if "is_final" in frame.columns:
+        final_mask = frame["is_final"].eq(True).fillna(False)
+        excluded_incomplete = not bool(final_mask.all())
+        frame = frame.loc[final_mask].copy()
     if len(frame) < 240:
         raise ValueError("At least 240 daily bars are required for this strategy backtest")
     if initial_capital <= 0 or not 0 < risk_fraction <= 0.02:
         raise ValueError("Invalid initial capital or risk fraction")
     if cost_bps_per_side < 0 or not 0 < max_position_fraction <= 1:
         raise ValueError("Invalid cost or max position setting")
+    if direction_mode not in ("long_only", "short_only", "long_short"):
+        raise ValueError("Invalid direction_mode")
     data = compute_indicators(frame)
     trades: list[dict] = []
     equity = float(initial_capital)
@@ -49,11 +58,19 @@ def run_trend_breakout_backtest(
         low = float(row["low"])
         close = float(row["close"])
 
+        stop_hit = (
+            position is not None
+            and (
+                low <= position["stop"]
+                if position["direction"] == "LONG"
+                else high >= position["stop"]
+            )
+        )
         # Check protective stop known before this candle. Gap-through stops fill at open.
-        if position is not None and low <= position["stop"]:
+        if stop_hit and position is not None:
             stop = float(position["stop"])
-            exit_price = min(open_price, stop) if open_price < stop else stop
-            gross = (exit_price - position["entry"]) * position["quantity"]
+            exit_price = _stop_fill(position, open_price, stop)
+            gross = _gross_pnl(position, exit_price)
             fees = (position["entry"] + exit_price) * position["quantity"] * entry_cost_fraction
             net = gross - fees
             equity += net
@@ -65,7 +82,7 @@ def run_trend_breakout_backtest(
         # A close-based exit signal from the previous bar executes at this bar's open.
         elif position is not None and pending_exit:
             exit_price = open_price
-            gross = (exit_price - position["entry"]) * position["quantity"]
+            gross = _gross_pnl(position, exit_price)
             fees = (position["entry"] + exit_price) * position["quantity"] * entry_cost_fraction
             net = gross - fees
             equity += net
@@ -78,9 +95,15 @@ def run_trend_breakout_backtest(
         if position is None and not exited_this_bar and i > 220:
             signal_row = data.iloc[i - 1]
             required = ["sma_50", "sma_200", "rsi_14", "adx", "atr_14", "donchian_upper_20", "rvol_20"]
-            if all(pd.notna(signal_row[name]) for name in required) and pd.notna(data["sma_200"].iloc[i - 21]):
-                trend_ok = (
-                    signal_row["close"] > signal_row["donchian_upper_20"]
+            candle_is_final = "is_final" not in data.columns or bool(signal_row["is_final"])
+            if (
+                candle_is_final
+                and all(pd.notna(signal_row[name]) for name in required)
+                and pd.notna(data["sma_200"].iloc[i - 21])
+            ):
+                long_setup = (
+                    direction_mode != "short_only"
+                    and signal_row["close"] > signal_row["donchian_upper_20"]
                     and signal_row["close"] > signal_row["sma_200"]
                     and signal_row["sma_50"] > signal_row["sma_200"]
                     and signal_row["sma_200"] > data["sma_200"].iloc[i - 21]
@@ -88,24 +111,55 @@ def run_trend_breakout_backtest(
                     and signal_row["adx"] >= 20
                     and signal_row["rvol_20"] >= 1.0
                 )
+                prior_lows = data["low"].iloc[max(0, i - 21):i - 1]
+                short_setup = (
+                    direction_mode != "long_only"
+                    and not prior_lows.empty
+                    and signal_row["close"] < prior_lows.min()
+                    and signal_row["close"] < signal_row["sma_200"]
+                    and signal_row["sma_50"] < signal_row["sma_200"]
+                    and signal_row["sma_200"] < data["sma_200"].iloc[i - 21]
+                    and signal_row["rsi_14"] < 50
+                    and signal_row["adx"] >= 20
+                    and signal_row["rvol_20"] >= 1.0
+                )
                 atr_value = float(signal_row["atr_14"])
-                stop = open_price - initial_stop_atr * atr_value
-                if trend_ok and stop > 0 and open_price > stop:
+                direction = "LONG" if long_setup else "SHORT" if short_setup else None
+                stop = (
+                    open_price - initial_stop_atr * atr_value
+                    if direction == "LONG"
+                    else open_price + initial_stop_atr * atr_value
+                )
+                valid_stop = (
+                    direction == "LONG" and 0 < stop < open_price
+                ) or (
+                    direction == "SHORT" and stop > open_price
+                )
+                if direction is not None and valid_stop:
                     risk_budget = equity * risk_fraction
-                    quantity_by_risk = math.floor(risk_budget / (open_price - stop))
+                    quantity_by_risk = math.floor(risk_budget / abs(open_price - stop))
                     quantity_by_capital = math.floor((equity * max_position_fraction) / open_price)
                     quantity = max(0, min(quantity_by_risk, quantity_by_capital))
                     if quantity > 0:
                         position = {
                             "entry_time": ts.isoformat(), "entry": open_price, "quantity": quantity,
-                            "stop": stop,
+                            "stop": stop, "direction": direction,
                             "signal_time": data.index[i - 1].isoformat(),
                         }
 
-        if position is not None and position["entry_time"] == ts.isoformat() and low <= position["stop"]:
+        entry_stop_hit = (
+            position is not None
+            and position["entry_time"] == ts.isoformat()
+            and (
+                low <= position["stop"]
+                if position["direction"] == "LONG"
+                else high >= position["stop"]
+            )
+        )
+        if entry_stop_hit and position is not None:
             # Protective stop is active immediately after an entry at today's open.
-            exit_price = min(open_price, float(position["stop"]))
-            gross = (exit_price - position["entry"]) * position["quantity"]
+            exit_price = _stop_fill(position, open_price, float(position["stop"]))
+            gross = _gross_pnl(position, exit_price)
             fees = (position["entry"] + exit_price) * position["quantity"] * entry_cost_fraction
             net = gross - fees
             equity += net
@@ -118,13 +172,21 @@ def run_trend_breakout_backtest(
             # Apply trailing stop only after today's close; it is effective from next bar.
             atr_value = row["atr_14"]
             if pd.notna(atr_value):
-                candidate = close - trailing_stop_atr * float(atr_value)
-                position["stop"] = max(float(position["stop"]), candidate)
-            # Compute prior-10-day lower channel explicitly; current day excluded.
-            lower10 = data["low"].iloc[max(0, i - 10):i].min() if i >= 10 else np.nan
-            pending_exit = bool(pd.notna(lower10) and close < lower10)
+                if position["direction"] == "LONG":
+                    candidate = close - trailing_stop_atr * float(atr_value)
+                    position["stop"] = max(float(position["stop"]), candidate)
+                else:
+                    candidate = close + trailing_stop_atr * float(atr_value)
+                    position["stop"] = min(float(position["stop"]), candidate)
+            # Compute prior-10-bar channel explicitly; current bar is excluded.
+            prior_lows = data["low"].iloc[max(0, i - 10):i]
+            prior_highs = data["high"].iloc[max(0, i - 10):i]
+            if position["direction"] == "LONG":
+                pending_exit = bool(not prior_lows.empty and close < prior_lows.min())
+            else:
+                pending_exit = bool(not prior_highs.empty and close > prior_highs.max())
             # Entry and exit fees are recognised exactly once when a trade closes.
-            unrealized = (close - position["entry"]) * position["quantity"]
+            unrealized = _gross_pnl(position, close)
         else:
             unrealized = 0.0
         marked_equity = equity + unrealized
@@ -134,7 +196,7 @@ def run_trend_breakout_backtest(
     if position is not None:
         last = data.iloc[-1]
         exit_price = float(last["close"])
-        gross = (exit_price - position["entry"]) * position["quantity"]
+        gross = _gross_pnl(position, exit_price)
         fees = (position["entry"] + exit_price) * position["quantity"] * entry_cost_fraction
         net = gross - fees
         equity += net
@@ -162,7 +224,23 @@ def run_trend_breakout_backtest(
     downside_deviation = float(np.sqrt(np.mean(np.square(downside)))) if len(downside) else 0.0
     if len(returns) > 1 and downside_deviation > 0:
         sortino = float(np.sqrt(annualization) * returns.mean() / downside_deviation)
+    limitations = [
+        f"Single instrument, {direction_mode.replace('_', '-')} research simulation; not a portfolio backtest.",
+        "Signals use completed daily bars and entries/exits execute at next bar open.",
+        "Protective stop fills model gap-through conservatively, but intrabar price path is unknown.",
+        "Cost is a configurable aggregate basis-point estimate, not a broker-specific Indian tax engine.",
+        "No survivorship-free historical universe or point-in-time symbol membership is supplied by this endpoint.",
+        "This result is not out-of-sample proof; use a locked walk-forward research protocol before relying on it.",
+        (
+            "Short exposure is hypothetical research exposure; no margin, borrow, or exchange execution is modelled."
+            if direction_mode != "long_only"
+            else "A SELL rule exits an existing long and never opens a short in long-only mode."
+        ),
+    ]
+    if excluded_incomplete:
+        limitations.append("Unfinished candles were excluded from the simulation.")
     return {
+        "direction_mode": direction_mode,
         "initial_capital": initial_capital,
         "final_equity": equity,
         "net_return_pct": (equity / initial_capital - 1) * 100,
@@ -179,20 +257,29 @@ def run_trend_breakout_backtest(
         "sortino_target_daily": 0.0,
         "trades": trades,
         "equity_curve": equity_curve,
-        "limitations": [
-            "Single instrument, long-only research simulation; not a portfolio backtest.",
-            "Signals use completed daily bars and entries/exits execute at next bar open.",
-            "Protective stop fills model gap-through conservatively, but intrabar price path is unknown.",
-            "Cost is a configurable aggregate basis-point estimate, not a broker-specific Indian tax engine.",
-            "No survivorship-free historical universe or point-in-time symbol membership is supplied by this endpoint.",
-            "This result is not out-of-sample proof; use a locked walk-forward research protocol before relying on it.",
-        ],
+        "limitations": limitations,
     }
+
+
+def _gross_pnl(position: dict, exit_price: float) -> float:
+    price_change = (
+        exit_price - position["entry"]
+        if position["direction"] == "LONG"
+        else position["entry"] - exit_price
+    )
+    return price_change * position["quantity"]
+
+
+def _stop_fill(position: dict, open_price: float, stop: float) -> float:
+    if position["direction"] == "LONG":
+        return min(open_price, stop)
+    return max(open_price, stop)
 
 
 def _trade_record(position: dict, exit_time, exit_price: float, gross: float,
                   fees: float, net: float, reason: str) -> dict:
     return {
+        "direction": position["direction"],
         "signal_time": position["signal_time"],
         "entry_time": position["entry_time"],
         "exit_time": exit_time.isoformat(),

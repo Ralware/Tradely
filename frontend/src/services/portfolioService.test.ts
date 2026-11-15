@@ -4,7 +4,7 @@ import { portfolioService } from './portfolioService';
 
 const request: TransactionRequest = {
   instrument_id: 'crypto:BINANCE:BTCUSDT',
-  side: 'BUY',
+  intent: 'BUY',
   amount: 100,
   currency: 'USDT',
   fees: 0,
@@ -52,7 +52,7 @@ describe('amount-based transaction client', () => {
     expect(init.method).toBe('POST');
     expect(JSON.parse(String(init.body))).toMatchObject({
       instrument_id: 'crypto:BINANCE:BTCUSDT',
-      side: 'BUY',
+      intent: 'BUY',
       amount: 100,
       currency: 'USDT',
       fees: 0,
@@ -79,6 +79,19 @@ describe('amount-based transaction client', () => {
     expect(body.idempotency_key).toBe('preview-key-1');
     expect(body).not.toHaveProperty('quantity');
     expect(body).not.toHaveProperty('price');
+  });
+
+  it('sends short exposure with an explicit SELL_SHORT intent', async () => {
+    stubBrowser();
+    const fetchMock = stubFetch({ valid: true, error: null });
+    await portfolioService.previewTransaction({ ...request, intent: 'SELL_SHORT' });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      intent: 'SELL_SHORT',
+      amount: 100,
+    });
+    expect(JSON.parse(String(init.body))).not.toHaveProperty('side');
   });
 
   it('rejects a partial preview from the server', async () => {

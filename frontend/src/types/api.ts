@@ -1,6 +1,19 @@
 export type Market = 'india' | 'global' | 'crypto';
 
+export type TransactionIntent = 'BUY' | 'SELL' | 'SELL_SHORT' | 'BUY_TO_COVER';
 export type Side = 'BUY' | 'SELL';
+export type DirectionMode = 'long_only' | 'short_only' | 'long_short';
+export type PositionDirection = 'LONG' | 'SHORT';
+export type SignalState =
+  | 'BUY'
+  | 'SELL'
+  | 'SELL_SHORT'
+  | 'BUY_TO_COVER'
+  | 'WAIT'
+  | 'NO_SIGNAL'
+  | 'INSUFFICIENT_DATA'
+  | 'STALE_DATA'
+  | 'DATA_QUALITY_ERROR';
 
 export type AssetType = 'equity' | 'crypto';
 
@@ -153,15 +166,6 @@ export interface QuotesResponse {
   currency_conversion?: string;
 }
 
-export type SignalState =
-  | 'BUY'
-  | 'SELL'
-  | 'WAIT'
-  | 'NO_SIGNAL'
-  | 'INSUFFICIENT_DATA'
-  | 'STALE_DATA'
-  | 'DATA_QUALITY_ERROR';
-
 export interface HealthResponse {
   status: string;
   application: string;
@@ -226,6 +230,8 @@ export interface StrategySignal {
   instrument_id?: string;
   strategy: string;
   strategy_version: string;
+  direction_mode?: DirectionMode;
+  direction?: PositionDirection | null;
   state: SignalState;
   as_of: string | null;
   entry_reference: number | null;
@@ -382,9 +388,11 @@ export interface BacktestRequest {
   risk_fraction?: number;
   cost_bps_per_side?: number;
   max_position_fraction?: number;
+  direction_mode?: DirectionMode;
 }
 
 export interface BacktestTrade {
+  direction: PositionDirection;
   signal_time: string;
   entry_time: string;
   exit_time: string;
@@ -403,6 +411,7 @@ export interface EquityPoint {
 }
 
 export interface BacktestResult {
+  direction_mode?: DirectionMode;
   initial_capital: number;
   final_equity: number;
   net_return_pct: number;
@@ -431,6 +440,7 @@ export interface RiskRequest {
   risk_fraction: number;
   entry: number;
   stop: number;
+  direction?: PositionDirection;
   lot_size?: number;
   max_position_fraction?: number;
 }
@@ -442,6 +452,7 @@ export interface RiskResult {
   position_value: number;
   planned_loss: number;
   capital_limited: boolean;
+  direction?: PositionDirection;
 }
 
 export interface Transaction {
@@ -449,6 +460,7 @@ export interface Transaction {
   symbol: string;
   market: Market;
   side: Side;
+  intent?: TransactionIntent;
   quantity: number;
   price: number;
   amount?: number;
@@ -486,7 +498,8 @@ export interface TransactionsResponse {
 
 export interface TransactionRequest {
   instrument_id: string;
-  side: Side;
+  intent: TransactionIntent;
+  side?: Side;
   amount: number;
   currency: string;
   fees: number;
@@ -509,6 +522,7 @@ export interface TransactionPreviewResponse {
   valid: boolean;
   error: string | null;
   side?: Side;
+  intent?: TransactionIntent;
   instrument?: Instrument;
   quote?: Quote;
   trading_rules?: TradingRules;
@@ -522,7 +536,9 @@ export interface TransactionPreviewResponse {
   available_quantity?: number | null;
   max_sell_amount?: number | null;
   max_sell_quantity?: number | null;
+  max_close_amount?: number | null;
   remaining_holding_quantity?: number | null;
+  accounting_note?: string | null;
   warnings?: string[];
   price_note?: string;
 }
@@ -537,7 +553,10 @@ export interface Position {
   asset_type: AssetType;
   provider: string;
   provider_symbol: string;
+  position_side?: PositionDirection | null;
+  direction?: PositionDirection | null;
   quantity: number;
+  absolute_quantity?: number;
   average_cost: number;
   cost_basis: number;
   realised_pnl: number;
@@ -568,11 +587,17 @@ export interface CurrencySummary {
   realized_pnl_pct: number | null;
   total_pnl_pct: number | null;
   open_positions: number;
+  long_positions?: number;
+  short_positions?: number;
   closed_positions: number;
   priced_positions: number;
   unpriced_positions: number;
   priced_invested: number;
   unpriced_invested: number;
+  short_proceeds_basis?: number;
+  priced_short_proceeds_basis?: number;
+  short_market_value?: number;
+  gross_market_value?: number;
   transaction_fees: number;
   latest_quote_at: string | null;
 }
@@ -601,6 +626,7 @@ export interface PositionLot {
   original_quantity: number;
   remaining_quantity: number;
   unit_cost: number;
+  unit_proceeds?: number | null;
   price: number;
   fees_allocated: number;
   remaining_cost_basis: number;
@@ -615,6 +641,9 @@ export interface PositionTotals {
   realised_pnl: number;
   remaining_cost_basis: number;
   average_cost: number;
+  position_side?: PositionDirection | null;
+  long_lot_count?: number;
+  short_lot_count?: number;
 }
 
 export interface PositionDetailResponse {
@@ -622,6 +651,7 @@ export interface PositionDetailResponse {
   position: Position;
   purchase_history: Transaction[];
   sale_history: Transaction[];
+  short_history?: Transaction[];
   transactions: Transaction[];
   remaining_lots: PositionLot[];
   totals: PositionTotals;

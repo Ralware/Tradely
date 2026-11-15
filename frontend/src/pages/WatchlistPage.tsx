@@ -1,0 +1,277 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useApi } from '../hooks/useApi';
+import { useQuotes } from '../hooks/useQuotes';
+import { marketService } from '../services/marketService';
+import { portfolioService } from '../services/portfolioService';
+import type { Instrument, SignalState, WatchlistItem } from '../types/api';
+import { instrumentPath } from '../utils/navigation';
+import { quoteRefFromWatchlist } from '../utils/quotes';
+import { notifyWatchlistChanged } from '../utils/events';
+import { Button } from '../components/common/Button';
+import { Icon } from '../components/common/Icon';
+import { ErrorState, LoadingPanel, Notice } from '../components/common/States';
+import { WatchlistTable } from '../components/tables/WatchlistTable';
+import { InstrumentSearch } from '../components/instruments/InstrumentSearch';
+
+function itemKey(item: WatchlistItem): string {
+  return item.instrument_id ?? `${item.market}:${item.exchange}:${item.symbol}`;
+}
+
+export function WatchlistPage() {
+  const navigate = useNavigate();
+  const watchlist = useApi((signal) => portfolioService.getWatchlist(signal), []);
+  const scanner = useApi((signal) => marketService.getScanner(signal), []);
+
+  const [sparklines, setSparklines] = useState<Map<string, number[]>>(new Map());
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [addingError, setAddingError] = useState<string | null>(null);
+
+  const watchlistItems = useMemo(() => watchlist.data?.items ?? [], [watchlist.data]);
+  const watchlistRefs = useMemo(
+    () => watchlistItems.map(quoteRefFromWatchlist),
+    [watchlistItems],
+  );
+  const { quotes: watchlistQuotes, refresh: refreshQuotes } = useQuotes(watchlistRefs);
+
+  // Map scanner signals by key and symbol
+  const signalsMap = useMemo(() => {
+    const map = new Map<string, { state: SignalState; label?: string }>();
+    if (!scanner.data?.items) return map;
+    for (const item of scanner.data.items) {
+      const state = item.strategy.state;
+      let label: string | undefined;
+      if (state === 'SELL') {
+        label = 'Sell · Exit Long';
+      } else if (state === 'WAIT') {
+        label = '→ Wait';
+      } else if (state === 'BUY') {
+        label = 'Buy';
+      }
+      if (item.instrument_id) {
+        map.set(item.instrument_id, { state, label });
+      }
+      map.set(`${item.market}:${item.symbol}`, { state, label });
+      map.set(item.symbol, { state, label });
+    }
+    return map;
+  }, [scanner.data]);
+
+  // Fetch 7-day daily sparklines for each instrument
+  const sparklineCache = useRef<Map<string, number[]>>(new Map());
+  useEffect(() => {
+    if (watchlistItems.length === 0) return;
+    let cancelled = false;
+
+    async function loadSparklines() {
+      const nextMap = new Map(sparklineCache.current);
+      const missing = watchlistItems.filter((item) => !nextMap.has(itemKey(item)));
+
+      if (missing.length > 0) {
+        await Promise.all(
+          missing.map(async (item) => {
+            const key = itemKey(item);
+            try {
+              const res = await marketService.getCandles({
+                instrumentId: item.instrument_id,
+                symbol: item.symbol,
+                market: item.market,
+                exchange: item.exchange,
+                interval: '1d',
+                days: 7,
+              });
+              if (res.candles && res.candles.length > 0) {
+                const closes = res.candles.map((c) => c.close);
+                nextMap.set(key, closes);
+                sparklineCache.current.set(key, closes);
+              }
+            } catch {
+              // Ignore individual failure; Sparkline handles missing data
+            }
+          }),
+        );
+      }
+
+      if (!cancelled) {
+        setSparklines(new Map(nextMap));
+      }
+    }
+
+    void loadSparklines();
+    return () => {
+      cancelled = true;
+    };
+  }, [watchlistItems]);
+
+  async function handleRemove(item: WatchlistItem) {
+    setActionError(null);
+    const key = itemKey(item);
+    setRemoving(key);
+    try {
+      await portfolioService.removeWatchlist({
+        instrumentId: item.instrument_id,
+        symbol: item.symbol,
+        market: item.market,
+        exchange: item.exchange,
+      });
+      notifyWatchlistChanged();
+      watchlist.reload();
+      scanner.reload();
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : 'Could not remove instrument');
+    } finally {
+      setRemoving(null);
+    }
+  }
+
+  async function handleAdd(instrument: Instrument) {
+    setAddingError(null);
+    try {
+      await portfolioService.addWatchlist({
+        symbol: instrument.symbol,
+        market: instrument.market,
+        exchange: instrument.exchange,
+        display_name: instrument.name ?? instrument.display_name ?? instrument.symbol,
+        instrument_id: instrument.instrument_id,
+      });
+      notifyWatchlistChanged();
+      setAddModalOpen(false);
+      watchlist.reload();
+      scanner.reload();
+    } catch (caught) {
+      setAddingError(caught instanceof Error ? caught.message : 'Could not add instrument');
+    }
+  }
+
+  function handleRowClick(item: WatchlistItem) {
+    if (item.instrument_id) {
+      navigate(instrumentPath({ instrument_id: item.instrument_id, market: item.market }));
+    } else {
+      navigate(instrumentPath({ instrument_id: `${item.market}:${item.exchange}:${item.symbol}`, market: item.market }));
+    }
+  }
+
+  function handleRefreshAll() {
+    watchlist.reload();
+    scanner.reload();
+    refreshQuotes();
+    sparklineCache.current.clear();
+  }
+
+  return (
+    <div className="w-full px-4 py-4 lg:px-6">
+      {/* Page Header */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-terminal-border pb-3">
+        <div className="flex items-center gap-2.5">
+          <h1 className="text-xl font-bold tracking-tight text-white">Watchlist</h1>
+          <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded bg-black px-1.5 text-xs font-semibold text-terminal-muted">
+            {watchlistItems.length}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleRefreshAll}
+            title="Refresh Watchlist"
+            className="flex h-8 w-8 items-center justify-center rounded-sm border border-terminal-border bg-terminal-panel text-terminal-muted hover:bg-white/[0.05] hover:text-terminal-text transition-colors"
+          >
+            <Icon name="refresh" size={14} />
+          </button>
+
+          <Button
+            size="sm"
+            variant="secondary"
+            icon="plus"
+            onClick={() => {
+              setAddingError(null);
+              setAddModalOpen(true);
+            }}
+            className="border-terminal-border bg-terminal-panel hover:bg-white/[0.05]"
+          >
+            Add Instrument
+          </Button>
+
+          <button
+            type="button"
+            title="Watchlist Options"
+            className="flex h-8 w-8 items-center justify-center rounded-sm border border-terminal-border bg-terminal-panel text-terminal-muted hover:bg-white/[0.05] hover:text-terminal-text transition-colors"
+          >
+            <span className="text-base leading-none">⋮</span>
+          </button>
+        </div>
+      </div>
+
+      {actionError ? (
+        <Notice tone="negative" className="mb-3">
+          {actionError}
+        </Notice>
+      ) : null}
+
+      {/* Full-width unified Watchlist table */}
+      <div className="w-full rounded-sm border border-terminal-border bg-terminal-panel">
+        {watchlist.loading && !watchlist.data ? (
+          <LoadingPanel label="Loading Watchlist" rows={8} />
+        ) : watchlist.error ? (
+          <ErrorState message={watchlist.error} onRetry={watchlist.reload} />
+        ) : (
+          <WatchlistTable
+            items={watchlistItems}
+            quotes={watchlistQuotes}
+            signals={signalsMap}
+            sparklines={sparklines}
+            removing={removing}
+            onRemove={(item) => void handleRemove(item)}
+            onRowClick={handleRowClick}
+          />
+        )}
+      </div>
+
+      {/* Add Instrument Modal */}
+      {addModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
+          <div className="w-full max-w-md rounded-md border border-terminal-border bg-terminal-panel p-4 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between border-b border-terminal-border pb-2.5">
+              <div>
+                <h3 className="text-sm font-semibold text-terminal-text">Add to Watchlist</h3>
+                <p className="text-2xs text-terminal-muted">
+                  Search across Indian stocks, US equities, and crypto pairs
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAddModalOpen(false)}
+                className="text-terminal-muted hover:text-terminal-text"
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            {addingError ? (
+              <Notice tone="negative" className="mb-3">
+                {addingError}
+              </Notice>
+            ) : null}
+
+            <div className="mt-2">
+              <InstrumentSearch
+                autoFocus
+                placeholder="Enter ticker (e.g. AAPL, RELIANCE, BTCUSDT) or company"
+                onSelect={(instrument) => void handleAdd(instrument)}
+              />
+            </div>
+
+            <div className="mt-4 flex justify-end">
+              <Button size="sm" variant="ghost" onClick={() => setAddModalOpen(false)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}

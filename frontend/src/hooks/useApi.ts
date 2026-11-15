@@ -11,6 +11,12 @@ export interface UseApiResult<T> extends ApiState<T> {
   reload: () => void;
 }
 
+export interface UseApiOptions {
+  enabled?: boolean;
+  keepPreviousData?: boolean;
+  keepPreviousDataKey?: unknown;
+}
+
 function toMessage(error: unknown): string {
   if (error instanceof ApiError) {
     return error.message;
@@ -26,16 +32,15 @@ function isAbort(error: unknown): boolean {
 }
 
 /**
- * Small typed data-fetching hook with cancellation and a manual reload trigger.
- * Keeps the previous data visible while a reload is in flight so the UI does not
- * flash between loading states.
+ * Robust typed data-fetching hook with cancellation, reload trigger, and stale-response protection.
  */
 export function useApi<T>(
   fetcher: (signal: AbortSignal) => Promise<T>,
   deps: readonly unknown[],
-  options: { enabled?: boolean } = {},
+  options: UseApiOptions = {},
 ): UseApiResult<T> {
   const enabled = options.enabled ?? true;
+  const keepPreviousData = options.keepPreviousData ?? false;
   const [state, setState] = useState<ApiState<T>>({
     data: null,
     loading: enabled,
@@ -44,6 +49,7 @@ export function useApi<T>(
   const [reloadToken, setReloadToken] = useState(0);
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
+  const previousDataKeyRef = useRef(options.keepPreviousDataKey);
 
   useEffect(() => {
     if (!enabled) {
@@ -54,7 +60,14 @@ export function useApi<T>(
     const controller = new AbortController();
     let active = true;
 
-    setState((previous) => ({ data: previous.data, loading: true, error: null }));
+    const sameDataKey = Object.is(previousDataKeyRef.current, options.keepPreviousDataKey);
+    previousDataKeyRef.current = options.keepPreviousDataKey;
+
+    setState((previous) => ({
+      data: keepPreviousData && sameDataKey ? previous.data : null,
+      loading: true,
+      error: null,
+    }));
 
     fetcherRef
       .current(controller.signal)
@@ -76,7 +89,7 @@ export function useApi<T>(
       controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [...deps, enabled, reloadToken]);
+  }, [...deps, enabled, reloadToken, keepPreviousData, options.keepPreviousDataKey]);
 
   const reload = useCallback(() => {
     setReloadToken((token) => token + 1);

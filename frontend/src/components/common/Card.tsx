@@ -26,7 +26,7 @@ export function Card({
         <header className="flex flex-wrap items-center justify-between gap-2 border-b border-terminal-border px-3 py-1.5">
           <div className="min-w-0">
             {title ? (
-              <h2 className="text-xs font-semibold text-terminal-text">{title}</h2>
+              <h2 className="text-xs font-semibold tracking-wider text-terminal-muted">{title}</h2>
             ) : null}
             {subtitle ? <p className="text-2xs text-terminal-muted">{subtitle}</p> : null}
           </div>

@@ -229,6 +229,77 @@ def test_partial_sell_keeps_position_and_reports_fifo_realised_pnl(api):
     assert details["totals"]["total_sold"] == 4
 
 
+def test_short_intents_are_manual_only_and_cover_uses_short_fifo(api):
+    opened = trade(
+        api.client, intent="SELL_SHORT", amount=1200, fees=10,
+    )
+    assert opened.status_code == 200
+    result = opened.json()
+    assert result["transaction"]["intent"] == "SELL_SHORT"
+    assert result["transaction"]["side"] == "SELL"
+    assert result["purpose"] == "research/manual exposure tracking only"
+    assert result["order_execution"] is False
+    assert result["spot_borrow_claims"] is False
+    assert result["position"]["position_side"] == "SHORT"
+    assert result["position"]["quantity"] == -10
+    assert result["position"]["cost_basis"] == 1190
+    held = api.client.get("/api/watchlist").json()["items"][0]
+    assert held["is_held"] is True
+    assert held["held_quantity"] == -10
+    assert held["held_side"] == "SHORT"
+    listed = api.client.get("/api/portfolio/transactions").json()
+    assert listed["mode"] == "manual-research-exposure-ledger"
+    assert listed["transactions"][0]["intent"] == "SELL_SHORT"
+    assert listed["transactions"][0]["side"] == "SELL"
+
+    preview = api.client.post("/api/portfolio/transactions/preview", json={
+        "instrument_id": "india:NSE:RELIANCE",
+        "intent": "BUY_TO_COVER",
+        "amount": 600,
+        "currency": "INR",
+        "fees": 6,
+        "trade_time": (BASE + timedelta(days=1)).isoformat(),
+    }).json()
+    assert preview["valid"] is True
+    assert preview["intent"] == "BUY_TO_COVER"
+    assert preview["side"] == "BUY"
+    assert preview["max_close_amount"] == 1200
+    assert preview["total_cash_cost"] is None
+
+    api.quotes.prices["india:NSE:RELIANCE"] = 100
+    covered = trade(
+        api.client, intent="BUY_TO_COVER", amount=600, fees=6,
+        trade_time=(BASE + timedelta(days=1)).isoformat(),
+    )
+    assert covered.status_code == 200
+    result = covered.json()
+    assert result["transaction"]["intent"] == "BUY_TO_COVER"
+    assert result["position"]["position_side"] == "SHORT"
+    assert result["position"]["quantity"] == -4
+    assert result["position"]["realised_pnl"] == 108
+    assert result["position"]["cost_basis"] == 476
+    assert result["position"]["market_value"] == 400
+    assert result["calculation"]["total_cash_cost"] is None
+    assert result["calculation"]["net_proceeds"] is None
+
+
+def test_short_intents_reject_overcovers_and_long_short_reversals(api):
+    assert trade(api.client, intent="SELL_SHORT", amount=1200).status_code == 200
+    overcover = trade(
+        api.client, intent="BUY_TO_COVER", amount=2400,
+        trade_time=(BASE + timedelta(days=1)).isoformat(),
+    )
+    assert overcover.status_code == 422
+    assert "exceeds the available holdings market value" in overcover.json()["detail"]
+
+    reverse = trade(
+        api.client, intent="BUY", amount=120,
+        trade_time=(BASE + timedelta(days=1)).isoformat(),
+    )
+    assert reverse.status_code == 422
+    assert "cannot reverse an open SHORT" in reverse.json()["detail"]
+
+
 def test_full_sell_closes_position_but_ledger_remains(api):
     assert trade(api.client).status_code == 200
     api.quotes.prices["india:NSE:RELIANCE"] = 110.0

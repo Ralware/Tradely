@@ -7,9 +7,25 @@
     color-scheme: dark;
   }
 
+  *,
+  *::before,
+  *::after {
+    text-transform: inherit;
+  }
+
   body {
     @apply bg-terminal-bg text-terminal-text antialiased;
-    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    background-color: #000000;
+    text-transform: capitalize;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  button,
+  input,
+  select,
+  textarea,
+  option {
+    text-transform: capitalize;
   }
 
   ::selection {
@@ -17,13 +33,18 @@
   }
 
   :focus-visible {
-    outline: 1px solid theme('colors.terminal.accent');
+    outline: 1px solid theme("colors.terminal.accent");
     outline-offset: 1px;
   }
 
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #1e1e1e transparent;
+  }
+
   ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
   }
 
   ::-webkit-scrollbar-track {
@@ -31,19 +52,19 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: #2a2e37;
-    border-radius: 4px;
+    background: #1e1e1e;
+    border-radius: 3px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: #3a3f4a;
+    background: #2a2a2a;
   }
 }
 
 @layer components {
   .num {
     font-variant-numeric: tabular-nums;
-    font-feature-settings: 'tnum';
+    font-feature-settings: "tnum";
   }
 
   .panel-surface {

@@ -111,6 +111,65 @@ def test_oversell_raises_instead_of_creating_short_position():
         ])
 
 
+def test_short_fifo_lots_and_partial_cover_include_fees_in_realised_pnl():
+    ledger = build_ledger([
+        row(1, "SELL_SHORT", 2, 100, fees=2, offset_days=0),
+        row(2, "SELL_SHORT", 3, 120, fees=3, offset_days=1),
+        row(3, "BUY_TO_COVER", 3, 90, fees=3, offset_days=2),
+    ])
+    account = ledger.accounts["india:NSE:RELIANCE"]
+    assert account.position_side == "SHORT"
+    assert float(account.quantity) == -2
+    assert float(account.cost_basis) == 238
+    assert float(account.realised_pnl) == 44
+    assert len(account.short_lots) == 1
+    assert float(account.short_lots[0].quantity) == 2
+    assert account.long_lots == []
+
+
+def test_short_position_view_and_summary_mark_exposure_and_pnl():
+    ledger = build_ledger([row(1, "SELL_SHORT", 10, 100, fees=10)])
+    account = ledger.accounts["india:NSE:RELIANCE"]
+    mark = quote("india:NSE:RELIANCE", 90)
+    position = position_view(account, mark)
+    assert position["position_side"] == "SHORT"
+    assert position["cost_basis_type"] == "net_short_opening_proceeds"
+    assert position["quantity"] == -10
+    assert position["absolute_quantity"] == 10
+    assert position["cost_basis"] == 990
+    assert position["market_value"] == 900
+    assert position["unrealized_pnl"] == 90
+    assert position["order_execution"] is False
+    summary = summary_view(
+        ledger, {"india:NSE:RELIANCE": mark},
+        base_currency="INR", transactions_count=1,
+    )
+    bucket = summary["currencies"][0]
+    assert bucket["total_invested"] == 0
+    assert bucket["market_value"] == 0
+    assert bucket["short_market_value"] == 900
+    assert bucket["gross_market_value"] == 900
+    assert bucket["unrealized_pnl"] == 90
+
+
+def test_cover_cannot_overclose_or_reverse_short_position():
+    with pytest.raises(ValueError, match="cover larger than recorded short holdings"):
+        build_ledger([
+            row(1, "SELL_SHORT", 1, 100),
+            row(2, "BUY_TO_COVER", 2, 90, offset_days=1),
+        ])
+    with pytest.raises(ValueError, match="reverse an open SHORT"):
+        build_ledger([
+            row(1, "SELL_SHORT", 1, 100),
+            row(2, "BUY", 1, 90, offset_days=1),
+        ])
+    with pytest.raises(ValueError, match="reverse an open LONG"):
+        build_ledger([
+            row(1, "BUY", 1, 100),
+            row(2, "SELL_SHORT", 1, 90, offset_days=1),
+        ])
+
+
 def test_summary_never_adds_currencies_and_obeys_pnl_identity():
     ledger = build_ledger([
         row(1, "BUY", 10, 100, fees=10, market="india", symbol="RELIANCE", currency="INR"),

@@ -11,7 +11,7 @@ import {
   type SeriesMarker,
   type UTCTimestamp,
 } from 'lightweight-charts';
-import type { Candle, Transaction } from '../../types/api';
+import type { Candle, PositionDirection, Transaction } from '../../types/api';
 import { EmptyState } from '../common/States';
 
 function toSeconds(timestamp: string): UTCTimestamp | null {
@@ -42,6 +42,7 @@ export function PositionChart({
   candles,
   purchases,
   sales,
+  positionSide = 'LONG',
   averageCost,
   currentPrice,
   height = 320,
@@ -49,6 +50,7 @@ export function PositionChart({
   candles: Candle[];
   purchases: Transaction[];
   sales: Transaction[];
+  positionSide?: PositionDirection;
   averageCost: number;
   currentPrice: number | null;
   height?: number;
@@ -64,7 +66,7 @@ export function PositionChart({
     const chart: IChartApi = createChart(element, {
       autoSize: true,
       layout: {
-        background: { type: ColorType.Solid, color: '#0e1012' },
+        background: { type: ColorType.Solid, color: '#000000' },
         textColor: '#8b909a',
         fontSize: 11,
         fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
@@ -83,8 +85,8 @@ export function PositionChart({
       },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: '#3a3f4a', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#20242b' },
-        horzLine: { color: '#3a3f4a', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#20242b' },
+        vertLine: { color: '#3a3f4a', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#000000' },
+        horzLine: { color: '#3a3f4a', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#000000' },
       },
     });
 
@@ -120,7 +122,7 @@ export function PositionChart({
         lineWidth: 1,
         lineStyle: LineStyle.Dashed,
         axisLabelVisible: true,
-        title: 'Average Cost',
+        title: positionSide === 'SHORT' ? 'Average Proceeds' : 'Average Cost',
       });
     }
     if (currentPrice !== null && currentPrice > 0) {
@@ -144,7 +146,7 @@ export function PositionChart({
         lineWidth: 1,
         lineStyle: LineStyle.Dotted,
         axisLabelVisible: false,
-        title: 'Buy',
+        title: positionSide === 'SHORT' ? 'Short Entry' : 'Buy',
       });
     }
 
@@ -156,10 +158,10 @@ export function PositionChart({
       }
       markers.push({
         time,
-        position: 'belowBar',
-        color: '#26a69a',
-        shape: 'arrowUp',
-        text: `B ${purchase.quantity}`,
+        position: positionSide === 'SHORT' ? 'aboveBar' : 'belowBar',
+        color: positionSide === 'SHORT' ? '#ef5350' : '#26a69a',
+        shape: positionSide === 'SHORT' ? 'arrowDown' : 'arrowUp',
+        text: `${positionSide === 'SHORT' ? 'SS' : 'B'} ${purchase.quantity}`,
       });
     }
     for (const sale of sales) {
@@ -169,10 +171,10 @@ export function PositionChart({
       }
       markers.push({
         time,
-        position: 'aboveBar',
-        color: '#ef5350',
-        shape: 'arrowDown',
-        text: `S ${sale.quantity}`,
+        position: positionSide === 'SHORT' ? 'belowBar' : 'aboveBar',
+        color: positionSide === 'SHORT' ? '#26a69a' : '#ef5350',
+        shape: positionSide === 'SHORT' ? 'arrowUp' : 'arrowDown',
+        text: `${positionSide === 'SHORT' ? 'C' : 'S'} ${sale.quantity}`,
       });
     }
     markers.sort((left, right) => left.time - right.time);
@@ -184,7 +186,7 @@ export function PositionChart({
     return () => {
       chart.remove();
     };
-  }, [candles, purchases, sales, averageCost, currentPrice]);
+  }, [candles, purchases, sales, positionSide, averageCost, currentPrice]);
 
   if (candles.length === 0) {
     return <EmptyState title="No Price History" description="Candles are unavailable for this instrument." icon="chart" />;

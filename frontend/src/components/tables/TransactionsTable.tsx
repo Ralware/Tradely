@@ -32,6 +32,23 @@ function amountOf(transaction: Transaction): number | null {
   return null;
 }
 
+function intentOf(transaction: Transaction): NonNullable<Transaction['intent']> {
+  return transaction.intent ?? transaction.side;
+}
+
+function intentLabel(intent: NonNullable<Transaction['intent']>): string {
+  switch (intent) {
+    case 'BUY':
+      return 'Buy';
+    case 'SELL':
+      return 'Sell';
+    case 'SELL_SHORT':
+      return 'Sell Short';
+    case 'BUY_TO_COVER':
+      return 'Buy To Cover';
+  }
+}
+
 export function TransactionsTable({
   transactions,
   onDelete,
@@ -45,7 +62,7 @@ export function TransactionsTable({
     return (
       <EmptyState
         title="No Transactions Recorded"
-        description="Record a real BUY or SELL amount to build the FIFO ledger."
+        description="Record explicit BUY, SELL, SELL SHORT, or BUY TO COVER intents for manual exposure accounting."
         icon="portfolio"
       />
     );
@@ -59,8 +76,8 @@ export function TransactionsTable({
             <th className="py-1.5 pr-3 font-medium">Time</th>
             <th className="py-1.5 pr-3 font-medium">Symbol</th>
             <th className="py-1.5 pr-3 font-medium">Exchange</th>
-            <th className="py-1.5 pr-3 font-medium">Side</th>
-            <th className="py-1.5 pr-3 text-right font-medium">Amount</th>
+            <th className="py-1.5 pr-3 font-medium">Intent</th>
+            <th className="py-1.5 pr-3 text-right font-medium">Reference Notional</th>
             <th className="py-1.5 pr-3 text-right font-medium">Quantity</th>
             <th className="py-1.5 pr-3 text-right font-medium">Price</th>
             <th className="py-1.5 pr-3 text-right font-medium">Fees</th>
@@ -74,6 +91,8 @@ export function TransactionsTable({
         <tbody>
           {transactions.map((transaction) => {
             const amount = amountOf(transaction);
+            const intent = intentOf(transaction);
+            const closesExposure = intent === 'SELL' || intent === 'BUY_TO_COVER';
             const quoteTitle = [
               transaction.quote_provider || transaction.provider,
               transaction.quote_time ? `Quote ${transaction.quote_time}` : null,
@@ -95,8 +114,8 @@ export function TransactionsTable({
                 </td>
                 <td className="py-1.5 pr-3 text-terminal-muted">{transaction.exchange ?? '—'}</td>
                 <td className="py-1.5 pr-3">
-                  <Badge tone={transaction.side === 'BUY' ? 'positive' : 'negative'}>
-                    {transaction.side}
+                  <Badge tone={intent === 'BUY' || intent === 'BUY_TO_COVER' ? 'positive' : 'negative'}>
+                    {intentLabel(intent)}
                   </Badge>
                 </td>
                 <td className="num py-1.5 pr-3 text-right text-terminal-text">
@@ -114,12 +133,12 @@ export function TransactionsTable({
                 <td
                   className={cn(
                     'num py-1.5 pr-3 text-right',
-                    transaction.side === 'SELL'
+                    closesExposure
                       ? toneClass(transaction.realised_pnl)
                       : 'text-terminal-muted',
                   )}
                 >
-                  {transaction.side === 'SELL'
+                  {closesExposure
                     ? formatSignedFixed(transaction.realised_pnl ?? null, 2)
                     : '—'}
                 </td>
@@ -143,7 +162,7 @@ export function TransactionsTable({
                       icon="trash"
                       loading={deleting === transaction.id}
                       onClick={() => onDelete(transaction)}
-                      aria-label={`Delete ${transaction.side} ${transaction.symbol}`}
+                      aria-label={`Delete ${intentLabel(intent)} ${transaction.symbol}`}
                     >
                       Delete
                     </Button>

@@ -13,6 +13,7 @@ export function TradesTable({ trades }: { trades: BacktestTrade[] }) {
         <thead>
           <tr className="border-b border-terminal-border text-left text-2xs text-terminal-muted">
             <th className="py-1.5 pr-3 font-medium">Signal</th>
+            <th className="py-1.5 pr-3 font-medium">Direction</th>
             <th className="py-1.5 pr-3 font-medium">Entry</th>
             <th className="py-1.5 pr-3 font-medium">Exit</th>
             <th className="py-1.5 pr-3 text-right font-medium">Entry Price</th>
@@ -29,6 +30,9 @@ export function TradesTable({ trades }: { trades: BacktestTrade[] }) {
             return (
               <tr key={`${trade.entry_time}-${index}`} className="border-b border-terminal-borderSoft last:border-0">
                 <td className="num py-1.5 pr-3 text-terminal-muted">{formatDateTime(trade.signal_time)}</td>
+                <td className="py-1.5 pr-3 text-terminal-text">
+                  {trade.direction === 'SHORT' ? 'Short' : 'Long'}
+                </td>
                 <td className="num py-1.5 pr-3 text-terminal-muted">{formatDateTime(trade.entry_time)}</td>
                 <td className="num py-1.5 pr-3 text-terminal-muted">{formatDateTime(trade.exit_time)}</td>
                 <td className="num py-1.5 pr-3 text-right text-terminal-text">

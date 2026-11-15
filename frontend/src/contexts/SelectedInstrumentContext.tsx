@@ -1,9 +1,9 @@
-import { createContext, useContext, useEffect, useMemo } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
-import { useApi } from '../hooks/useApi';
 import { useQuotes } from '../hooks/useQuotes';
 import { instrumentService } from '../services/instrumentService';
+import { portfolioService } from '../services/portfolioService';
 import type {
   Instrument,
   InstrumentCapabilities,
@@ -34,6 +34,8 @@ export interface SelectedQuote {
   interval: string;
 }
 
+type ResolutionStatus = 'resolved' | 'ambiguous' | 'unsupported' | 'not_found' | 'loading' | 'error';
+
 interface SelectedInstrumentValue {
   symbol: string;
   name: string;
@@ -51,6 +53,7 @@ interface SelectedInstrumentValue {
   quote: SelectedQuote | null;
   quoteLoading: boolean;
   error: string | null;
+  resolutionStatus: ResolutionStatus;
   reload: () => void;
 }
 
@@ -92,64 +95,283 @@ function identityFromId(instrumentId: string): IdentityParts | null {
   };
 }
 
-/**
- * Resolves the instrument referenced by the URL and reads its quote from the
- * app-wide quote hub.
- *
- * The canonical URL parameter is `instrument=<instrument_id>`. Legacy
- * `symbol`/`market`/`exchange` links are accepted and normalised once the
- * backend confirms the identity, so old bookmarks keep working.
- */
+function messageForStatus(status: ResolutionStatus, fallback: string | null): string | null {
+  if (status === 'ambiguous') return 'Multiple supported instruments match this search. Select the correct listing.';
+  if (status === 'unsupported') return fallback ?? 'Instrument was recognized, but no supported market-data source is available.';
+  if (status === 'not_found') return fallback ?? 'No supported instrument matches the current selection.';
+  if (status === 'error') return fallback ?? 'Unable to resolve the selected instrument.';
+  return fallback;
+}
+
 export function SelectedInstrumentProvider({ children }: { children: ReactNode }) {
   const [params, setParams] = useSearchParams();
   const location = useLocation();
-  const cryptoRoute = location.pathname.startsWith('/crypto');
 
-  const instrumentParam = (params.get('instrument') ?? '').trim();
-  const legacySymbol = (params.get('symbol') ?? '').trim().toUpperCase();
-  const legacyMarket =
-    asMarket(params.get('market')) ?? (cryptoRoute ? 'crypto' : 'india');
-  const legacyExchange = params.get('exchange') ?? exchangeForMarket(legacyMarket);
+  const rawInstrument = (params.get('instrument') ?? '').trim();
+  const rawSymbol = (params.get('symbol') ?? '').trim().toUpperCase();
+  const rawMarket = asMarket(params.get('market'));
+  const rawExchange = params.get('exchange')?.trim().toUpperCase() ?? null;
+  const hasLegacyParams =
+    params.has('symbol') || params.has('market') || params.has('exchange');
 
-  const identity = useMemo<IdentityParts | null>(() => {
-    if (instrumentParam) {
-      const parsed = identityFromId(instrumentParam);
-      if (parsed) {
-        return parsed;
-      }
-      return {
-        instrumentId: instrumentParam,
-        market: legacyMarket,
-        exchange: legacyExchange.toUpperCase(),
-        symbol: legacySymbol,
+  const canonicalParts = useMemo(() => {
+    if (!rawInstrument) return null;
+    return identityFromId(rawInstrument);
+  }, [rawInstrument]);
+
+  const requestedInstrumentId = useMemo(() => {
+    if (canonicalParts) {
+      return canonicalParts.instrumentId;
+    }
+    if (rawInstrument && rawInstrument.includes(':')) {
+      return rawInstrument;
+    }
+    return '';
+  }, [canonicalParts, rawInstrument]);
+
+  const legacyQuery = rawInstrument && !rawInstrument.includes(':') ? rawInstrument : rawSymbol;
+
+  const [selection, setSelection] = useState<{
+    instrument: Instrument | null;
+    status: ResolutionStatus;
+    message: string | null;
+    loading: boolean;
+    error: string | null;
+  }>({
+    instrument: null,
+    status: 'loading',
+    message: null,
+    loading: false,
+    error: null,
+  });
+  const selectionRequestRef = useRef(0);
+
+  useEffect(() => {
+    const requestId = ++selectionRequestRef.current;
+    const controller = new AbortController();
+    const isCanonical = Boolean(canonicalParts) || Boolean(rawInstrument && rawInstrument.includes(':'));
+
+    if (!rawInstrument && !rawSymbol && location.pathname === '/analysis') {
+      setSelection({ instrument: null, status: 'loading', message: null, loading: true, error: null });
+      let active = true;
+      portfolioService
+        .getWatchlist()
+        .then((res) => {
+          if (!active || requestId !== selectionRequestRef.current) return;
+          const first = res.items?.[0];
+          if (!first) {
+            setSelection({ instrument: null, status: 'loading', message: null, loading: false, error: null });
+            return;
+          }
+          const targetId = first.instrument_id ?? instrumentIdFromLegacy(first.symbol, first.market, first.exchange);
+          setParams(
+            (current) => {
+              const next = new URLSearchParams(current);
+              next.set('instrument', targetId);
+              return next;
+            },
+            { replace: true },
+          );
+        })
+        .catch(() => {
+          if (active && requestId === selectionRequestRef.current) {
+            setSelection({ instrument: null, status: 'error', message: 'Unable to load your watchlist.', loading: false, error: 'Unable to load your watchlist.' });
+          }
+        });
+      return () => {
+        active = false;
       };
     }
-    if (legacySymbol) {
-      return {
-        instrumentId: instrumentIdFromLegacy(legacySymbol, legacyMarket, legacyExchange),
-        market: legacyMarket,
-        exchange: legacyExchange.toUpperCase(),
-        symbol: legacySymbol,
+
+    if (!requestedInstrumentId && !legacyQuery) {
+      setSelection({ instrument: null, status: 'loading', message: null, loading: false, error: null });
+      return undefined;
+    }
+
+    if (!requestedInstrumentId && legacyQuery) {
+      const query = legacyQuery;
+      setSelection((current) => ({ ...current, loading: true, error: null, status: 'loading' }));
+
+      void instrumentService
+        .resolve(query, controller.signal)
+        .then((res) => {
+          if (!controller.signal.aborted || !controller.signal.aborted) {
+            if (requestId !== selectionRequestRef.current) return;
+          }
+          if (res.status === 'resolved' && res.instrument) {
+            const canonicalId = res.instrument.instrument_id;
+            if (rawInstrument !== canonicalId || hasLegacyParams) {
+              setParams(
+                (current) => {
+                  const next = new URLSearchParams(current);
+                  next.delete('symbol');
+                  next.delete('market');
+                  next.delete('exchange');
+                  next.set('instrument', canonicalId);
+                  return next;
+                },
+                { replace: true },
+              );
+            }
+            setSelection({ instrument: res.instrument, status: 'resolved', message: null, loading: false, error: null });
+            return;
+          }
+          if (res.status === 'ambiguous') {
+            setSelection({ instrument: null, status: 'ambiguous', message: res.message ?? 'Multiple supported instruments matched your search.', loading: false, error: null });
+            return;
+          }
+          if (res.status === 'unsupported') {
+            setSelection({ instrument: null, status: 'unsupported', message: res.message ?? 'This instrument was recognized, but market data is unavailable.', loading: false, error: null });
+            return;
+          }
+          if (res.status === 'not_found') {
+            setSelection({ instrument: null, status: 'not_found', message: res.message ?? 'No supported instrument was found.', loading: false, error: null });
+            return;
+          }
+          setSelection({ instrument: null, status: 'error', message: 'Unable to resolve the selected instrument.', loading: false, error: 'Unable to resolve the selected instrument.' });
+        })
+        .catch((caught: unknown) => {
+          if (requestId !== selectionRequestRef.current) return;
+          const errorMessage = caught instanceof Error ? caught.message : 'Unable to resolve the selected instrument.';
+          setSelection({ instrument: null, status: 'error', message: errorMessage, loading: false, error: errorMessage });
+        });
+
+      return () => {
+        controller.abort();
       };
+    }
+
+    if (requestedInstrumentId && !isCanonical && rawInstrument && rawInstrument.includes(':')) {
+      setSelection({ instrument: null, status: 'error', message: 'Invalid instrument identifier in the URL.', loading: false, error: 'Invalid instrument identifier in the URL.' });
+      return () => controller.abort();
+    }
+
+    if (!requestedInstrumentId) {
+      setSelection({ instrument: null, status: 'error', message: 'No instrument selected.', loading: false, error: 'No instrument selected.' });
+      return () => controller.abort();
+    }
+
+    if (selection.instrument?.instrument_id === requestedInstrumentId) {
+      return undefined;
+    }
+
+    setSelection((current) => ({ ...current, loading: true, error: null, status: 'loading' }));
+
+    void instrumentService
+      .get(requestedInstrumentId, controller.signal)
+      .then((instrument) => {
+        if (requestId !== selectionRequestRef.current) return;
+        const canonicalId = instrument.instrument_id;
+        if (rawInstrument !== canonicalId || hasLegacyParams) {
+          setParams(
+            (current) => {
+              const next = new URLSearchParams(current);
+              next.delete('symbol');
+              next.delete('market');
+              next.delete('exchange');
+              next.set('instrument', canonicalId);
+              return next;
+            },
+            { replace: true },
+          );
+        }
+        setSelection({ instrument, status: 'resolved', message: null, loading: false, error: null });
+      })
+      .catch((caught: unknown) => {
+        if (requestId !== selectionRequestRef.current) return;
+        const message = caught instanceof Error ? caught.message : 'Unable to load instrument details.';
+        setSelection({ instrument: null, status: 'error', message, loading: false, error: message });
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [
+    canonicalParts,
+    hasLegacyParams,
+    legacyQuery,
+    location.pathname,
+    rawInstrument,
+    rawMarket,
+    rawExchange,
+    rawSymbol,
+    requestedInstrumentId,
+    selection.instrument?.instrument_id,
+    setParams,
+  ]);
+
+  const instrument = selection.instrument;
+  const capabilities = instrument?.capabilities ?? null;
+  const resolvedIdentity = useMemo<IdentityParts | null>(() => {
+    if (instrument) {
+      return {
+        instrumentId: instrument.instrument_id,
+        market: instrument.market,
+        exchange: instrument.exchange,
+        symbol: instrument.symbol,
+      };
+    }
+    if (canonicalParts) {
+      return canonicalParts;
+    }
+    if (rawSymbol) {
+      const market: Market = rawMarket ?? 'india';
+      const exchange = rawExchange ?? exchangeForMarket(market);
+      return {
+        instrumentId: instrumentIdFromLegacy(rawSymbol, market, exchange),
+        market,
+        exchange,
+        symbol: rawSymbol,
+      };
+    }
+    if (rawInstrument && rawInstrument.includes(':')) {
+      return identityFromId(rawInstrument);
     }
     return null;
-  }, [instrumentParam, legacySymbol, legacyMarket, legacyExchange]);
+  }, [canonicalParts, instrument, rawExchange, rawInstrument, rawMarket, rawSymbol]);
 
-  const enabled = identity !== null;
-  const instrumentId = identity?.instrumentId ?? '';
-  const metadata = useApi(
-    (signal) => instrumentService.get(instrumentId, signal),
-    [instrumentId],
-    { enabled },
-  );
-
-  const instrument = metadata.data;
-  const capabilities = instrument?.capabilities ?? null;
-  const market = instrument?.market ?? identity?.market ?? legacyMarket;
-  const symbol = instrument?.symbol ?? identity?.symbol ?? '';
-  const exchange = instrument?.exchange ?? identity?.exchange ?? legacyExchange;
+  const market = instrument?.market ?? resolvedIdentity?.market ?? 'crypto';
+  const symbol = instrument?.symbol ?? resolvedIdentity?.symbol ?? '';
+  const exchange = instrument?.exchange ?? resolvedIdentity?.exchange ?? '';
   const name = instrument?.name ?? symbol;
   const currency = instrument?.currency ?? '';
+  const enabled = Boolean(instrument || resolvedIdentity);
+  const instrumentId = instrument?.instrument_id ?? resolvedIdentity?.instrumentId ?? '';
+
+  const autoSelectedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const noRouteSelection = !rawInstrument && !rawSymbol && location.pathname === '/analysis';
+    if (!noRouteSelection) {
+      autoSelectedRef.current = null;
+      return;
+    }
+    const guardKey = location.pathname;
+    if (autoSelectedRef.current === guardKey) {
+      return;
+    }
+    autoSelectedRef.current = guardKey;
+    portfolioService
+      .getWatchlist()
+      .then((res) => {
+        if (!res.items || res.items.length === 0) return;
+        const first = res.items[0];
+        const targetId = first.instrument_id ?? instrumentIdFromLegacy(first.symbol, first.market, first.exchange);
+        setParams(
+          (current) => {
+            if (current.get('instrument') || current.get('symbol')) {
+              return current;
+            }
+            const next = new URLSearchParams(current);
+            next.delete('market');
+            next.delete('exchange');
+            next.set('instrument', targetId);
+            return next;
+          },
+          { replace: true },
+        );
+      })
+      .catch(() => undefined);
+  }, [location.pathname, rawInstrument, rawSymbol, setParams]);
 
   const timeframes = useMemo<TimeframeOption[]>(() => {
     if (capabilities?.supported_intervals?.length) {
@@ -165,35 +387,14 @@ export function SelectedInstrumentProvider({ children }: { children: ReactNode }
   );
   const days = asDays(params.get('days'), interval);
 
-  // Migrate legacy links to the canonical parameter without a full navigation.
-  useEffect(() => {
-    if (instrumentParam || !metadata.data) {
-      return;
-    }
-    const next = new URLSearchParams(params);
-    next.delete('symbol');
-    next.delete('market');
-    next.delete('exchange');
-    next.set('instrument', metadata.data.instrument_id);
-    setParams(next, { replace: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [instrumentParam, metadata.data]);
-
   const refs = useMemo(
     () =>
-      enabled
-        ? [
-            {
-              instrument_id: instrumentId,
-              symbol,
-              market,
-              exchange,
-              currency: currency || undefined,
-            },
-          ]
+      enabled && instrumentId
+        ? [{ instrument_id: instrumentId, symbol, market, exchange, currency: currency || undefined }]
         : [],
-    [enabled, instrumentId, symbol, market, exchange, currency],
+    [currency, enabled, exchange, instrumentId, market, symbol],
   );
+
   const { quotes, loading: quoteLoading, refresh } = useQuotes(refs);
   const live = quotes.get(instrumentId) ?? null;
 
@@ -215,30 +416,38 @@ export function SelectedInstrumentProvider({ children }: { children: ReactNode }
       isAdjusted: Boolean(live.is_adjusted),
       interval,
     };
-  }, [live, interval]);
+  }, [interval, live]);
 
-  const value: SelectedInstrumentValue = {
-    symbol,
-    name,
-    market,
-    exchange,
-    currency,
-    instrumentId,
-    instrument,
-    capabilities,
-    timeframes,
-    interval,
-    days,
-    enabled,
-    loading: metadata.loading,
-    quote,
-    quoteLoading,
-    error: metadata.error ?? live?.error ?? null,
-    reload: () => {
-      metadata.reload();
-      refresh();
-    },
-  };
+  const errorMessage = messageForStatus(selection.status, selection.error ?? selection.message ?? null);
+
+  const value = useMemo<SelectedInstrumentValue>(
+    () => ({
+      symbol,
+      name,
+      market,
+      exchange,
+      currency,
+      instrumentId,
+      instrument,
+      capabilities,
+      timeframes,
+      interval,
+      days,
+      enabled,
+      loading: selection.loading,
+      quote,
+      quoteLoading,
+      error: errorMessage,
+      resolutionStatus: selection.status,
+      reload: () => {
+        if (selection.instrument?.instrument_id) {
+          selectionRequestRef.current += 1;
+        }
+        refresh();
+      },
+    }),
+    [capabilities, currency, days, enabled, errorMessage, exchange, instrument, instrumentId, interval, market, name, quote, quoteLoading, refresh, selection.loading, selection.status, symbol, timeframes],
+  );
 
   return (
     <SelectedInstrumentContext.Provider value={value}>
@@ -248,9 +457,9 @@ export function SelectedInstrumentProvider({ children }: { children: ReactNode }
 }
 
 export function useSelectedInstrument(): SelectedInstrumentValue {
-  const value = useContext(SelectedInstrumentContext);
-  if (!value) {
-    throw new Error('useSelectedInstrument must be used inside SelectedInstrumentProvider');
+  const context = useContext(SelectedInstrumentContext);
+  if (!context) {
+    throw new Error('useSelectedInstrument must be used inside <SelectedInstrumentProvider>');
   }
-  return value;
+  return context;
 }

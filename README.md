@@ -27,13 +27,13 @@ This repository now contains a **runnable local application foundation**, not ju
 - OHLCV normalisation and validation, with provider/source and adjustment metadata.
 - Best-effort Yahoo Finance company profiles, valuation/quality ratios and quarterly financial statements where the provider supplies them.
 - Deterministic SMA, EMA, Wilder-seeded RSI/ATR/ADX, MACD, Bollinger Bands, Donchian channels, relative volume, OBV, session VWAP (intraday bars only; deliberately unavailable on daily bars), MFI, CMF, CCI and Stochastic RSI calculations.
-- One versioned daily long-only trend/Donchian strategy. `BUY` means all entry conditions pass. `SELL` means exit an existing long after a close below the prior 10-bar low; it does **not** open a short.
+- One versioned daily trend/Donchian strategy with selectable long-only, short-only and long/short research modes. `BUY` opens a long, `SELL` exits an existing long, `SELL_SHORT` opens a short research exposure, and `BUY_TO_COVER` exits an existing short. Signals use completed candles only and never place orders.
 - Signal suppression when daily strategy data is stale or Indian-equity history is not confirmed corporate-action-adjusted.
-- ATR-based position sizing, a single-instrument daily backtest with next-bar-open execution assumptions and configurable aggregate basis-point costs.
+- Direction-aware ATR-based position sizing and a single-instrument daily backtest with next-bar-open execution assumptions, configurable aggregate basis-point costs and explicit LONG/SHORT trade records.
 - Stock/asset-specific news endpoint with GDELT discovery and optional Yahoo Finance News supplementation.
-- Manual actual-holdings ledger with amount-based BUY/SELL entry and FIFO lot accounting. The owner enters the monetary amount; the backend validates a provider quote, derives the quantity and stores the reference price. BUY fees are included in cost basis; SELL consumes the oldest lots, allocates buy fees, deducts sell fees and records realised P&L. Oversells and deletion that would create a historical oversell are rejected. There are no short positions, simulated trades, paper-trading accounts or order placement.
+- Manual exposure ledger with explicit BUY, SELL, SELL_SHORT and BUY_TO_COVER intents and separate FIFO long/short lots. Short rows are research/manual exposure only; the system makes no claim of exchange execution, borrowing, margin, collateral or funding. The owner enters a monetary reference notional; the backend validates a provider quote, derives quantity and stores the reference price. Invalid oversells, over-covers, reversals and deletions that would invalidate the ledger are rejected. No order placement or paper-trading account is provided.
 - Backend-computed live portfolio valuation: invested value, current market value, day change, unrealised P&L and return, realised P&L, fees and total P&L. Monetary summary totals are grouped by transaction currency; no INR/USD/USDT conversion is performed or implied.
-- Position detail with canonical identity, holding quantity, average and remaining cost basis, latest quote, market value, total bought/sold, realised P&L, fees, purchase/sale history and a daily candle chart with buy/sell markers and cost/price references.
+- Position detail with canonical identity, signed long/short quantity, side-aware cost/proceeds basis and P&L, latest quote, marked exposure, FIFO history/lots and a daily candle chart with direction-aware trade markers.
 - An SSE quote stream and shared frontend quote hub so watchlist, portfolio and analysis views use the same instrument identity, prices and timestamps without duplicate provider calls. Held instruments are added to the watchlist once, deduplicated by canonical identity.
 - React + TypeScript frontend with dashboard, markets/watchlist, stock and crypto analysis, live portfolio valuation, backtesting and settings pages; candlestick/volume charts via Lightweight Charts and backend-computed indicator series; machine-readable API at `/docs`; automated backend and frontend tests.
 
@@ -141,15 +141,15 @@ The production bundle is written to `frontend/dist/`. On Windows PowerShell, if 
 | `GET` | `/api/instruments/{symbol}/technicals` | Conventional Buy/Sell/Neutral labels for existing backend indicators (additive; drives the gauges and tables) |
 | `GET` | `/api/instruments/{symbol}/news` | GDELT discovery with optional Yahoo Finance News supplementation |
 | `GET` | `/api/scanner/watchlist` | Daily strategy scan of saved watchlist |
-| `POST` | `/api/backtests/trend-breakout` | Initial daily single-instrument backtest |
-| `POST` | `/api/risk/position-size` | Risk-budget position sizing |
+| `POST` | `/api/backtests/trend-breakout` | Daily single-instrument backtest with selectable direction mode |
+| `POST` | `/api/risk/position-size` | Direction-aware risk-budget position sizing |
 | `GET/POST` | `/api/watchlist` | Read/add watchlist entries |
 | `DELETE` | `/api/watchlist/{market}/{symbol}` | Remove a watchlist entry |
 | `GET` | `/api/watchlist/quotes` | Latest quotes for every watchlist instrument |
 | `GET` | `/api/market/quotes` | Deduplicated latest quotes by `instrument_id`, `symbol` or whole watchlist |
 | `GET` | `/api/market/quotes/stream` | Server-Sent Events quote stream backed by the shared quote cache and Binance WebSocket |
-| `GET/POST` | `/api/portfolio/transactions` | Read/add amount-based BUY/SELL transactions; the backend derives quantity from a validated quote |
-| `POST` | `/api/portfolio/transactions/preview` | Server-authoritative amount-to-quantity preview with precision, remainder and SELL availability |
+| `GET/POST` | `/api/portfolio/transactions` | Read/add explicit BUY, SELL, SELL_SHORT or BUY_TO_COVER manual exposure entries |
+| `POST` | `/api/portfolio/transactions/preview` | Server-authoritative notional-to-quantity preview with precision and long/short availability |
 | `DELETE` | `/api/portfolio/transactions/{transaction_id}` | Delete a transaction if the remaining ledger stays valid |
 | `GET` | `/api/portfolio/summary` | Currency-separated invested, market value, realised/unrealised and total P&L |
 | `GET` | `/api/portfolio/positions` | Open positions with backend-computed valuation and P&L |
@@ -188,7 +188,7 @@ frontend/
 
 - The layout is a slim top bar plus a persistent right-hand market rail on desktop. Below `xl`, navigation and the watchlist move into drawers. The rail reports watchlist quotes and session statistics from backend candles; it does not calculate indicators.
 - `src/services/quoteHub.ts` is the only frontend owner of live quotes. It ref-counts subscribers, keeps one REST batch and one SSE subscription, falls back to polling when streaming is unavailable, deduplicates instruments by canonical identity, ignores stale ticks that would overwrite newer quotes, and pauses when the page is hidden. Components render the returned quote metadata; they do not invent prices.
-- The portfolio page orders the view as summary, open positions, position detail, then the amount-based transaction form and ledger. The form contains Instrument, Market, Exchange, Side, Currency, Amount, Latest Price (read-only), Fees, Transaction Time and Notes; Quantity and Price Per Unit are not user inputs. Quote ticks trigger a throttled backend re-fetch of positions and summary, so FIFO, invested value, market value and P&L remain backend calculations.
+- The portfolio page orders the view as summary, open positions, position detail, then the notional-based transaction form and ledger. The form requires an explicit BUY, SELL, SELL_SHORT or BUY_TO_COVER intent; quantity and price are derived from a validated quote. Short accounting is a manual research record and does not imply borrowing or execution. Quote ticks trigger a throttled backend re-fetch, so FIFO, marked exposure and P&L remain backend calculations.
 - The technical gauges and tables render `/api/instruments/{symbol}/technicals`. That endpoint only labels values already produced by `compute_indicators` with documented conventional thresholds. It is not the trend-breakout strategy and does not introduce a second trading algorithm.
 - All HTTP calls go through `src/services/api.ts`. `VITE_API_BASE_URL` is empty by default, so the browser calls `/api/...` on the same origin and Vite proxies it to `http://127.0.0.1:8000`. Set the variable only for a separately hosted build; that requires CORS on the FastAPI side.
 - The frontend never calculates indicators, signals, risk, FIFO or portfolio valuation. It renders values returned by the backend and shows the backend's `detail` message when a request fails. There is no mock or fallback market data.
@@ -213,7 +213,7 @@ frontend/
 ### Data and execution semantics
 
 - The first strategy is daily-only. Intraday indicators can be inspected from sources that provide completed intraday candles, but the daily strategy is not applied to those intervals.
-- Binance's active, still-forming candle is excluded. Binance pagination fetches up to 20 pages / 20,000 candles; if that cap is reached, the API marks the history as truncated. Yahoo intraday and current-session candles are filtered conservatively; provider timestamps and market sessions can still vary.
+- Binance's active, still-forming candle is excluded. Binance pagination fetches up to 2,500 candles (three 1,000-row pages maximum); if that cap is reached, the API marks the history as truncated. Yahoo intraday and current-session candles are filtered conservatively; provider timestamps and market sessions can still vary.
 - Session VWAP is only calculated when the input spacing is intraday. Daily OHLCV bars do not contain the intraday volume distribution, so daily session VWAP is returned as unavailable rather than approximated from typical price.
 - The single-instrument backtest evaluates completed daily signals and uses next-bar open entries/exits for close-based conditions. Protective stops are checked against candle ranges and gaps are filled at the bar open when that is worse than the stop. Intrabar path, queue position, liquidity impact and exchange-auction mechanics remain approximate.
 - Backtest costs are an aggregate configurable basis-point input, not a complete Indian broker/STT/GST/stamp-duty engine. Always run a broker-specific cost model before drawing conclusions.

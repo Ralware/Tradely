@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { useQuotes } from '../hooks/useQuotes';
 import { marketService } from '../services/marketService';
@@ -14,9 +15,11 @@ import { WatchlistTable } from '../components/tables/WatchlistTable';
 import { ProviderList } from '../components/tables/ProviderList';
 import { useApiStatus } from '../contexts/ApiStatusContext';
 import { notifyWatchlistChanged } from '../utils/events';
+import { instrumentPath } from '../utils/navigation';
 import { quoteRefFromWatchlist } from '../utils/quotes';
 
 export function MarketsPage() {
+  const navigate = useNavigate();
   const [pending, setPending] = useState<Instrument | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -76,7 +79,7 @@ export function MarketsPage() {
   }
 
   return (
-    <div>
+    <div className="w-full px-4 py-4 lg:px-6">
       <PageHeader
         title="Markets"
         subtitle="Watchlists · Scanner · Providers"
@@ -150,6 +153,13 @@ export function MarketsPage() {
               removing={removing}
               onRemove={(item) => {
                 void removeItem(item);
+              }}
+              onRowClick={(item) => {
+                if (item.instrument_id) {
+                  navigate(instrumentPath({ instrument_id: item.instrument_id, market: item.market }));
+                } else {
+                  navigate(instrumentPath({ instrument_id: `${item.market}:${item.exchange}:${item.symbol}`, market: item.market }));
+                }
               }}
             />
           )}

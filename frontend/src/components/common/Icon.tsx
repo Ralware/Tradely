@@ -19,7 +19,8 @@ export type IconName =
   | 'close'
   | 'menu'
   | 'arrowUp'
-  | 'arrowDown';
+  | 'arrowDown'
+  | 'bell';
 
 const paths: Record<IconName, string> = {
   dashboard:
@@ -46,14 +47,19 @@ const paths: Record<IconName, string> = {
   menu: 'M4 7h16M4 12h16M4 17h16',
   arrowUp: 'M12 19V5m0 0-6 6m6-6 6 6',
   arrowDown: 'M12 5v14m0 0 6-6m-6 6-6-6',
+  bell: 'M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0',
 };
 
-interface IconProps extends SVGProps<SVGSVGElement> {
+export function Icon({
+  name,
+  size = 14,
+  className,
+  ...rest
+}: {
   name: IconName;
   size?: number;
-}
-
-export function Icon({ name, size = 18, ...rest }: IconProps) {
+  className?: string;
+} & SVGProps<SVGSVGElement>) {
   return (
     <svg
       width={size}
@@ -61,9 +67,10 @@ export function Icon({ name, size = 18, ...rest }: IconProps) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={1.7}
+      strokeWidth={1.8}
       strokeLinecap="round"
       strokeLinejoin="round"
+      className={className}
       aria-hidden="true"
       {...rest}
     >

@@ -28,7 +28,7 @@ const exchangeOptions: Record<Market, Array<{ value: string; label: string }>> =
     { value: 'NASDAQ', label: 'NASDAQ' },
     { value: 'NYSE', label: 'NYSE' },
   ],
-  crypto: [{ value: 'BINANCE', label: 'BINANCE' }],
+  crypto: [{ value: 'BINANCE', label: 'Binance' }],
 };
 
 const controlClasses =

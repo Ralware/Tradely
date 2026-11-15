@@ -3,10 +3,17 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 Market = Literal["india", "global", "crypto"]
-Side = Literal["BUY", "SELL"]
+TransactionIntent = Literal["BUY", "SELL", "SELL_SHORT", "BUY_TO_COVER"]
+Side = TransactionIntent
+DirectionMode = Literal["long_only", "short_only", "long_short"]
+PositionDirection = Literal["LONG", "SHORT"]
+SignalState = Literal[
+    "BUY", "SELL", "SELL_SHORT", "BUY_TO_COVER", "WAIT", "NO_SIGNAL",
+    "INSUFFICIENT_DATA", "STALE_DATA", "DATA_QUALITY_ERROR",
+]
 AssetType = Literal["equity", "crypto"]
 QuoteFreshness = Literal[
     "live", "delayed", "eod", "historical", "cached", "stale", "unavailable",
@@ -88,7 +95,9 @@ class StrategySignal(BaseModel):
     market: Market
     strategy: str
     strategy_version: str
-    state: Literal["BUY", "SELL", "WAIT", "NO_SIGNAL", "INSUFFICIENT_DATA", "STALE_DATA", "DATA_QUALITY_ERROR"]
+    direction_mode: DirectionMode = "long_only"
+    direction: PositionDirection | None = None
+    state: SignalState
     as_of: datetime | None = None
     entry_reference: float | None = None
     stop_reference: float | None = None
@@ -103,6 +112,7 @@ class RiskRequest(BaseModel):
     risk_fraction: float = Field(gt=0, le=0.02)
     entry: float = Field(gt=0)
     stop: float = Field(gt=0)
+    direction: PositionDirection = "LONG"
     lot_size: int = Field(default=1, ge=1)
     max_position_fraction: float = Field(default=1.0, gt=0, le=1)
 
@@ -114,6 +124,7 @@ class RiskResult(BaseModel):
     position_value: float
     planned_loss: float
     capital_limited: bool
+    direction: PositionDirection = "LONG"
 
 
 class Instrument(BaseModel):
@@ -197,6 +208,10 @@ class HoldingTransaction(BaseModel):
     quote_currency: str | None = None
     idempotency_key: str | None = None
 
+    @property
+    def intent(self) -> TransactionIntent:
+        return self.side
+
     @field_validator("trade_time")
     @classmethod
     def make_utc(cls, value: datetime) -> datetime:
@@ -219,16 +234,21 @@ class AmountTransactionRequest(BaseModel):
 
     The client never supplies the accounting quantity or unit price. The
     backend resolves the instrument, acquires a valid quote and derives both.
+    New clients should send ``intent``; legacy ``side`` remains accepted.
     """
 
     instrument_id: str = Field(min_length=3, max_length=120)
-    side: Side
+    intent: TransactionIntent = Field(validation_alias=AliasChoices("intent", "side"))
     amount: float = Field(gt=0)
     currency: str | None = None
     fees: float = Field(default=0, ge=0)
     trade_time: datetime
     notes: str | None = Field(default=None, max_length=2000)
     idempotency_key: str | None = Field(default=None, max_length=120)
+
+    @property
+    def side(self) -> TransactionIntent:
+        return self.intent
 
     @field_validator("trade_time")
     @classmethod
@@ -270,3 +290,4 @@ class BacktestRequest(BaseModel):
     risk_fraction: float = Field(default=0.005, gt=0, le=0.02)
     cost_bps_per_side: float = Field(default=15, ge=0, le=500)
     max_position_fraction: float = Field(default=0.95, gt=0, le=1)
+    direction_mode: DirectionMode = "long_only"

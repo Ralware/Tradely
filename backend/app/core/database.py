@@ -15,7 +15,7 @@ from app.core.instruments import (
 )
 from app.core.models import HoldingTransaction, Instrument, WatchlistItem
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 _CATALOGUE_COLUMNS: dict[str, str] = {
     "display_name": "TEXT NOT NULL DEFAULT ''",
     "base_currency": "TEXT NOT NULL DEFAULT ''",
@@ -140,6 +140,7 @@ class Database:
                     symbol TEXT NOT NULL,
                     market TEXT NOT NULL,
                     side TEXT NOT NULL CHECK(side IN ('BUY','SELL')),
+                    intent TEXT NOT NULL DEFAULT '',
                     quantity REAL NOT NULL CHECK(quantity > 0),
                     price REAL NOT NULL CHECK(price > 0),
                     trade_time TEXT NOT NULL,
@@ -250,6 +251,7 @@ class Database:
             "quote_currency": "TEXT NOT NULL DEFAULT ''",
             "idempotency_key": "TEXT NOT NULL DEFAULT ''",
             "resolution_status": "TEXT NOT NULL DEFAULT 'resolved'",
+            "intent": "TEXT NOT NULL DEFAULT ''",
         }
         for column, definition in transaction_columns.items():
             self._add_column(connection, "holding_transactions", column, definition)
@@ -269,6 +271,9 @@ class Database:
                      WHEN actual_amount = 0 THEN quantity * price ELSE actual_amount
                    END
                WHERE amount = 0 OR actual_amount = 0"""
+        )
+        connection.execute(
+               "UPDATE holding_transactions SET intent=side WHERE intent=''"
         )
         connection.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_watchlist_instrument "
@@ -611,7 +616,12 @@ class Database:
                           COALESCE(i.provider, w.provider, '') AS instrument_provider,
                           COALESCE(i.provider_symbol, w.provider_symbol, '') AS instrument_provider_symbol,
                           COALESCE((
-                              SELECT SUM(CASE WHEN t.side='BUY' THEN t.quantity ELSE -t.quantity END)
+                              SELECT SUM(CASE COALESCE(NULLIF(t.intent,''), t.side)
+                                  WHEN 'BUY' THEN t.quantity
+                                  WHEN 'SELL' THEN -t.quantity
+                                  WHEN 'SELL_SHORT' THEN -t.quantity
+                                  WHEN 'BUY_TO_COVER' THEN t.quantity
+                                  ELSE 0 END)
                               FROM holding_transactions t
                               WHERE t.instrument_id = w.instrument_id
                           ), 0) AS held_quantity
@@ -629,8 +639,14 @@ class Database:
                 item.get("instrument_provider_symbol") or item.get("provider_symbol") or item["symbol"]
             )
             item["name"] = item.get("instrument_name") or item.get("display_name") or item["symbol"]
-            item["is_held"] = float(item.get("held_quantity") or 0) > 1e-9
-            item["held_quantity"] = max(0.0, float(item.get("held_quantity") or 0))
+            held_quantity = float(item.get("held_quantity") or 0)
+            item["is_held"] = abs(held_quantity) > 1e-9
+            item["held_quantity"] = held_quantity
+            item["held_side"] = (
+                "LONG" if held_quantity > 1e-9
+                else "SHORT" if held_quantity < -1e-9
+                else None
+            )
             items.append(item)
         return items
 
@@ -723,7 +739,8 @@ class Database:
         trade_time: str, excluding_id: int | None = None,
     ) -> float:
         sql = (
-            """SELECT COALESCE(SUM(CASE WHEN side='BUY' THEN quantity ELSE -quantity END), 0) AS quantity
+            """SELECT COALESCE(SUM(CASE COALESCE(NULLIF(intent,''), side)
+                   WHEN 'BUY' THEN quantity WHEN 'SELL' THEN -quantity ELSE 0 END), 0) AS quantity
                FROM holding_transactions
                WHERE instrument_id=? AND currency=? AND trade_time<=?"""
         )
@@ -741,12 +758,45 @@ class Database:
         with self.connect() as connection:
             return self._available_quantity(connection, instrument_id, currency, value)
 
+    def _available_short_quantity(
+        self, connection: sqlite3.Connection, instrument_id: str, currency: str,
+        trade_time: str,
+    ) -> float:
+        row = connection.execute(
+            """SELECT COALESCE(SUM(CASE COALESCE(NULLIF(intent,''), side)
+                   WHEN 'SELL_SHORT' THEN quantity
+                   WHEN 'BUY_TO_COVER' THEN -quantity
+                   ELSE 0 END), 0) AS quantity
+               FROM holding_transactions
+               WHERE instrument_id=? AND currency=? AND trade_time<=?""",
+            (instrument_id, currency, trade_time),
+        ).fetchone()
+        return float(row["quantity"] or 0)
+
+    def available_short_quantity(
+        self, instrument_id: str, currency: str, trade_time: datetime | str,
+    ) -> float:
+        value = trade_time.isoformat() if isinstance(trade_time, datetime) else trade_time
+        with self.connect() as connection:
+            return self._available_short_quantity(connection, instrument_id, currency, value)
+
+    def position_side_at(
+        self, instrument_id: str, currency: str, trade_time: datetime | str,
+    ) -> str | None:
+        long_quantity = self.available_quantity(instrument_id, currency, trade_time)
+        short_quantity = self.available_short_quantity(instrument_id, currency, trade_time)
+        if long_quantity > 1e-9:
+            return "LONG"
+        if short_quantity > 1e-9:
+            return "SHORT"
+        return None
+
     def _validate_instrument_ledger(
         self, connection: sqlite3.Connection, instrument_id: str, *,
         currency: str | None = None, excluding_id: int | None = None,
     ) -> None:
         sql = (
-            "SELECT side, quantity, currency FROM holding_transactions "
+            "SELECT side, intent, quantity, currency FROM holding_transactions "
             "WHERE instrument_id=?"
         )
         parameters: list[Any] = [instrument_id]
@@ -757,16 +807,38 @@ class Database:
             sql += " AND id<>?"
             parameters.append(excluding_id)
         sql += " ORDER BY trade_time, id"
-        quantity = 0.0
+        balances: dict[str, dict[str, float]] = {}
         for row in connection.execute(sql, parameters).fetchall():
-            if row["side"] == "BUY":
-                quantity += float(row["quantity"])
-            else:
-                quantity -= float(row["quantity"])
-                if quantity < -1e-9:
+            side = str(row["intent"] or row["side"]).upper()
+            quantity = float(row["quantity"])
+            balance = balances.setdefault(row["currency"], {"long": 0.0, "short": 0.0})
+            if side == "BUY":
+                if balance["short"] > 1e-9:
                     raise ValueError(
-                        "This change would leave the ledger with a sell larger than recorded holdings"
+                        "BUY cannot reverse an open SHORT exposure; use BUY_TO_COVER first"
                     )
+                balance["long"] += quantity
+            elif side == "SELL":
+                if balance["long"] + 1e-9 < quantity:
+                    raise ValueError(
+                        f"Sell quantity {quantity} exceeds recorded holdings {balance['long']}"
+                    )
+                balance["long"] = max(0.0, balance["long"] - quantity)
+            elif side == "SELL_SHORT":
+                if balance["long"] > 1e-9:
+                    raise ValueError(
+                        "SELL_SHORT cannot reverse an open LONG exposure; use SELL first"
+                    )
+                balance["short"] += quantity
+            elif side == "BUY_TO_COVER":
+                if balance["short"] + 1e-9 < quantity:
+                    raise ValueError(
+                        f"Cover quantity {quantity} exceeds recorded short holdings "
+                        f"{balance['short']}"
+                    )
+                balance["short"] = max(0.0, balance["short"] - quantity)
+            else:
+                raise ValueError(f"Unsupported transaction intent: {side}")
 
     def get_transaction_by_idempotency_key(self, key: str) -> dict[str, Any] | None:
         if not key:
@@ -808,27 +880,9 @@ class Database:
                 if existing:
                     return dict(existing), True
             if currency != instrument.currency:
-                if transaction.side == "SELL":
-                    available = self._available_quantity(
-                        connection, instrument.instrument_id, currency, transaction.trade_time.isoformat()
-                    )
-                    if transaction.quantity > available + 1e-9:
-                        raise ValueError(
-                            f"Sell quantity {transaction.quantity} exceeds recorded holdings {available}"
-                        )
                 raise ValueError(
                     f"Currency {currency} does not match instrument currency {instrument.currency}"
                 )
-
-            if transaction.side == "SELL":
-                available = self._available_quantity(
-                    connection, instrument.instrument_id, instrument.currency,
-                    transaction.trade_time.isoformat(),
-                )
-                if transaction.quantity > available + 1e-9:
-                    raise ValueError(
-                        f"Sell quantity {transaction.quantity} exceeds recorded holdings {available}"
-                    )
 
             amount = transaction.amount
             if amount is None or amount <= 0:
@@ -836,14 +890,16 @@ class Database:
             actual_amount = transaction.actual_amount
             if actual_amount is None or actual_amount <= 0:
                 actual_amount = transaction.quantity * transaction.price
+            side = transaction.side
+            legacy_side = "BUY" if side in {"BUY", "BUY_TO_COVER"} else "SELL"
             cursor = connection.execute(
                 """INSERT INTO holding_transactions
-                   (symbol, market, side, quantity, price, trade_time, currency, fees, notes,
+                   (symbol, market, side, intent, quantity, price, trade_time, currency, fees, notes,
                     instrument_id, instrument_name, exchange, asset_type, provider, provider_symbol,
                     amount, actual_amount, quote_provider, quote_time, quote_type, quote_status,
                     quote_currency, idempotency_key)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (instrument.symbol, instrument.market, transaction.side,
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (instrument.symbol, instrument.market, legacy_side, side,
                  transaction.quantity, transaction.price, transaction.trade_time.isoformat(),
                  instrument.currency, transaction.fees, transaction.notes,
                  instrument.instrument_id, instrument.name, instrument.exchange,

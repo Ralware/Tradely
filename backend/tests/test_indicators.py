@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 import pytest
-
 from app.services.indicators import atr, compute_indicators, donchian, rsi, sma, validate_ohlcv
 
 
@@ -69,6 +68,20 @@ def test_daily_vwap_is_unavailable_without_intraday_volume_distribution():
     result = compute_indicators(frame)
     assert result["vwap_session"].isna().all()
 
+def test_sma_and_ema_100_series_are_available_for_chart_overlays():
+    index = pd.date_range("2025-01-01", periods=220, freq="B", tz="UTC")
+    close = pd.Series(np.linspace(100, 200, len(index)), index=index)
+    frame = pd.DataFrame({
+        "open": close - 0.5,
+        "high": close + 1.0,
+        "low": close - 1.0,
+        "close": close,
+        "volume": 1000.0,
+    }, index=index)
+    result = compute_indicators(frame)
+    assert pd.notna(result["sma_100"].iloc[-1])
+    assert pd.notna(result["ema_100"].iloc[-1])
+
 
 def test_intraday_vwap_resets_at_new_session():
     index = pd.to_datetime([
@@ -92,3 +105,15 @@ def test_ohlcv_validation_rejects_inconsistent_candle():
     })
     with pytest.raises(ValueError, match="Invalid OHLCV"):
         validate_ohlcv(frame)
+
+
+def test_ohlcv_validation_sorts_and_deduplicates_before_indicators():
+    index = pd.to_datetime(["2025-01-02", "2025-01-01", "2025-01-02"], utc=True)
+    frame = pd.DataFrame({
+        "open": [2, 1, 3], "high": [3, 2, 4], "low": [1, 0.5, 2],
+        "close": [2, 1, 3], "volume": [20, 10, 30],
+    }, index=index)
+    result = validate_ohlcv(frame)
+    assert result.index.is_monotonic_increasing
+    assert not result.index.has_duplicates
+    assert result.iloc[-1]["close"] == pytest.approx(3)

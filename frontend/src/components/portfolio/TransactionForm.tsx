@@ -7,7 +7,7 @@ import type {
   Instrument,
   Position,
   Quote,
-  Side,
+  TransactionIntent,
   TransactionPreviewResponse,
 } from '../../types/api';
 import { cn, formatDateTime, formatNumber } from '../../utils/format';
@@ -28,9 +28,24 @@ import { InstrumentSearch } from '../instruments/InstrumentSearch';
 const sideOptions = [
   { value: 'BUY', label: 'Buy' },
   { value: 'SELL', label: 'Sell' },
+  { value: 'SELL_SHORT', label: 'Sell Short' },
+  { value: 'BUY_TO_COVER', label: 'Buy To Cover' },
 ];
 
 const PREVIEW_DEBOUNCE_MS = 450;
+
+function intentLabel(intent: TransactionIntent): string {
+  switch (intent) {
+    case 'BUY':
+      return 'Buy';
+    case 'SELL':
+      return 'Sell';
+    case 'SELL_SHORT':
+      return 'Sell Short';
+    case 'BUY_TO_COVER':
+      return 'Buy To Cover';
+  }
+}
 
 function localDateTimeValue(): string {
   const now = new Date();
@@ -154,7 +169,7 @@ export function TransactionForm({
   positions: Position[];
   onRecorded: (response: AddTransactionResponse, message: string) => void;
 }) {
-  const [side, setSide] = useState<Side>('BUY');
+  const [side, setSide] = useState<TransactionIntent>('BUY');
   const [amount, setAmount] = useState('');
   const [tradeTime, setTradeTime] = useState(localDateTimeValue);
   const [fees, setFees] = useState('0');
@@ -222,7 +237,7 @@ export function TransactionForm({
         .previewTransaction(
           {
             instrument_id: instrumentId,
-            side,
+            intent: side,
             amount: parsedAmount,
             currency,
             fees: parsedFees,
@@ -291,7 +306,7 @@ export function TransactionForm({
       const instrument = resolution;
       const saved = await portfolioService.addTransaction({
         instrument_id: instrument.instrument_id,
-        side,
+        intent: side,
         amount: parsedAmount,
         currency: instrument.currency,
         fees: parsedFees,
@@ -302,9 +317,11 @@ export function TransactionForm({
 
       const unit = assetUnit(instrument.symbol, instrument.market, instrument.currency);
       const transaction = saved.transaction;
+      const savedIntent = transaction.intent ?? transaction.side;
+      const sideLabel = intentLabel(savedIntent);
       const message = saved.duplicate
-        ? `${transaction.side} ${instrument.symbol} was already recorded; the existing ledger row was returned.`
-        : `${transaction.side} ${instrument.symbol} recorded · ${formatNumber(
+        ? `${sideLabel} ${instrument.symbol} was already recorded; the existing ledger row was returned.`
+        : `${sideLabel} ${instrument.symbol} recorded · ${formatNumber(
             transaction.quantity,
             8,
           )} ${unit} at ${formatNumber(transaction.price, priceDigits(transaction.price))} ${
@@ -334,19 +351,24 @@ export function TransactionForm({
   const heldQuantity =
     resolution === null
       ? null
-      : positions.find((position) => position.instrument_id === resolution.instrument_id)
-          ?.quantity ?? null;
+      : (() => {
+          const position = positions.find(
+            (item) => item.instrument_id === resolution.instrument_id,
+          );
+          return position ? Math.abs(position.quantity) : null;
+        })();
   const availableQuantity =
     preview?.valid && preview.available_quantity !== null && preview.available_quantity !== undefined
       ? preview.available_quantity
       : heldQuantity;
-  const maxSellAmount =
-    preview?.valid && preview.max_sell_amount !== null && preview.max_sell_amount !== undefined
-      ? preview.max_sell_amount
-      : null;
+  const maxSellAmount = preview?.valid
+    ? side === 'BUY_TO_COVER'
+      ? preview.max_close_amount ?? preview.max_sell_amount ?? null
+      : preview.max_sell_amount ?? null
+    : null;
 
   return (
-    <Card className="xl:col-span-4" title="Record Transaction" subtitle="Actual Holdings Only">
+    <Card className="xl:col-span-4" title="Record Transaction" subtitle="Manual Exposure Ledger · No Execution">
       <form onSubmit={recordTrade} className="space-y-2.5">
         <div className="grid gap-2 sm:grid-cols-2">
           <div className="sm:col-span-2">
@@ -375,10 +397,10 @@ export function TransactionForm({
             placeholder="Select instrument"
           />
           <Select
-            label="Side"
+            label="Transaction Intent"
             value={side}
             onChange={(event) => {
-              setSide(event.target.value as Side);
+              setSide(event.target.value as TransactionIntent);
               setError(null);
             }}
             options={sideOptions}
@@ -403,12 +425,20 @@ export function TransactionForm({
 
         <div
           className={cn(
-            'rounded-sm border bg-white/[0.02] px-3 py-2 transition-colors',
+            'rounded-sm border bg-black px-3 py-2 transition-colors',
             preview && !preview.valid ? 'border-[#3f2528]' : 'border-terminal-border',
           )}
         >
           <Field
-            label={`${side === 'BUY' ? 'Amount To Invest' : 'Amount To Sell'} (${currency})`}
+            label={`${
+              side === 'BUY'
+                ? 'Amount To Invest'
+                : side === 'SELL'
+                  ? 'Amount To Sell'
+                  : side === 'SELL_SHORT'
+                    ? 'Short Exposure Notional'
+                    : 'Cover Notional'
+            } (${currency})`}
             hint={
               preview && !preview.valid
                 ? undefined
@@ -420,7 +450,15 @@ export function TransactionForm({
               <input
                 inputMode="decimal"
                 autoComplete="off"
-                aria-label={`${side === 'BUY' ? 'Amount To Invest' : 'Amount To Sell'} in ${currency}`}
+                aria-label={`${
+                  side === 'BUY'
+                    ? 'Amount To Invest'
+                    : side === 'SELL'
+                      ? 'Amount To Sell'
+                      : side === 'SELL_SHORT'
+                        ? 'Short Exposure Notional'
+                        : 'Cover Notional'
+                } in ${currency}`}
                 value={amount}
                 onChange={(event) => setAmount(event.target.value)}
                 placeholder="0.00"
@@ -452,7 +490,7 @@ export function TransactionForm({
             hint={preview?.valid ? unit : undefined}
           />
           <MetricRow
-            label={side === 'BUY' ? 'Actual Transaction Amount' : 'Gross Sale Proceeds'}
+            label={side === 'BUY' || side === 'BUY_TO_COVER' ? 'Calculated Notional' : 'Reference Notional'}
             value={
               preview?.valid && preview.actual_amount !== undefined
                 ? formatNumber(preview.actual_amount, 2)
@@ -480,7 +518,7 @@ export function TransactionForm({
               tone="muted"
               hint={preview?.valid ? currency : undefined}
             />
-          ) : (
+          ) : side === 'SELL' ? (
             <MetricRow
               label="Net Sale Proceeds"
               value={
@@ -491,11 +529,22 @@ export function TransactionForm({
               tone="muted"
               hint={preview?.valid ? currency : undefined}
             />
+          ) : (
+            <MetricRow
+              label="Manual Exposure Reference"
+              value={
+                preview?.valid && preview.actual_amount !== undefined
+                  ? formatNumber(preview.actual_amount, 2)
+                  : '—'
+              }
+              tone="muted"
+              hint={preview?.valid ? `${currency} · Not An Execution` : undefined}
+            />
           )}
-          {side === 'SELL' ? (
+          {side === 'SELL' || side === 'BUY_TO_COVER' ? (
             <>
               <MetricRow
-                label="Available Holdings"
+                label={side === 'SELL' ? 'Available Long Holdings' : 'Available Short Exposure'}
                 value={
                   availableQuantity !== null && availableQuantity !== undefined
                     ? formatNumber(availableQuantity, 8)
@@ -505,7 +554,7 @@ export function TransactionForm({
                 hint={availableQuantity !== null && availableQuantity !== undefined ? unit : undefined}
               />
               <MetricRow
-                label="Max Sellable Value"
+                label={side === 'SELL' ? 'Max Sellable Notional' : 'Max Cover Notional'}
                 value={maxSellAmount !== null ? formatNumber(maxSellAmount, 2) : '—'}
                 tone="muted"
                 hint={maxSellAmount !== null ? currency : undefined}
@@ -555,14 +604,14 @@ export function TransactionForm({
             loading={saving}
             disabled={!canSubmit}
           >
-            Record {side === 'BUY' ? 'Buy' : 'Sell'}
+            Record {intentLabel(side)}
           </Button>
           <span className="text-2xs text-terminal-muted">
             FIFO · Fees Included · No Order Execution
           </span>
         </div>
         <p className="text-2xs leading-relaxed text-terminal-muted">
-          Recorded Using Latest Available Market Quote. Actual Exchange Fill May Differ.
+          Reference Quantity Uses A Verified Provider Quote. No Exchange Order Is Placed.
         </p>
       </form>
     </Card>

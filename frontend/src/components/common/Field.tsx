@@ -8,9 +8,9 @@ import { useId } from 'react';
 import { cn } from '../../utils/format';
 
 const controlClasses =
-  'w-full rounded-sm border border-terminal-border bg-terminal-panelAlt px-2 py-1.5 text-xs text-terminal-text ' +
+  'w-full rounded-sm border border-terminal-border bg-terminal-panel px-2 py-1.5 text-xs text-terminal-text ' +
   'placeholder:text-terminal-muted/70 transition-colors hover:border-[#30353f] ' +
-  'focus:border-terminal-accent focus:outline-none disabled:opacity-60';
+  'focus:outline-none focus:ring-1 focus:ring-terminal-accent focus:border-terminal-accent disabled:opacity-60';
 
 interface FieldProps {
   label: string;

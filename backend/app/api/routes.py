@@ -14,6 +14,7 @@ from app.core.instruments import canonical_instrument, parse_instrument_id
 from app.core.models import (
     AmountTransactionRequest,
     BacktestRequest,
+    DirectionMode,
     HoldingTransaction,
     RiskRequest,
     RiskResult,
@@ -35,7 +36,7 @@ from app.services.backtest import run_trend_breakout_backtest
 from app.services.indicators import compute_indicators
 from app.services.market import MarketService
 from app.services.portfolio import build_ledger, detail_view, position_view, summary_view
-from app.services.strategy import evaluate_trend_breakout, position_size
+from app.services.strategy import STRATEGY_VERSION, evaluate_trend_breakout, position_size
 from app.services.technicals import build_technical_summary
 
 router = APIRouter(prefix="/api")
@@ -153,7 +154,7 @@ def candles(
     market: str | None = Query(None, pattern="^(india|global|crypto)$"),
     exchange: str | None = None,
     interval: str = "1d",
-    days: int = Query(365, ge=1, le=3650),
+    days: int = Query(3650, ge=1, le=3650),
     provider: str = "auto",
 ) -> dict[str, Any]:
     instrument = _market_target(
@@ -178,8 +179,8 @@ def candles(
         "is_stale": stale, "history_truncated": bool(frame.attrs.get("history_truncated", False)),
         "history_pages": frame.attrs.get("history_pages"),
         "last_candle_at": latest.isoformat(), "count": len(frame),
-        "candles": _to_json_records(frame),
-        "warnings": (["Provider history was capped at 20,000 candles; the requested date range may not be fully covered."]
+        "candles": _to_json_records(frame, limit=2500),
+        "warnings": (["Provider history was capped at 2,500 candles; the requested date range may not be fully covered."]
                      if frame.attrs.get("history_truncated", False) else []),
     }
 
@@ -221,8 +222,9 @@ def analyze(
     market: str | None = Query(None, pattern="^(india|global|crypto)$"),
     exchange: str | None = None,
     interval: str = "1d",
-    days: int = Query(500, ge=1, le=3650),
+    days: int = Query(3650, ge=1, le=3650),
     provider: str = "auto",
+    direction_mode: DirectionMode = Query("long_only"),
 ) -> dict[str, Any]:
     instrument = _market_target(
         request, symbol=symbol, instrument_id=instrument_id, market=market, exchange=exchange
@@ -243,21 +245,37 @@ def analyze(
         if column not in {"open", "high", "low", "close", "volume"}:
             values[column] = None if pd.isna(value) else float(value)
     if interval != "1d":
-        signal = evaluate_trend_breakout(frame.iloc[:0], symbol=symbol, market=market, source=source)
+        signal = evaluate_trend_breakout(
+            frame.iloc[:0], symbol=symbol, market=market, source=source,
+            direction_mode=direction_mode,
+        )
         signal.explanation = "This strategy is currently calibrated for completed daily candles only. Indicator values are still shown for the selected interval."
     else:
-        signal = evaluate_trend_breakout(frame, symbol=symbol, market=market, source=source)
+        position_side = request.app.state.db.position_side_at(
+            instrument["instrument_id"],
+            instrument["currency"],
+            datetime.now(timezone.utc),
+        )
+        signal = evaluate_trend_breakout(
+            frame,
+            symbol=symbol,
+            market=market,
+            source=source,
+            direction_mode=direction_mode,
+            position_side=position_side,
+        )
     adjusted = bool(frame.attrs.get("is_adjusted", False))
     stale = _is_stale(frame, market)
     warnings = []
     if frame.attrs.get("history_truncated", False):
-        warnings.append("Provider history was capped at 20,000 candles; the requested date range may not be fully covered.")
+        warnings.append("Provider history was capped at 2,500 candles; the requested date range may not be fully covered.")
     if stale:
         warnings.append("Latest candle is stale for this market; actionable signal output is suppressed.")
         signal.state = "STALE_DATA"
         signal.entry_reference = None
         signal.stop_reference = None
         signal.risk_per_unit = None
+        signal.direction = None
         signal.explanation = "Signal suppressed because the latest candle exceeds the configured freshness window. Verify the provider and market session."
     if market == "india" and not adjusted:
         warnings.append("Indian equity candles are unadjusted. Corporate actions can distort long-term indicators; do not treat strategy output as actionable.")
@@ -265,6 +283,7 @@ def analyze(
         signal.entry_reference = None
         signal.stop_reference = None
         signal.risk_per_unit = None
+        signal.direction = None
         signal.explanation = "Signal suppressed because the available Indian equity history is not confirmed as corporate-action-adjusted. Configure a TejHQ free key or use adjusted Yahoo history."
     signal_payload = signal.model_dump(mode="json")
     request.app.state.db.save_signal(signal_payload)
@@ -279,7 +298,7 @@ def analyze(
         "indicators": values,
         "strategy": signal_payload,
         "warnings": warnings,
-        "candles": _to_json_records(frame.tail(300)),
+        "candles": _to_json_records(frame, limit=2500),
     }
 
 
@@ -291,9 +310,9 @@ def indicator_series(
     market: str | None = Query(None, pattern="^(india|global|crypto)$"),
     exchange: str | None = None,
     interval: str = "1d",
-    days: int = Query(500, ge=1, le=3650),
+    days: int = Query(3650, ge=1, le=3650),
     provider: str = "auto",
-    limit: int = Query(300, ge=50, le=1000),
+    limit: int = Query(2500, ge=50, le=2500),
 ) -> dict[str, Any]:
     """Per-bar indicator values for chart rendering.
 
@@ -334,7 +353,7 @@ def technical_summary(
     market: str | None = Query(None, pattern="^(india|global|crypto)$"),
     exchange: str | None = None,
     interval: str = "1d",
-    days: int = Query(500, ge=1, le=3650),
+    days: int = Query(3650, ge=1, le=3650),
     provider: str = "auto",
 ) -> dict[str, Any]:
     """Per-indicator Buy/Sell/Neutral labels and gauge counts.
@@ -466,6 +485,7 @@ def backtest_trend_breakout(request: Request, payload: BacktestRequest) -> dict[
             cost_bps_per_side=payload.cost_bps_per_side,
             max_position_fraction=payload.max_position_fraction,
             market=market,
+            direction_mode=payload.direction_mode,
         )
     except HTTPException:
         raise
@@ -473,7 +493,7 @@ def backtest_trend_breakout(request: Request, payload: BacktestRequest) -> dict[
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     result.update({"symbol": symbol, "market": market, "instrument": instrument,
                    "source": source,
-                   "strategy": "Trend + Donchian 20 Breakout", "strategy_version": "trend-donchian-20-v1.0.0",
+                   "strategy": "Trend + Donchian 20 Breakout", "strategy_version": STRATEGY_VERSION,
                    "data_adjusted": bool(frame.attrs.get("is_adjusted", False))})
     return result
 
@@ -860,10 +880,15 @@ def _portfolio_views(request: Request, *, force_quotes: bool = False) -> tuple[A
 @router.get("/portfolio/transactions")
 def portfolio_transactions(request: Request) -> dict[str, Any]:
     return {
-        "transactions": request.app.state.db.list_transactions(),
-        "mode": "actual-holdings-ledger",
+        "transactions": [
+            {**row, "intent": row.get("intent") or row.get("side")}
+            for row in request.app.state.db.list_transactions()
+        ],
+        "mode": "manual-research-exposure-ledger",
+        "purpose": "research/manual exposure tracking only",
         "accounting_method": "FIFO with fees allocated per unit",
         "order_execution": False,
+        "spot_borrow_claims": False,
     }
 
 
@@ -876,32 +901,35 @@ def add_portfolio_transaction(request: Request, transaction: AmountTransactionRe
 
     instrument, quote, rules, calculation = _prepare_amount_transaction(request, transaction)
     quote_time = _quote_datetime(quote)
-    saved, duplicate = db.add_transaction_once(HoldingTransaction(
-        symbol=instrument["symbol"],
-        market=instrument["market"],
-        exchange=instrument["exchange"],
-        instrument_id=instrument["instrument_id"],
-        name=instrument.get("name"),
-        asset_type=instrument.get("asset_type"),
-        provider=instrument.get("provider"),
-        provider_symbol=instrument.get("provider_symbol"),
-        side=transaction.side,
-        amount=calculation["requested_amount"],
-        actual_amount=calculation["actual_amount"],
-        quantity=calculation["quantity"],
-        price=quote["price"],
-        trade_time=transaction.trade_time,
-        currency=instrument["currency"],
-        fees=transaction.fees,
-        notes=transaction.notes,
-        quote_provider=quote.get("provider"),
-        quote_time=quote_time,
-        quote_type=quote.get("quote_type"),
-        quote_status=quote.get("freshness"),
-        quote_currency=quote.get("currency") or instrument["currency"],
-        idempotency_key=transaction.idempotency_key,
-    ))
-    if not duplicate and saved["side"] == "BUY":
+    try:
+        saved, duplicate = db.add_transaction_once(HoldingTransaction(
+            symbol=instrument["symbol"],
+            market=instrument["market"],
+            exchange=instrument["exchange"],
+            instrument_id=instrument["instrument_id"],
+            name=instrument.get("name"),
+            asset_type=instrument.get("asset_type"),
+            provider=instrument.get("provider"),
+            provider_symbol=instrument.get("provider_symbol"),
+            side=transaction.intent,
+            amount=calculation["requested_amount"],
+            actual_amount=calculation["actual_amount"],
+            quantity=calculation["quantity"],
+            price=quote["price"],
+            trade_time=transaction.trade_time,
+            currency=instrument["currency"],
+            fees=transaction.fees,
+            notes=transaction.notes,
+            quote_provider=quote.get("provider"),
+            quote_time=quote_time,
+            quote_type=quote.get("quote_type"),
+            quote_status=quote.get("freshness"),
+            quote_currency=quote.get("currency") or instrument["currency"],
+            idempotency_key=transaction.idempotency_key,
+        ))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not duplicate and (saved.get("intent") or saved["side"]) in {"BUY", "SELL_SHORT"}:
         try:
             # Held instruments are identifiable in the watchlist and deduplicated
             # by canonical identity.
@@ -1006,14 +1034,33 @@ def _prepare_amount_transaction(
                 "avoid an incorrect quantity precision."
             ),
         )
+    intent = payload.intent
+    position_side = db.position_side_at(
+        instrument["instrument_id"], instrument["currency"], payload.trade_time
+    )
+    if intent == "BUY" and position_side == "SHORT":
+        raise HTTPException(
+            status_code=422,
+            detail="BUY cannot reverse an open SHORT exposure; use BUY_TO_COVER first",
+        )
+    if intent == "SELL_SHORT" and position_side == "LONG":
+        raise HTTPException(
+            status_code=422,
+            detail="SELL_SHORT cannot reverse an open LONG exposure; use SELL first",
+        )
+
     available = None
-    if payload.side == "SELL":
+    if intent == "SELL":
         available = db.available_quantity(
+            instrument["instrument_id"], instrument["currency"], payload.trade_time
+        )
+    elif intent == "BUY_TO_COVER":
+        available = db.available_short_quantity(
             instrument["instrument_id"], instrument["currency"], payload.trade_time
         )
     try:
         calculation = calculate_amount_transaction(
-            side=payload.side,
+            side="SELL" if intent in {"SELL", "BUY_TO_COVER"} else "BUY",
             requested_amount=payload.amount,
             price=float(quote["price"]),
             rules=rules,
@@ -1022,6 +1069,17 @@ def _prepare_amount_transaction(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    calculation["intent"] = intent
+    calculation["reference_notional"] = calculation["actual_amount"]
+    if intent in {"SELL_SHORT", "BUY_TO_COVER"}:
+        calculation["total_cash_cost"] = None
+        calculation["net_proceeds"] = None
+        calculation["accounting_note"] = (
+            "Reference notional for manual exposure accounting; this is not an execution "
+            "or settlement amount."
+        )
+    if intent == "BUY_TO_COVER":
+        calculation["max_close_amount"] = calculation.get("max_sell_amount")
     return instrument, quote, rules, calculation
 
 
@@ -1043,6 +1101,7 @@ def _transaction_saved_response(
     return {
         "transaction": {
             **saved,
+            "intent": saved.get("intent") or saved.get("side"),
             "amount": saved.get("amount") or None,
             "actual_amount": saved.get("actual_amount") or None,
         },
@@ -1056,11 +1115,18 @@ def _transaction_saved_response(
         "position": position,
         "positions": positions,
         "summary": summary,
-        "transactions": db.list_transactions(),
+        "transactions": [
+            {**row, "intent": row.get("intent") or row.get("side")}
+            for row in db.list_transactions()
+        ],
         "accounting_method": "FIFO with fees allocated per unit",
+        "mode": "manual-research-exposure-ledger",
+        "purpose": "research/manual exposure tracking only",
         "order_execution": False,
+        "spot_borrow_claims": False,
         "price_note": (
-            "Recorded Using Latest Available Market Quote. Actual Exchange Fill May Differ."
+            "Recorded using a reference quote for manual exposure accounting only. "
+            "No order was executed and no spot borrow is implied."
         ),
     }
 
@@ -1084,8 +1150,14 @@ def preview_amount_transaction(
             "valid": False,
             "error": exc.detail,
             "instrument_id": transaction.instrument_id,
-            "side": transaction.side,
+            "side": (
+                "BUY" if transaction.intent in {"BUY", "BUY_TO_COVER"} else "SELL"
+            ),
+            "intent": transaction.intent,
             "requested_amount": transaction.amount,
+            "purpose": "research/manual exposure tracking only",
+            "order_execution": False,
+            "spot_borrow_claims": False,
         }
     warnings: list[str] = []
     if quote.get("quote_type") == "historical":
@@ -1106,14 +1178,21 @@ def preview_amount_transaction(
     return {
         "valid": True,
         "error": None,
-        "side": transaction.side,
+        "side": (
+            "BUY" if transaction.intent in {"BUY", "BUY_TO_COVER"} else "SELL"
+        ),
+        "intent": transaction.intent,
         "instrument": instrument,
         "quote": _quote_payload(instrument, quote),
         "trading_rules": rules.model_dump(mode="json"),
         **calculation,
         "warnings": warnings,
+        "purpose": "research/manual exposure tracking only",
+        "order_execution": False,
+        "spot_borrow_claims": False,
         "price_note": (
-            "Recorded Using Latest Available Market Quote. Actual Exchange Fill May Differ."
+            "This is a reference quote for manual exposure accounting only. No order was "
+            "executed and no spot borrow is implied."
         ),
     }
 
@@ -1133,7 +1212,13 @@ def delete_portfolio_transaction(request: Request, transaction_id: int) -> dict[
         "removed": removed,
         "positions": positions,
         "summary": summary,
-        "transactions": db.list_transactions(),
+        "transactions": [
+            {**row, "intent": row.get("intent") or row.get("side")}
+            for row in db.list_transactions()
+        ],
+        "purpose": "research/manual exposure tracking only",
+        "order_execution": False,
+        "spot_borrow_claims": False,
     }
 
 
@@ -1150,6 +1235,9 @@ def portfolio_positions(request: Request, force: bool = False) -> dict[str, Any]
         "positions": positions,
         "summary": summary,
         "accounting_method": "FIFO with fees allocated per unit",
+        "purpose": "research/manual exposure tracking only",
+        "order_execution": False,
+        "spot_borrow_claims": False,
         "note": (
             "Invested value and P&L come from the backend FIFO ledger. Current price "
             "and market value use the centralised quote service; when a quote is "
@@ -1196,5 +1284,9 @@ def portfolio_position_detail(
         "candle_error": candle_error,
         "currency_conversion": "unavailable",
         "accounting_method": "FIFO with fees allocated per unit",
+        "mode": "manual-research-exposure-ledger",
+        "purpose": "research/manual exposure tracking only",
+        "order_execution": False,
+        "spot_borrow_claims": False,
     })
     return detail

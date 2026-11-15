@@ -28,6 +28,26 @@ def test_risk_endpoint_returns_expected_sizing():
     assert response.json()["quantity"] == 25
     assert response.json()["planned_loss"] == 500
 
+def test_risk_endpoint_accepts_short_direction_and_requires_a_higher_stop():
+    response = client.post("/api/risk/position-size", json={
+        "capital": 100000,
+        "risk_fraction": 0.005,
+        "entry": 100,
+        "stop": 110,
+        "direction": "SHORT",
+    })
+    assert response.status_code == 200
+    assert response.json()["direction"] == "SHORT"
+    assert response.json()["risk_per_unit"] == 10
+    invalid = client.post("/api/risk/position-size", json={
+        "capital": 100000,
+        "risk_fraction": 0.005,
+        "entry": 100,
+        "stop": 90,
+        "direction": "SHORT",
+    })
+    assert invalid.status_code == 422
+
 
 def test_daily_backtest_rejects_intraday_interval():
     response = client.post("/api/backtests/trend-breakout", json={

@@ -1,5 +1,5 @@
 import type { SignalCondition } from '../../types/api';
-import { cn, formatNumber } from '../../utils/format';
+import { cn } from '../../utils/format';
 import { Icon } from '../common/Icon';
 
 export function ConditionList({ conditions }: { conditions: SignalCondition[] }) {
@@ -10,12 +10,12 @@ export function ConditionList({ conditions }: { conditions: SignalCondition[] })
   return (
     <ul className="divide-y divide-terminal-borderSoft">
       {conditions.map((condition) => (
-        <li key={condition.name} className="flex items-start gap-2 py-1.5">
+        <li key={condition.name} className="flex items-center gap-2 py-1">
           <span
             className={cn(
-              'mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm border',
+              'flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm border',
               condition.passed
-                ? 'border-[#1f4d43] bg-[#10201d] text-terminal-green'
+                ? 'border-[#1f4d43] bg-black text-terminal-green'
                 : 'border-terminal-border bg-terminal-panelAlt text-terminal-muted',
             )}
             aria-label={condition.passed ? 'Passed' : 'Not Passed'}
@@ -30,17 +30,6 @@ export function ConditionList({ conditions }: { conditions: SignalCondition[] })
               )}
             >
               {condition.name}
-            </p>
-            <p className="mt-0.5 text-2xs leading-relaxed text-terminal-muted">
-              {condition.explanation}
-            </p>
-            <p className="num mt-0.5 text-2xs text-terminal-muted">
-              Observed {typeof condition.observed === 'number' ? formatNumber(condition.observed, 4) : (condition.observed ?? '—')}
-              {' · '}
-              Threshold{' '}
-              {typeof condition.threshold === 'number'
-                ? formatNumber(condition.threshold, 4)
-                : (condition.threshold ?? '—')}
             </p>
           </div>
         </li>

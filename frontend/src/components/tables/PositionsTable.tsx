@@ -38,7 +38,7 @@ export function PositionsTable({
     return (
       <EmptyState
         title="No Open Positions"
-        description="Record a BUY transaction to open a position. Fully sold instruments remain in the ledger."
+        description="Record a BUY or SELL SHORT intent to open a manual exposure. Closed instruments remain in the ledger."
         icon="portfolio"
       />
     );
@@ -51,9 +51,10 @@ export function PositionsTable({
           <tr className="border-b border-terminal-border text-left text-2xs text-terminal-muted">
             <th className="py-1.5 pr-3 font-medium">Symbol</th>
             <th className="py-1.5 pr-3 font-medium">Exchange</th>
+            <th className="py-1.5 pr-3 font-medium">Direction</th>
             <th className="py-1.5 pr-3 text-right font-medium">Quantity</th>
-            <th className="py-1.5 pr-3 text-right font-medium">Average Cost</th>
-            <th className="py-1.5 pr-3 text-right font-medium">Invested Value</th>
+            <th className="py-1.5 pr-3 text-right font-medium">Average Cost / Proceeds</th>
+            <th className="py-1.5 pr-3 text-right font-medium">Cost / Proceeds Basis</th>
             <th className="py-1.5 pr-3 text-right font-medium">Current Price</th>
             <th className="py-1.5 pr-3 text-right font-medium">Market Value</th>
             <th className="py-1.5 pr-3 text-right font-medium">Day Change</th>
@@ -65,6 +66,7 @@ export function PositionsTable({
         <tbody>
           {positions.map((position) => {
             const selected = selectedId === position.instrument_id;
+            const isShort = position.position_side === 'SHORT' || position.quantity < 0;
             return (
               <tr
                 key={position.instrument_id}
@@ -79,7 +81,7 @@ export function PositionsTable({
                 aria-selected={selected}
                 className={cn(
                   'cursor-pointer border-b border-terminal-borderSoft last:border-0 focus:outline-none',
-                  selected ? 'bg-[#17202e]' : 'hover:bg-white/[0.03]',
+                  selected ? 'bg-black' : 'hover:bg-white/[0.03]',
                 )}
                 title={position.valuation_error ?? position.name}
               >
@@ -98,8 +100,13 @@ export function PositionsTable({
                 <td className="py-1.5 pr-3">
                   <Badge>{position.exchange}</Badge>
                 </td>
+                <td className="py-1.5 pr-3">
+                  <Badge tone={isShort ? 'negative' : 'positive'}>
+                    {isShort ? 'Short' : 'Long'}
+                  </Badge>
+                </td>
                 <td className="num py-1.5 pr-3 text-right text-terminal-text">
-                  {formatNumber(position.quantity, 6)}
+                  {formatNumber(position.absolute_quantity ?? Math.abs(position.quantity), 6)}
                 </td>
                 <td className="num py-1.5 pr-3 text-right text-terminal-text">
                   {formatNumber(position.average_cost, 4)}

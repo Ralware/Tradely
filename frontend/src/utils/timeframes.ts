@@ -14,7 +14,7 @@ const EQUITY_TIMEFRAMES: TimeframeOption[] = [
   { id: '15m', label: '15 Minutes', days: 30 },
   { id: '30m', label: '30 Minutes', days: 30 },
   { id: '1h', label: '1 Hour', days: 365 },
-  { id: '1d', label: '1 Day', days: 500 },
+  { id: '1d', label: '1 Day', days: 3650 },
   { id: '1wk', label: '1 Week', days: 1825 },
   { id: '1mo', label: '1 Month', days: 3650 },
 ];
@@ -27,7 +27,7 @@ const CRYPTO_TIMEFRAMES: TimeframeOption[] = [
   { id: '1h', label: '1 Hour', days: 365 },
   { id: '2h', label: '2 Hours', days: 365 },
   { id: '4h', label: '4 Hours', days: 365 },
-  { id: '1d', label: '1 Day', days: 500 },
+  { id: '1d', label: '1 Day', days: 3650 },
   { id: '1w', label: '1 Week', days: 1825 },
   { id: '1M', label: '1 Month', days: 3650 },
 ];
@@ -106,7 +106,7 @@ export function defaultDaysFor(interval: string): number {
     case '4h':
       return 365;
     case '1d':
-      return 500;
+      return 3650;
     case '1wk':
     case '1w':
       return 1825;
@@ -114,7 +114,7 @@ export function defaultDaysFor(interval: string): number {
     case '1M':
       return 3650;
     default:
-      return 500;
+      return 3650;
   }
 }
 
