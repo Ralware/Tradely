@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from app.services.indicators import compute_indicators
+from app.services.strategy_config import DEFAULT_STRATEGY_CONFIG, StrategyConfig
 
 
 def run_trend_breakout_backtest(
@@ -16,10 +17,9 @@ def run_trend_breakout_backtest(
     risk_fraction: float = 0.005,
     cost_bps_per_side: float = 10.0,
     max_position_fraction: float = 0.95,
-    initial_stop_atr: float = 2.0,
-    trailing_stop_atr: float = 3.0,
     market: str = "global",
     direction_mode: Literal["long_only", "short_only", "long_short"] = "long_only",
+    strategy_config: StrategyConfig = DEFAULT_STRATEGY_CONFIG,
 ) -> dict:
     """Single-instrument directional research backtest.
 
@@ -33,7 +33,11 @@ def run_trend_breakout_backtest(
         final_mask = frame["is_final"].eq(True).fillna(False)
         excluded_incomplete = not bool(final_mask.all())
         frame = frame.loc[final_mask].copy()
-    if len(frame) < 240:
+    indicator_warmup = max(strategy_config.sma_slow_period + 20, strategy_config.rsi_period + 1,
+                 strategy_config.adx_period * 2, strategy_config.atr_period + 1,
+                 strategy_config.donchian_entry_period + 1,
+                 strategy_config.donchian_exit_period + 1, strategy_config.rvol_period + 1, 220)
+    if len(frame) < max(indicator_warmup, 240):
         raise ValueError("At least 240 daily bars are required for this strategy backtest")
     if initial_capital <= 0 or not 0 < risk_fraction <= 0.02:
         raise ValueError("Invalid initial capital or risk fraction")
@@ -41,7 +45,15 @@ def run_trend_breakout_backtest(
         raise ValueError("Invalid cost or max position setting")
     if direction_mode not in ("long_only", "short_only", "long_short"):
         raise ValueError("Invalid direction_mode")
-    data = compute_indicators(frame)
+    data = (compute_indicators(frame) if strategy_config == DEFAULT_STRATEGY_CONFIG
+            else compute_indicators(frame, strategy_config=strategy_config))
+    fast_sma = f"sma_{strategy_config.sma_fast_period}"
+    slow_sma = f"sma_{strategy_config.sma_slow_period}"
+    rsi_col = f"rsi_{strategy_config.rsi_period}"
+    atr_col = f"atr_{strategy_config.atr_period}"
+    entry_col = f"donchian_upper_{strategy_config.donchian_entry_period}"
+    exit_col = f"donchian_lower_{strategy_config.donchian_exit_period}"
+    rvol_col = f"rvol_{strategy_config.rvol_period}"
     trades: list[dict] = []
     equity = float(initial_capital)
     equity_curve: list[dict] = []
@@ -49,7 +61,8 @@ def run_trend_breakout_backtest(
     pending_exit = False
     entry_cost_fraction = cost_bps_per_side / 10_000
 
-    for i in range(220, len(data)):
+    first_bar = max(220, indicator_warmup - 1)
+    for i in range(first_bar, len(data)):
         exited_this_bar = False
         row = data.iloc[i]
         ts = data.index[i]
@@ -92,43 +105,43 @@ def run_trend_breakout_backtest(
             exited_this_bar = True
 
         # Enter at this bar's open if the prior completed bar generated a full setup.
-        if position is None and not exited_this_bar and i > 220:
+        if position is None and not exited_this_bar and i >= first_bar:
             signal_row = data.iloc[i - 1]
-            required = ["sma_50", "sma_200", "rsi_14", "adx", "atr_14", "donchian_upper_20", "rvol_20"]
+            required = [fast_sma, slow_sma, rsi_col, "adx", atr_col, entry_col, rvol_col]
             candle_is_final = "is_final" not in data.columns or bool(signal_row["is_final"])
             if (
                 candle_is_final
                 and all(pd.notna(signal_row[name]) for name in required)
-                and pd.notna(data["sma_200"].iloc[i - 21])
+                and pd.notna(data[slow_sma].iloc[i - 21])
             ):
                 long_setup = (
                     direction_mode != "short_only"
-                    and signal_row["close"] > signal_row["donchian_upper_20"]
-                    and signal_row["close"] > signal_row["sma_200"]
-                    and signal_row["sma_50"] > signal_row["sma_200"]
-                    and signal_row["sma_200"] > data["sma_200"].iloc[i - 21]
-                    and signal_row["rsi_14"] > 50
-                    and signal_row["adx"] >= 20
-                    and signal_row["rvol_20"] >= 1.0
+                    and signal_row["close"] > signal_row[entry_col]
+                    and signal_row["close"] > signal_row[slow_sma]
+                    and signal_row[fast_sma] > signal_row[slow_sma]
+                    and signal_row[slow_sma] > data[slow_sma].iloc[i - 21]
+                    and signal_row[rsi_col] > strategy_config.rsi_threshold
+                    and signal_row["adx"] >= strategy_config.min_adx
+                    and signal_row[rvol_col] >= strategy_config.min_rvol
                 )
-                prior_lows = data["low"].iloc[max(0, i - 21):i - 1]
+                prior_lows = data["low"].iloc[max(0, i - strategy_config.donchian_entry_period - 1):i - 1]
                 short_setup = (
                     direction_mode != "long_only"
                     and not prior_lows.empty
                     and signal_row["close"] < prior_lows.min()
-                    and signal_row["close"] < signal_row["sma_200"]
-                    and signal_row["sma_50"] < signal_row["sma_200"]
-                    and signal_row["sma_200"] < data["sma_200"].iloc[i - 21]
-                    and signal_row["rsi_14"] < 50
-                    and signal_row["adx"] >= 20
-                    and signal_row["rvol_20"] >= 1.0
+                    and signal_row["close"] < signal_row[slow_sma]
+                    and signal_row[fast_sma] < signal_row[slow_sma]
+                    and signal_row[slow_sma] < data[slow_sma].iloc[i - 21]
+                    and signal_row[rsi_col] < 100 - strategy_config.rsi_threshold
+                    and signal_row["adx"] >= strategy_config.min_adx
+                    and signal_row[rvol_col] >= strategy_config.min_rvol
                 )
-                atr_value = float(signal_row["atr_14"])
+                atr_value = float(signal_row[atr_col])
                 direction = "LONG" if long_setup else "SHORT" if short_setup else None
                 stop = (
-                    open_price - initial_stop_atr * atr_value
+                    open_price - strategy_config.initial_stop_atr * atr_value
                     if direction == "LONG"
-                    else open_price + initial_stop_atr * atr_value
+                    else open_price + strategy_config.initial_stop_atr * atr_value
                 )
                 valid_stop = (
                     direction == "LONG" and 0 < stop < open_price
@@ -170,17 +183,17 @@ def run_trend_breakout_backtest(
 
         if position is not None:
             # Apply trailing stop only after today's close; it is effective from next bar.
-            atr_value = row["atr_14"]
+            atr_value = row[atr_col]
             if pd.notna(atr_value):
                 if position["direction"] == "LONG":
-                    candidate = close - trailing_stop_atr * float(atr_value)
+                    candidate = close - strategy_config.trailing_stop_atr * float(atr_value)
                     position["stop"] = max(float(position["stop"]), candidate)
                 else:
-                    candidate = close + trailing_stop_atr * float(atr_value)
+                    candidate = close + strategy_config.trailing_stop_atr * float(atr_value)
                     position["stop"] = min(float(position["stop"]), candidate)
-            # Compute prior-10-bar channel explicitly; current bar is excluded.
-            prior_lows = data["low"].iloc[max(0, i - 10):i]
-            prior_highs = data["high"].iloc[max(0, i - 10):i]
+            # Compute the configured prior-bar exit channel; current bar is excluded.
+            prior_lows = data["low"].iloc[max(0, i - strategy_config.donchian_exit_period):i]
+            prior_highs = data["high"].iloc[max(0, i - strategy_config.donchian_exit_period):i]
             if position["direction"] == "LONG":
                 pending_exit = bool(not prior_lows.empty and close < prior_lows.min())
             else:
@@ -239,13 +252,26 @@ def run_trend_breakout_backtest(
     ]
     if excluded_incomplete:
         limitations.append("Unfinished candles were excluded from the simulation.")
+    latest = data.iloc[-1]
+    strategy_indicators = {
+        "sma_fast": latest.get(fast_sma), "sma_slow": latest.get(slow_sma),
+        "rsi": latest.get(rsi_col), "adx": latest.get("adx"), "atr": latest.get(atr_col),
+        "donchian_entry": latest.get(entry_col), "donchian_exit": latest.get(exit_col),
+        "relative_volume": latest.get(rvol_col),
+    }
+    strategy_indicators = {key: (None if pd.isna(value) else float(value)) for key, value in strategy_indicators.items()}
     return {
         "direction_mode": direction_mode,
+        "strategy_config": strategy_config.model_dump(mode="json"),
+        "strategy_indicators": strategy_indicators,
         "initial_capital": initial_capital,
         "final_equity": equity,
+        "net_profit_loss": equity - initial_capital,
         "net_return_pct": (equity / initial_capital - 1) * 100,
         "trade_count": len(trades),
         "win_rate_pct": (len(winners) / len(trades) * 100) if trades else None,
+        "average_winning_trade": float(np.mean(winners)) if winners else None,
+        "average_losing_trade": float(np.mean(losers)) if losers else None,
         "profit_factor": gross_profit / gross_loss if gross_loss else (None if not gross_profit else "infinite"),
         "expectancy_per_trade": float(np.mean(pnls)) if pnls else None,
         "max_drawdown_pct": (float(drawdown.min()) * 100) if not drawdown.empty else None,

@@ -34,6 +34,7 @@ from app.services.indicators import compute_indicators
 from app.services.market import MarketService
 from app.services.portfolio import build_ledger, detail_view, position_view, summary_view
 from app.services.strategy import STRATEGY_VERSION, evaluate_trend_breakout, position_size
+from app.services.strategy_config import StrategyConfig
 from app.services.technicals import build_technical_summary
 
 router = APIRouter(prefix="/api")
@@ -470,10 +471,11 @@ def backtest_trend_breakout(request: Request, payload: BacktestRequest) -> dict[
             )
         result = run_trend_breakout_backtest(
             frame, initial_capital=payload.initial_capital, risk_fraction=payload.risk_fraction,
-            cost_bps_per_side=payload.cost_bps_per_side,
+            cost_bps_per_side=(payload.commission_bps_per_side if payload.commission_bps_per_side is not None else payload.cost_bps_per_side) + payload.slippage_bps_per_side,
             max_position_fraction=payload.max_position_fraction,
             market=market,
             direction_mode=payload.direction_mode,
+            strategy_config=payload.strategy_config,
         )
     except HTTPException:
         raise
@@ -482,7 +484,14 @@ def backtest_trend_breakout(request: Request, payload: BacktestRequest) -> dict[
     result.update({"symbol": symbol, "market": market, "instrument": instrument,
                    "source": source,
                    "strategy": "Trend + Donchian 20 Breakout", "strategy_version": STRATEGY_VERSION,
-                   "data_adjusted": bool(frame.attrs.get("is_adjusted", False))})
+                   "data_adjusted": bool(frame.attrs.get("is_adjusted", False)),
+                   "date_range": {"start": frame.index[0].isoformat(), "end": frame.index[-1].isoformat()},
+                   "executed_at": datetime.now(timezone.utc).isoformat(),
+                   "execution_assumptions": {"initial_capital": payload.initial_capital,
+                       "risk_fraction": payload.risk_fraction, "max_position_fraction": payload.max_position_fraction,
+                       "cost_bps_per_side": result["cost_bps_per_side"],
+                       "commission_bps_per_side": payload.commission_bps_per_side if payload.commission_bps_per_side is not None else payload.cost_bps_per_side,
+                       "slippage_bps_per_side": payload.slippage_bps_per_side}})
     return result
 
 
