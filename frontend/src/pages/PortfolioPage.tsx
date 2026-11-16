@@ -7,7 +7,6 @@ import type {
   Position,
   Transaction,
 } from "../types/api";
-import { notifyWatchlistChanged } from "../utils/events";
 import { Button } from "../components/common/Button";
 import { Card } from "../components/common/Card";
 import { PageHeader } from "../components/common/PageHeader";
@@ -133,7 +132,6 @@ export function PortfolioPage() {
     if (position) {
       setSelectedId(position.instrument_id);
     }
-    notifyWatchlistChanged();
     reloadPortfolio();
   }
 
@@ -154,7 +152,6 @@ export function PortfolioPage() {
       setMessage(
         `${sideLabel} ${transaction.symbol} deleted; remaining ledger revalidated`,
       );
-      notifyWatchlistChanged();
       reloadPortfolio();
     } catch (caught) {
       setError(messageOf(caught));

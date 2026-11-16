@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analysisPath, instrumentIdFromLegacy, instrumentPath } from './navigation';
+import { instrumentIdFromLegacy, instrumentPath } from './navigation';
 
 describe('navigation utilities', () => {
   it('builds canonical analysis path for crypto', () => {
@@ -22,10 +22,5 @@ describe('navigation utilities', () => {
     expect(instrumentIdFromLegacy('reliance', 'india', 'nse')).toBe('india:NSE:RELIANCE');
     expect(instrumentIdFromLegacy('aapl', 'global', 'nasdaq')).toBe('global:NASDAQ:AAPL');
     expect(instrumentIdFromLegacy('btcusdt', 'crypto')).toBe('crypto:BINANCE:BTCUSDT');
-  });
-
-  it('redirects legacy analysisPath directly to unified analysis route', () => {
-    const path = analysisPath('BTCUSDT', 'crypto');
-    expect(path).toBe('/analysis?symbol=BTCUSDT&market=crypto');
   });
 });

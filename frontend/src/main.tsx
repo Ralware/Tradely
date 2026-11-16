@@ -2,7 +2,6 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { App } from './App';
-import { ApiStatusProvider } from './contexts/ApiStatusContext';
 import { SelectedInstrumentProvider } from './contexts/SelectedInstrumentContext';
 import './styles/index.css';
 
@@ -14,11 +13,9 @@ if (!container) {
 createRoot(container).render(
   <StrictMode>
     <BrowserRouter>
-      <ApiStatusProvider>
-        <SelectedInstrumentProvider>
-          <App />
-        </SelectedInstrumentProvider>
-      </ApiStatusProvider>
+      <SelectedInstrumentProvider>
+        <App />
+      </SelectedInstrumentProvider>
     </BrowserRouter>
   </StrictMode>,
 );

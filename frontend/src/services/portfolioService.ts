@@ -1,15 +1,11 @@
 import { apiRequest } from './api';
-import { instrumentService } from './instrumentService';
 import type {
   AddTransactionResponse,
   AddWatchlistRequest,
-  InstrumentResolveResponse,
-  InstrumentSearchResponse,
   Market,
   PortfolioSummary,
   PositionDetailResponse,
   PositionsResponse,
-  QuotesResponse,
   TransactionPreviewResponse,
   TransactionRequest,
   TransactionsResponse,
@@ -19,15 +15,6 @@ import type {
 
 const SHORT_TIMEOUT = 15_000;
 const QUOTE_TIMEOUT = 45_000;
-
-export interface QuoteQuery {
-  instrumentIds?: string[];
-  watchlist?: boolean;
-  force?: boolean;
-  symbol?: string;
-  market?: Market;
-  exchange?: string | null;
-}
 
 export const portfolioService = {
   getTransactions(signal?: AbortSignal): Promise<TransactionsResponse> {
@@ -93,35 +80,6 @@ export const portfolioService = {
         timeoutMs: QUOTE_TIMEOUT,
       },
     );
-  },
-
-  getQuotes(query: QuoteQuery, signal?: AbortSignal): Promise<QuotesResponse> {
-    return apiRequest<QuotesResponse>('/api/market/quotes', {
-      query: {
-        instrument_id: query.instrumentIds,
-        watchlist: query.watchlist,
-        force: query.force,
-        symbol: query.symbol,
-        market: query.market,
-        exchange: query.exchange ?? undefined,
-      },
-      signal,
-      timeoutMs: QUOTE_TIMEOUT,
-    });
-  },
-
-  resolveInstrument(
-    query: string,
-    signal?: AbortSignal,
-  ): Promise<InstrumentResolveResponse> {
-    return instrumentService.resolve(query, signal);
-  },
-
-  searchInstruments(
-    query: string,
-    signal?: AbortSignal,
-  ): Promise<InstrumentSearchResponse> {
-    return instrumentService.search(query, signal);
   },
 
   getWatchlist(signal?: AbortSignal): Promise<WatchlistResponse> {

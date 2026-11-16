@@ -1,7 +1,6 @@
 import { apiRequest } from './api';
 import type {
   Instrument,
-  InstrumentCapabilities,
   InstrumentResolutionResponse,
   InstrumentSearchResponse,
 } from '../types/api';
@@ -30,27 +29,9 @@ export const instrumentService = {
     });
   },
 
-  resolveInstrumentId(
-    instrumentId: string,
-    signal?: AbortSignal,
-  ): Promise<InstrumentResolutionResponse> {
-    return apiRequest<InstrumentResolutionResponse>('/api/instruments/resolve', {
-      query: { instrument_id: instrumentId },
-      signal,
-      timeoutMs: SHORT_TIMEOUT,
-    });
-  },
-
   get(instrumentId: string, signal?: AbortSignal): Promise<Instrument> {
     return apiRequest<Instrument>(
       `/api/instruments/${encodeURIComponent(instrumentId)}`,
-      { signal, timeoutMs: SHORT_TIMEOUT },
-    );
-  },
-
-  capabilities(instrumentId: string, signal?: AbortSignal): Promise<InstrumentCapabilities> {
-    return apiRequest<InstrumentCapabilities>(
-      `/api/instruments/${encodeURIComponent(instrumentId)}/capabilities`,
       { signal, timeoutMs: SHORT_TIMEOUT },
     );
   },

@@ -7,7 +7,6 @@ import { portfolioService } from '../services/portfolioService';
 import type { Instrument, SignalState, WatchlistItem } from '../types/api';
 import { instrumentPath } from '../utils/navigation';
 import { quoteRefFromWatchlist } from '../utils/quotes';
-import { notifyWatchlistChanged } from '../utils/events';
 import { Button } from '../components/common/Button';
 import { Icon } from '../components/common/Icon';
 import { ErrorState, LoadingPanel, Notice } from '../components/common/States';
@@ -116,7 +115,6 @@ export function WatchlistPage() {
         market: item.market,
         exchange: item.exchange,
       });
-      notifyWatchlistChanged();
       watchlist.reload();
       scanner.reload();
     } catch (caught) {
@@ -136,7 +134,6 @@ export function WatchlistPage() {
         display_name: instrument.name ?? instrument.display_name ?? instrument.symbol,
         instrument_id: instrument.instrument_id,
       });
-      notifyWatchlistChanged();
       setAddModalOpen(false);
       watchlist.reload();
       scanner.reload();
@@ -193,14 +190,6 @@ export function WatchlistPage() {
           >
             Add Instrument
           </Button>
-
-          <button
-            type="button"
-            title="Watchlist Options"
-            className="flex h-8 w-8 items-center justify-center rounded-sm border border-terminal-border bg-terminal-panel text-terminal-muted hover:bg-white/[0.05] hover:text-terminal-text transition-colors"
-          >
-            <span className="text-base leading-none">⋮</span>
-          </button>
         </div>
       </div>
 

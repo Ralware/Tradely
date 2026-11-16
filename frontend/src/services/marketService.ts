@@ -1,9 +1,7 @@
 import { apiRequest } from './api';
 import type {
   CandlesResponse,
-  HealthResponse,
   Market,
-  ProvidersResponse,
   ScannerResponse,
 } from '../types/api';
 
@@ -20,14 +18,6 @@ export interface CandleQuery {
 const LONG_TIMEOUT = 120_000;
 
 export const marketService = {
-  getHealth(signal?: AbortSignal): Promise<HealthResponse> {
-    return apiRequest<HealthResponse>('/api/health', { signal, timeoutMs: 10_000 });
-  },
-
-  getProviders(signal?: AbortSignal): Promise<ProvidersResponse> {
-    return apiRequest<ProvidersResponse>('/api/providers/status', { signal, timeoutMs: 10_000 });
-  },
-
   getCandles(query: CandleQuery, signal?: AbortSignal): Promise<CandlesResponse> {
     return apiRequest<CandlesResponse>('/api/market/candles', {
       query: {

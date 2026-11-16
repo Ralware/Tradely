@@ -4,7 +4,6 @@ import type {
   DirectionMode,
   IndicatorSeriesResponse,
   Market,
-  SignalsHistoryResponse,
   TechnicalSummaryResponse,
 } from '../types/api';
 import { defaultDaysFor } from '../utils/timeframes';
@@ -183,14 +182,6 @@ export const analysisService = {
         },
       ),
     );
-  },
-
-  getSignalsHistory(limit = 50, signal?: AbortSignal): Promise<SignalsHistoryResponse> {
-    return apiRequest<SignalsHistoryResponse>('/api/signals/history', {
-      query: { limit },
-      signal,
-      timeoutMs: 15_000,
-    });
   },
 
   getTechnicals(query: AnalysisQuery, signal?: AbortSignal): Promise<TechnicalSummaryResponse> {

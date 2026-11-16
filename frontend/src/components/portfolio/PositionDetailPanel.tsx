@@ -8,7 +8,7 @@ import {
   formatSignedFixed,
   toneForNumber,
 } from '../../utils/format';
-import { analysisPath } from '../../utils/navigation';
+import { instrumentPath } from '../../utils/navigation';
 import { Badge } from '../common/Badge';
 import { Button } from '../common/Button';
 import { EmptyState, ErrorState, LoadingPanel } from '../common/States';
@@ -189,7 +189,12 @@ export function PositionDetailPanel({
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           <QuoteBadge quote={position.quote} />
-          <Link to={analysisPath(position.symbol, position.market, position.exchange)}>
+          <Link
+            to={instrumentPath({
+              instrument_id: position.instrument_id,
+              market: position.market,
+            })}
+          >
             <Button size="sm" variant="ghost" icon="external">
               Analysis
             </Button>

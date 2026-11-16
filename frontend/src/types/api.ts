@@ -160,35 +160,6 @@ export interface Quote {
   error: string | null;
 }
 
-export interface QuotesResponse {
-  quotes: Quote[];
-  as_of: string;
-  currency_conversion?: string;
-}
-
-export interface HealthResponse {
-  status: string;
-  application: string;
-  mode: string;
-  ai: boolean;
-  paper_trading: boolean;
-  order_execution: boolean;
-  timestamp: string;
-}
-
-export interface ProviderStatus {
-  name: string;
-  configured: boolean;
-  available?: boolean;
-  purpose?: string;
-  note: string;
-}
-
-export interface ProvidersResponse {
-  providers: ProviderStatus[];
-  checked_at: string;
-}
-
 export interface Candle {
   timestamp: string;
   open: number;
@@ -342,38 +313,6 @@ export interface AddWatchlistRequest {
   market?: Market;
   exchange?: string | null;
   display_name?: string | null;
-}
-
-export interface NewsItem {
-  id: string;
-  title: string;
-  url: string;
-  publisher: string | null;
-  published_at: string | null;
-  retrieved_at: string;
-  summary: string | null;
-  category: string;
-  source: string;
-  related_symbols: string[];
-  official: boolean;
-}
-
-export interface NewsProviderState {
-  enabled?: boolean;
-  configured_feeds?: number;
-  error?: string | null;
-  errors?: string[];
-  note?: string;
-}
-
-export interface NewsResponse {
-  symbol: string;
-  market: Market;
-  instrument?: Instrument | null;
-  items: NewsItem[];
-  count: number;
-  providers: Record<string, NewsProviderState>;
-  note: string;
 }
 
 export interface BacktestRequest {
@@ -693,14 +632,8 @@ export interface InstrumentResolutionResponse {
   resolved: boolean;
 }
 
-export type InstrumentResolveResponse = InstrumentResolutionResponse;
-
 export interface InstrumentSearchResponse extends InstrumentResolutionResponse {
   items: InstrumentCandidate[];
-}
-
-export interface SignalsHistoryResponse {
-  signals: StrategySignal[];
 }
 
 export type TechnicalAction = 'Buy' | 'Sell' | 'Neutral';

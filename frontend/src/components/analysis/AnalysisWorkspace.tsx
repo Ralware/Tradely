@@ -4,12 +4,10 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
 import { useSelectedInstrument } from '../../contexts/SelectedInstrumentContext';
 import { analysisService } from '../../services/analysisService';
-import { newsService } from '../../services/newsService';
 import { portfolioService } from '../../services/portfolioService';
 import type { DirectionMode, Instrument } from '../../types/api';
 import { changeDigits, cn, formatDate, formatNumber, formatPercent, formatSignedFixed, toneForNumber } from '../../utils/format';
 import { defaultDaysFor, intervalLabel, isIntradayInterval } from '../../utils/timeframes';
-import { notifyWatchlistChanged } from '../../utils/events';
 import { instrumentPath } from '../../utils/navigation';
 import { Badge } from '../common/Badge';
 import { Button } from '../common/Button';
@@ -26,7 +24,6 @@ import { SignalCard } from '../signals/SignalCard';
 import { RiskCalculator } from '../signals/RiskCalculator';
 import { CandleTable } from '../tables/CandleTable';
 import { IndicatorTable } from '../tables/IndicatorTable';
-import { NewsList } from '../tables/NewsList';
 import { TechnicalGauge } from './TechnicalGauge';
 import { TechnicalTable } from './TechnicalTable';
 import { TimeframeSelector } from './TimeframeSelector';
@@ -103,7 +100,7 @@ export function AnalysisWorkspace() {
     {
       enabled,
       keepPreviousData: true,
-      keepPreviousDataKey: `${instrumentId}:${directionMode}`,
+      keepPreviousDataKey: `${instrumentId}:${interval}:${days}`,
     },
   );
 
@@ -114,19 +111,13 @@ export function AnalysisWorkspace() {
         signal,
       ),
     [instrumentId, interval, days],
-    { enabled, keepPreviousData: true, keepPreviousDataKey: instrumentId },
+    { enabled, keepPreviousData: true, keepPreviousDataKey: `${instrumentId}:${interval}:${days}` },
   );
 
   const technicals = useApi(
     (signal) => analysisService.getTechnicals({ instrumentId, interval, days }, signal),
     [instrumentId, interval, days],
-    { enabled, keepPreviousData: true, keepPreviousDataKey: instrumentId },
-  );
-
-  const news = useApi(
-    (signal) => newsService.getNews({ instrumentId }, signal),
-    [instrumentId],
-    { enabled },
+    { enabled, keepPreviousData: true, keepPreviousDataKey: `${instrumentId}:${interval}:${days}` },
   );
 
   const currency = selected.currency || (market === 'india' ? 'INR' : market === 'crypto' ? 'USDT' : 'USD');
@@ -196,7 +187,6 @@ export function AnalysisWorkspace() {
     analysis.reload();
     indicatorSeries.reload();
     technicals.reload();
-    news.reload();
   }
 
   async function addToWatchlist() {
@@ -206,7 +196,6 @@ export function AnalysisWorkspace() {
     setWatchState({ loading: true, message: null, error: null });
     try {
       await portfolioService.addWatchlist({ instrument_id: instrumentId });
-      notifyWatchlistChanged();
       setWatchState({ loading: false, message: `${symbol} Added to Watchlist`, error: null });
     } catch (caught) {
       setWatchState({
@@ -222,7 +211,6 @@ export function AnalysisWorkspace() {
     { id: 'risk', label: 'Risk' },
     { id: 'indicators', label: 'Indicators' },
     { id: 'candles', label: 'Candles' },
-    { id: 'news', label: 'News' },
   ];
   const activeTab = tabs.some((item) => item.id === tab) ? tab : 'signal';
 
@@ -484,18 +472,6 @@ export function AnalysisWorkspace() {
               subtitle={`Last ${Math.min(30, data.candles.length)} Bars · ${intervalLabel(interval)}`}
             >
               <CandleTable candles={data.candles} limit={30} />
-            </Card>
-          ) : null}
-
-          {activeTab === 'news' ? (
-            <Card title="News" subtitle="Provider Records">
-              {news.loading ? (
-                <LoadingPanel label="Loading News" rows={4} />
-              ) : news.error ? (
-                <ErrorState message={news.error} onRetry={news.reload} />
-              ) : (
-                <NewsList items={news.data?.items ?? []} note={news.data?.note} />
-              )}
             </Card>
           ) : null}
 

@@ -23,26 +23,3 @@ export function instrumentIdFromLegacy(
     exchange || (market === 'crypto' ? 'BINANCE' : market === 'global' ? 'NASDAQ' : 'NSE');
   return `${market}:${resolvedExchange.toUpperCase()}:${symbol.trim().toUpperCase()}`;
 }
-
-/**
- * Legacy URL builder kept for scanner/signal rows that predate canonical ids.
- * New navigation uses instrumentPath with the resolved instrument.
- */
-export function analysisPath(
-  symbol: string,
-  market: Market,
-  exchange?: string | null,
-  options: { interval?: string; days?: number } = {},
-): string {
-  const params = new URLSearchParams({ symbol: symbol.toUpperCase(), market });
-  if (exchange) {
-    params.set('exchange', exchange.toUpperCase());
-  }
-  if (options.interval) {
-    params.set('interval', options.interval);
-  }
-  if (options.days) {
-    params.set('days', String(options.days));
-  }
-  return `/analysis?${params.toString()}`;
-}

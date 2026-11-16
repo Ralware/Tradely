@@ -8,7 +8,7 @@ import {
   formatTime,
   toneForNumber,
 } from '../../utils/format';
-import { analysisPath } from '../../utils/navigation';
+import { instrumentPath } from '../../utils/navigation';
 import { formatAge } from '../../utils/quotes';
 import { Badge } from '../common/Badge';
 import { EmptyState } from '../common/States';
@@ -87,7 +87,10 @@ export function PositionsTable({
               >
                 <td className="py-1.5 pr-3">
                   <Link
-                    to={analysisPath(position.symbol, position.market, position.exchange)}
+                    to={instrumentPath({
+                      instrument_id: position.instrument_id,
+                      market: position.market,
+                    })}
                     onClick={(event) => event.stopPropagation()}
                     className="font-medium text-terminal-text hover:text-terminal-accent"
                   >

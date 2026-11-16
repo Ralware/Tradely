@@ -38,7 +38,6 @@ const CRYPTO_TIMEFRAMES: TimeframeOption[] = [
  * verified interval mapping.
  */
 export function timeframesFor(market: Market): TimeframeOption[] {
-  if (market === 'india') return EQUITY_TIMEFRAMES.filter((option) => option.id === '1d');
   return market === 'crypto' ? CRYPTO_TIMEFRAMES : EQUITY_TIMEFRAMES;
 }
 
@@ -71,17 +70,6 @@ export function normalizeIntervalForIntervals(
     return '1d';
   }
   return intervals[0];
-}
-
-export function normalizeIntervalForMarket(market: Market, interval: string): string {
-  const supported = timeframesFor(market);
-  let normalized = interval;
-  if (interval === '1w') {
-    normalized = '1wk';
-  } else if (interval === '1M') {
-    normalized = '1mo';
-  }
-  return supported.some((option) => option.id === normalized) ? normalized : '1d';
 }
 
 export function defaultDaysFor(interval: string): number {

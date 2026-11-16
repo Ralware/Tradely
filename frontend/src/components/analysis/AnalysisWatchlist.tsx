@@ -5,7 +5,6 @@ import { portfolioService } from '../../services/portfolioService';
 import type { Instrument, WatchlistItem } from '../../types/api';
 import { cn, formatNumber, formatPercent, toneForNumber } from '../../utils/format';
 import { quoteRefFromWatchlist } from '../../utils/quotes';
-import { notifyWatchlistChanged } from '../../utils/events';
 import { Icon } from '../common/Icon';
 import { EmptyState, ErrorState, LoadingPanel } from '../common/States';
 import { InstrumentSearch } from '../instruments/InstrumentSearch';
@@ -50,7 +49,6 @@ export function AnalysisWatchlist({
         display_name: instrument.name ?? instrument.display_name ?? instrument.symbol,
         instrument_id: instrument.instrument_id,
       });
-      notifyWatchlistChanged();
       setAddOpen(false);
       watchlist.reload();
       // Also automatically select the added instrument
@@ -79,7 +77,6 @@ export function AnalysisWatchlist({
         market: item.market,
         exchange: item.exchange,
       });
-      notifyWatchlistChanged();
       watchlist.reload();
     } catch {
       // Ignore
@@ -167,7 +164,7 @@ export function AnalysisWatchlist({
               key === selectedInstrumentId ||
               item.symbol === selectedInstrumentId ||
               (item.instrument_id && item.instrument_id === selectedInstrumentId);
-            const quote = quotes.get(key) ?? quotes.get(item.symbol) ?? null;
+            const quote = quotes.get(key);
 
             return (
               <div
