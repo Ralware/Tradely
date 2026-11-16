@@ -1,10 +1,10 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
-import { AppShell } from './components/layout/AppShell';
-import { WatchlistPage } from './pages/WatchlistPage';
-import { AnalysisPage } from './pages/AnalysisPage';
-import { PortfolioPage } from './pages/PortfolioPage';
-import { BacktestingPage } from './pages/BacktestingPage';
-import { NotFoundPage } from './pages/NotFoundPage';
+import { Navigate, Route, Routes } from "react-router-dom";
+import { AppShell } from "./components/layout/AppShell";
+import { WatchlistPage } from "./pages/WatchlistPage";
+import { AnalysisPage } from "./pages/AnalysisPage";
+import { PortfolioPage } from "./pages/PortfolioPage";
+import { BacktestingPage } from "./pages/BacktestingPage";
+import { NotFoundPage } from "./pages/NotFoundPage";
 
 export function App() {
   return (
