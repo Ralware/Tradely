@@ -10,55 +10,99 @@ interface NavItem {
   end?: boolean;
 }
 
-const navItems: NavItem[] = [
+const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Watchlist', icon: 'dashboard', end: true },
   { to: '/analysis', label: 'Analysis', icon: 'chart' },
   { to: '/portfolio', label: 'Portfolio', icon: 'portfolio' },
   { to: '/backtesting', label: 'Backtesting', icon: 'flask' },
 ];
 
-export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
+interface SidebarProps {
+  onNavigate?: () => void;
+  /** Optional bottom slot for settings, connection status, or profile */
+  footerSlot?: React.ReactNode;
+}
+
+export function Sidebar({ onNavigate, footerSlot }: SidebarProps) {
   return (
-    <aside
-      className="flex h-12 sm:h-screen w-full sm:w-[60px] shrink-0 flex-row sm:flex-col items-center justify-around sm:justify-start border-t sm:border-t-0 sm:border-r border-terminal-border bg-black py-0 sm:py-4 select-none z-30"
-      aria-label="Application Navigation"
+    <nav
+      aria-label="Primary Navigation"
+      className={cn(
+        'z-30 flex shrink-0 select-none border-terminal-border bg-black',
+        // Mobile: bottom bar | Desktop: left vertical rail
+        'h-14 w-full flex-row items-center justify-around border-t px-2',
+        'sm:h-screen sm:w-[60px] sm:flex-col sm:justify-center sm:border-r sm:border-t-0 sm:px-0 sm:py-4',
+      )}
     >
-      <nav className="flex w-full sm:w-auto flex-row sm:flex-col items-center justify-around sm:justify-start gap-1 sm:gap-2" aria-label="Main Navigation">
-        {navItems.map((item) => (
+      {/* Navigation Links — vertically centered on desktop via sm:my-auto */}
+      <div className="flex w-full flex-row items-center justify-around gap-1 sm:my-auto sm:w-auto sm:flex-col sm:justify-center sm:gap-3">
+        {NAV_ITEMS.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
             end={item.end}
             onClick={onNavigate}
-            title={item.label}
+            aria-label={item.label}
             className={({ isActive }) =>
               cn(
-                'group relative flex h-10 w-10 items-center justify-center rounded-sm transition-colors',
+                'group relative flex h-10 w-10 items-center justify-center rounded-sm transition-colors duration-150',
+                'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-terminal-accent',
                 isActive
-                  ? 'bg-black text-terminal-accent after:absolute after:bottom-0 sm:after:bottom-auto after:left-2 sm:after:left-0 sm:after:top-2 sm:after:bottom-2 after:right-2 sm:after:right-auto after:h-[2px] sm:after:h-auto sm:after:w-[3px] after:bg-terminal-accent'
+                  ? 'bg-white/[0.04] text-terminal-accent'
                   : 'text-terminal-muted hover:bg-white/[0.05] hover:text-white',
               )
             }
           >
             {({ isActive }) => (
               <>
+                {/* Active Indicator Pill (Bottom on mobile, Left on desktop) */}
+                {isActive && (
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      'absolute bg-terminal-accent',
+                      'bottom-0 left-2 right-2 h-[2px]',
+                      'sm:bottom-2 sm:left-0 sm:right-auto sm:top-2 sm:h-auto sm:w-[3px] sm:rounded-r-xs',
+                    )}
+                  />
+                )}
+
                 <Icon
                   name={item.icon}
                   size={19}
+                  aria-hidden="true"
                   className={cn(
-                    'transition-colors',
-                    isActive ? 'text-terminal-accent' : 'text-terminal-muted group-hover:text-white',
+                    'shrink-0 transition-transform duration-150 group-active:scale-95',
+                    isActive
+                      ? 'text-terminal-accent'
+                      : 'text-terminal-muted group-hover:text-white',
                   )}
                 />
-                {/* Floating Tooltip on Desktop */}
-                <span className="pointer-events-none absolute left-full ml-2 z-50 hidden rounded bg-black border border-terminal-border px-2 py-1 text-2xs font-medium text-white shadow-lg whitespace-nowrap group-hover:block">
+
+                {/* Desktop Tooltip (Hover + Keyboard Focus) */}
+                <span
+                  role="tooltip"
+                  className={cn(
+                    'pointer-events-none absolute left-full z-50 ml-3 hidden whitespace-nowrap',
+                    'rounded border border-terminal-border bg-black/95 px-2.5 py-1',
+                    'text-[11px] font-medium tracking-wide text-white shadow-xl backdrop-blur-xs',
+                    'sm:group-hover:block sm:group-focus-visible:block',
+                  )}
+                >
                   {item.label}
                 </span>
               </>
             )}
           </NavLink>
         ))}
-      </nav>
-    </aside>
+      </div>
+
+      {/* Optional Footer Actions pinned to bottom on desktop */}
+      {footerSlot && (
+        <div className="hidden sm:flex sm:flex-col sm:items-center sm:gap-2">
+          {footerSlot}
+        </div>
+      )}
+    </nav>
   );
 }
