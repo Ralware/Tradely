@@ -3,8 +3,36 @@
 @tailwind utilities;
 
 @layer base {
-  html {
+  /* Light Mode Tokens (Default) */
+  :root {
+    color-scheme: light;
+    --terminal-bg: #f8fafc;
+    --terminal-panel: #ffffff;
+    --terminal-border: #e2e8f0;
+    --terminal-border-soft: #f1f5f9;
+    --terminal-text: #0f172a;
+    --terminal-muted: #64748b;
+    --terminal-accent: #2f6feb;
+    --terminal-hover: rgba(15, 23, 42, 0.05);
+    --terminal-active-bg: rgba(47, 111, 235, 0.08);
+    --scrollbar-thumb: #cbd5e1;
+    --scrollbar-thumb-hover: #94a3b8;
+  }
+
+  /* Dark Mode Tokens */
+  .dark {
     color-scheme: dark;
+    --terminal-bg: #000000;
+    --terminal-panel: #0a0a0a;
+    --terminal-border: #1e1e1e;
+    --terminal-border-soft: #141414;
+    --terminal-text: #f8fafc;
+    --terminal-muted: #737373;
+    --terminal-accent: #2f6feb;
+    --terminal-hover: rgba(255, 255, 255, 0.05);
+    --terminal-active-bg: rgba(255, 255, 255, 0.04);
+    --scrollbar-thumb: #1e1e1e;
+    --scrollbar-thumb-hover: #2a2a2a;
   }
 
   *,
@@ -14,8 +42,8 @@
   }
 
   body {
-    @apply bg-terminal-bg text-terminal-text antialiased;
-    background-color: #000000;
+    @apply bg-terminal-bg text-terminal-text antialiased transition-colors duration-150;
+    background-color: var(--terminal-bg);
     text-transform: capitalize;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
@@ -33,13 +61,13 @@
   }
 
   :focus-visible {
-    outline: 1px solid theme("colors.terminal.accent");
+    outline: 1px solid var(--terminal-accent);
     outline-offset: 1px;
   }
 
   * {
     scrollbar-width: thin;
-    scrollbar-color: #1e1e1e transparent;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
 
   ::-webkit-scrollbar {
@@ -52,12 +80,12 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: #1e1e1e;
+    background: var(--scrollbar-thumb);
     border-radius: 3px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: #2a2a2a;
+    background: var(--scrollbar-thumb-hover);
   }
 }
 

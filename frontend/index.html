@@ -1,6 +1,15 @@
 <!doctype html>
 <html lang="en" class="dark">
   <head>
+    <script>
+  (function () {
+    const saved = localStorage.getItem('theme');
+    const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+    if (saved === 'dark' || (!saved && !prefersLight)) {
+      document.documentElement.classList.add('dark');
+    }
+  })();
+    </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta

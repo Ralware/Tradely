@@ -1,23 +1,26 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: 'class',
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     extend: {
       colors: {
         terminal: {
-          bg: '#000000',
-          panel: '#000000',
-          panelAlt: '#000000',
-          border: '#1e1e1e',
-          borderSoft: '#161616',
-          text: '#e8e8e8',
-          muted: '#6b7280',
-          accent: '#2f6feb',
-          accentSoft: 'rgba(47,111,235,0.12)',
-          green: '#26a69a',
-          red: '#ef5350',
-          amber: '#f59e0b',
-          violet: '#8f7ee7',
+          bg: 'var(--terminal-bg)',
+          panel: 'var(--terminal-panel)',
+          panelAlt: 'var(--terminal-panel-alt)',
+          border: 'var(--terminal-border)',
+          borderSoft: 'var(--terminal-border-soft)',
+          text: 'var(--terminal-text)',
+          muted: 'var(--terminal-muted)',
+          accent: 'var(--terminal-accent)',
+          accentSoft: 'var(--terminal-accent-soft)',
+          hover: 'var(--terminal-hover)',
+          activeBg: 'var(--terminal-active-bg)',
+          green: 'var(--terminal-green)',
+          red: 'var(--terminal-red)',
+          amber: 'var(--terminal-amber)',
+          violet: 'var(--terminal-violet)',
         },
       },
       fontFamily: {
