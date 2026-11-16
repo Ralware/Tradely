@@ -326,8 +326,18 @@ export interface BacktestRequest {
   initial_capital?: number;
   risk_fraction?: number;
   cost_bps_per_side?: number;
+  commission_bps_per_side?: number;
+  slippage_bps_per_side?: number;
   max_position_fraction?: number;
   direction_mode?: DirectionMode;
+  strategy_config?: StrategyConfig;
+}
+
+export interface StrategyConfig {
+  sma_fast_period: number; sma_slow_period: number; rsi_period: number; rsi_threshold: number;
+  adx_period: number; min_adx: number; atr_period: number; initial_stop_atr: number;
+  trailing_stop_atr: number; donchian_entry_period: number; rvol_period: number;
+  min_rvol: number; donchian_exit_period: number;
 }
 
 export interface BacktestTrade {
@@ -350,12 +360,20 @@ export interface EquityPoint {
 }
 
 export interface BacktestResult {
+  strategy_config: StrategyConfig;
+  strategy_indicators: Record<string, number | null>;
+  date_range?: { start: string; end: string };
+  execution_assumptions?: Record<string, number>;
+  executed_at?: string;
   direction_mode?: DirectionMode;
   initial_capital: number;
   final_equity: number;
+  net_profit_loss: number;
   net_return_pct: number;
   trade_count: number;
   win_rate_pct: number | null;
+  average_winning_trade: number | null;
+  average_losing_trade: number | null;
   profit_factor: number | 'infinite' | null;
   expectancy_per_trade: number | null;
   max_drawdown_pct: number | null;

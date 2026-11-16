@@ -225,22 +225,30 @@ def stochastic_rsi(close: pd.Series, rsi_period: int = 14, stoch_period: int = 1
     return 100 * (rsi_values - lowest) / (highest - lowest).replace(0, np.nan)
 
 
-def compute_indicators(frame: pd.DataFrame) -> pd.DataFrame:
+def compute_indicators(frame: pd.DataFrame, *, strategy_config=None) -> pd.DataFrame:
     data = validate_ohlcv(frame)
     result = data.copy()
     for period in (20, 50, 100, 200):
         result[f"sma_{period}"] = sma(data["close"], period)
     for period in (9, 20, 50, 100, 200):
         result[f"ema_{period}"] = ema(data["close"], period)
-    result["rsi_14"] = rsi(data["close"], 14)
+    result["rsi_14"] = rsi(data["close"], strategy_config.rsi_period if strategy_config else 14)
     result = result.join(macd(data["close"]))
-    result["atr_14"] = atr(data, 14)
-    result = result.join(adx(data, 14))
+    result["atr_14"] = atr(data, strategy_config.atr_period if strategy_config else 14)
+    result = result.join(adx(data, strategy_config.adx_period if strategy_config else 14))
     result = result.join(bollinger(data["close"], 20, 2.0))
-    result = result.join(donchian(data, 10))
-    result = result.join(donchian(data, 20))
+    for period in dict.fromkeys((strategy_config.donchian_exit_period, strategy_config.donchian_entry_period) if strategy_config else (10, 20)):
+        channel = donchian(data, period)
+        for column in channel:
+            result[column] = channel[column]
     result = result.join(donchian(data, 55))
-    result["rvol_20"] = relative_volume(data["volume"], 20)
+    result["rvol_20"] = relative_volume(data["volume"], strategy_config.rvol_period if strategy_config else 20)
+    if strategy_config:
+        result[f"sma_{strategy_config.sma_fast_period}"] = sma(data["close"], strategy_config.sma_fast_period)
+        result[f"sma_{strategy_config.sma_slow_period}"] = sma(data["close"], strategy_config.sma_slow_period)
+        result[f"rsi_{strategy_config.rsi_period}"] = result["rsi_14"]
+        result[f"atr_{strategy_config.atr_period}"] = result["atr_14"]
+        result[f"rvol_{strategy_config.rvol_period}"] = result["rvol_20"]
     result["obv"] = obv(data)
     # Session VWAP requires intraday bars. With one OHLCV candle per day,
     # intraday price/volume distribution is unknowable and the result would

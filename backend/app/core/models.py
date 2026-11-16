@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+import math
 from typing import Literal
 
-from pydantic import AliasChoices, BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
+from app.services.strategy_config import StrategyConfig
 
 Market = Literal["india", "global", "crypto"]
 TransactionIntent = Literal["BUY", "SELL", "SELL_SHORT", "BUY_TO_COVER"]
@@ -289,5 +291,20 @@ class BacktestRequest(BaseModel):
     initial_capital: float = Field(default=100000, gt=0)
     risk_fraction: float = Field(default=0.005, gt=0, le=0.02)
     cost_bps_per_side: float = Field(default=15, ge=0, le=500)
+    commission_bps_per_side: float | None = Field(default=None, ge=0, le=500)
+    slippage_bps_per_side: float = Field(default=0, ge=0, le=500)
     max_position_fraction: float = Field(default=0.95, gt=0, le=1)
     direction_mode: DirectionMode = "long_only"
+    strategy_config: StrategyConfig = Field(default_factory=StrategyConfig)
+
+    @model_validator(mode="after")
+    def validate_cost_assumptions(self):
+        for name in ("initial_capital", "risk_fraction", "cost_bps_per_side", "max_position_fraction", "slippage_bps_per_side"):
+            if not math.isfinite(getattr(self, name)):
+                raise ValueError(f"{name} must be finite")
+        commission = self.cost_bps_per_side if self.commission_bps_per_side is None else self.commission_bps_per_side
+        if self.commission_bps_per_side is not None and not math.isfinite(self.commission_bps_per_side):
+            raise ValueError("commission_bps_per_side must be finite")
+        if commission + self.slippage_bps_per_side > 500:
+            raise ValueError("Combined commission and slippage cannot exceed 500 bps per side")
+        return self

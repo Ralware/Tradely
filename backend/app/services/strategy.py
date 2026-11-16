@@ -8,7 +8,7 @@ import pandas as pd
 from app.core.models import DirectionMode, PositionDirection, SignalCondition, StrategySignal
 from app.services.indicators import compute_indicators
 
-STRATEGY_VERSION = "trend-donchian-20-v1.1.0"
+STRATEGY_VERSION = "trend-donchian-v1.2.0"
 
 
 def _evaluate_trend_breakout_long_only(
