@@ -42,7 +42,7 @@ export function TradesTable({ trades }: { trades: BacktestTrade[] }) {
                   {formatNumber(trade.exit_price, 2)}
                 </td>
                 <td className="num py-1.5 pr-3 text-right text-terminal-muted">
-                  {formatNumber(trade.quantity, 0)}
+                  {formatNumber(trade.quantity, Number.isInteger(trade.quantity) ? 0 : 8)}
                 </td>
                 <td className="num py-1.5 pr-3 text-right text-terminal-muted">
                   {formatNumber(trade.total_costs, 2)}

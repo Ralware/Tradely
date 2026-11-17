@@ -253,15 +253,6 @@ export function AnalysisWorkspace() {
         ) : null}
       </div>
 
-      <div aria-hidden="true" className="h-0.5 overflow-hidden rounded-full bg-terminal-borderSoft">
-        <div
-          className={cn(
-            'h-full w-1/3 rounded-full bg-terminal-accent transition-opacity duration-200',
-            updating ? 'animate-analysis-progress opacity-100' : 'opacity-0',
-          )}
-        />
-      </div>
-
       {!instrumentId ? (
         <EmptyState
           title="No Instrument Selected"
@@ -305,7 +296,7 @@ export function AnalysisWorkspace() {
                 {data.is_stale ? <Badge tone="warning">Stale</Badge> : null}
               </div>
               <div
-                key={displayedInterval}
+                key={`price-${displayedInterval}`}
                 className="mt-1 flex animate-panel-in flex-wrap items-baseline gap-x-3 gap-y-1"
               >
                 <span className="num text-xl font-semibold leading-none text-terminal-text">
@@ -350,19 +341,17 @@ export function AnalysisWorkspace() {
                   onChange={changeTimeframe}
                 />
                 <span
-                  aria-live="polite"
+                  role="status"
                   className={cn(
-                    'flex items-center gap-1 pb-1.5 text-2xs text-terminal-muted transition-opacity duration-300',
+                    'self-center inline-flex h-3 w-3 items-center justify-center text-terminal-muted transition-opacity duration-300',
                     updating ? 'opacity-100' : 'opacity-0',
                   )}
                 >
                   <span
-                    className={cn(
-                      'h-1.5 w-1.5 rounded-full bg-terminal-accent',
-                      updating && 'animate-pulse',
-                    )}
+                    className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent"
+                    aria-hidden="true"
                   />
-                  Updating
+                  {updating ? <span className="sr-only">Updating</span> : null}
                 </span>
               </div>
             </div>
@@ -384,10 +373,7 @@ export function AnalysisWorkspace() {
               )}
             >
               {technicals.data ? (
-                <div
-                  key={technicals.data.interval}
-                  className="grid animate-panel-in grid-cols-1 items-end gap-4 sm:grid-cols-3"
-                >
+                <div className="grid animate-panel-in grid-cols-1 items-end gap-4 sm:grid-cols-3">
                   <div className="flex justify-center">
                     <TechnicalGauge label="Oscillators" summary={technicals.data.summary.oscillators} />
                   </div>
@@ -415,7 +401,7 @@ export function AnalysisWorkspace() {
 
           {technicals.data ? (
             <div
-              key={technicals.data.interval}
+              key={`technicals-${technicals.data.interval}`}
               className={cn(
                 'grid animate-panel-in grid-cols-1 gap-3 transition-opacity duration-300 xl:grid-cols-2',
                 technicals.refreshing ? 'opacity-70' : 'opacity-100',
@@ -489,7 +475,7 @@ export function AnalysisWorkspace() {
           <Tabs items={tabs} active={activeTab} onChange={setTab} />
 
           {activeTab === 'signal' ? (
-            <div key={displayedInterval} className="grid animate-panel-in grid-cols-1 gap-3 xl:grid-cols-2">
+            <div key={`signal-${displayedInterval}`} className="grid animate-panel-in grid-cols-1 gap-3 xl:grid-cols-2">
               <SignalCard signal={data.strategy} />
               <Card title="Latest Bar" subtitle={intervalLabel(displayedInterval)}>
                 <dl className="divide-y divide-terminal-borderSoft">

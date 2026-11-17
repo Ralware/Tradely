@@ -196,3 +196,51 @@ def test_backtest_ignores_unfinished_signal_candle(monkeypatch):
 
     assert result["trade_count"] == 0
     assert any("Unfinished candles were excluded" in item for item in result["limitations"])
+
+
+def _bullish_flat_fixture(monkeypatch, rows: int = 241):
+    index = pd.date_range("2025-01-01", periods=rows, freq="B", tz="UTC")
+    frame = pd.DataFrame(
+        {"open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0, "volume": 1000.0},
+        index=index,
+    )
+    indicators = frame.copy()
+    for column, value in {
+        "sma_50": 99.0,
+        "sma_200": 98.0,
+        "rsi_14": 60.0,
+        "adx": 25.0,
+        "atr_14": 1.0,
+        "donchian_upper_20": 99.0,
+        "rvol_20": 1.2,
+    }.items():
+        indicators[column] = value
+    indicators.loc[indicators.index[:201], "sma_200"] = 97.0
+    monkeypatch.setattr("app.services.backtest.compute_indicators", lambda _: indicators)
+    return frame
+
+
+@pytest.mark.parametrize("capital", [50.0, 1_000.0, 100_000.0])
+def test_backtest_takes_trades_for_any_positive_capital(monkeypatch, capital):
+    frame = _bullish_flat_fixture(monkeypatch)
+    result = run_trend_breakout_backtest(
+        frame, initial_capital=capital, risk_fraction=0.01, cost_bps_per_side=10,
+    )
+    assert result["trade_count"] == 1
+    trade = result["trades"][0]
+    assert 0 < trade["quantity"] <= (capital * 0.95) / 100.0
+    assert result["final_equity"] == pytest.approx(
+        result["initial_capital"] + sum(item["net_pnl"] for item in result["trades"])
+    )
+
+
+def test_backtest_returns_scale_consistently_across_capital(monkeypatch):
+    frame = _bullish_flat_fixture(monkeypatch)
+    small = run_trend_breakout_backtest(
+        frame, initial_capital=500.0, risk_fraction=0.01, cost_bps_per_side=10,
+    )
+    large = run_trend_breakout_backtest(
+        frame, initial_capital=500_000.0, risk_fraction=0.01, cost_bps_per_side=10,
+    )
+    assert small["trade_count"] == large["trade_count"] == 1
+    assert small["net_return_pct"] == pytest.approx(large["net_return_pct"], rel=1e-6, abs=1e-9)

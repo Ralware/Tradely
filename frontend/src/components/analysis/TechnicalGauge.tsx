@@ -28,7 +28,6 @@ function arcPath(startAngle: number, endAngle: number, radius = RADIUS): string 
 export function TechnicalGauge({ label, summary, size = 'default' }: TechnicalGaugeProps) {
   const clamped = Math.max(-1, Math.min(1, summary.score));
   const needleAngle = 180 - ((clamped + 1) / 2) * 180;
-  const needle = polar(needleAngle, 64);
   const hero = size === 'hero';
 
   return (
@@ -42,15 +41,24 @@ export function TechnicalGauge({ label, summary, size = 'default' }: TechnicalGa
         <path d={arcPath(180, 135)} stroke="#ef5350" strokeWidth={7} fill="none" />
         <path d={arcPath(135, 45)} stroke="#4a4f58" strokeWidth={7} fill="none" />
         <path d={arcPath(45, 0)} stroke="#2f6feb" strokeWidth={7} fill="none" />
-        <line
-          x1={CX}
-          y1={CY}
-          x2={needle.x}
-          y2={needle.y}
-          stroke="#c9ced6"
-          strokeWidth={2.5}
-          strokeLinecap="round"
-        />
+        <g
+          className="transition-transform duration-700 ease-out"
+          style={{
+            transform: `rotate(${-needleAngle}deg)`,
+            transformOrigin: `${CX}px ${CY}px`,
+            transformBox: 'view-box',
+          }}
+        >
+          <line
+            x1={CX}
+            y1={CY}
+            x2={CX + 64}
+            y2={CY}
+            stroke="#c9ced6"
+            strokeWidth={2.5}
+            strokeLinecap="round"
+          />
+        </g>
         <circle cx={CX} cy={CY} r={3.6} fill="#c9ced6" />
       </svg>
 

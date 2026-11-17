@@ -201,6 +201,16 @@ export function RiskCalculator({ entry, stop, direction = 'LONG', currency }: Ri
         </dl>
       ) : null}
 
+      {result && result.quantity <= 0 ? (
+        <Notice tone="warning" className="mt-2">
+          Whole-unit quantity rounds down to zero because{' '}
+          {result.capital_limited
+            ? 'the account capital cannot fund one lot at this entry price.'
+            : 'the risk budget cannot fund one lot at this stop distance.'}{' '}
+          Increase capital or risk per trade.
+        </Notice>
+      ) : null}
+
       <Notice className="mt-2">
         Excludes charges, spread, slippage, partial fills and gap risk.
       </Notice>

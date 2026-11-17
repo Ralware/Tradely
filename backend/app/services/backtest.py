@@ -150,9 +150,16 @@ def run_trend_breakout_backtest(
                 )
                 if direction is not None and valid_stop:
                     risk_budget = equity * risk_fraction
-                    quantity_by_risk = math.floor(risk_budget / abs(open_price - stop))
-                    quantity_by_capital = math.floor((equity * max_position_fraction) / open_price)
-                    quantity = max(0, min(quantity_by_risk, quantity_by_capital))
+                    risk_per_unit = abs(open_price - stop)
+                    # Fractional sizing keeps every positive capital usable and
+                    # makes results scale proportionally with the account size.
+                    # Flooring to whole units silently skipped entries whenever
+                    # the risk budget was smaller than one unit's stop distance.
+                    quantity_by_risk = risk_budget / risk_per_unit
+                    quantity_by_capital = (equity * max_position_fraction) / open_price
+                    quantity = min(quantity_by_risk, quantity_by_capital)
+                    # Round down to avoid ever exceeding either sizing cap.
+                    quantity = math.floor(quantity * 100_000_000) / 100_000_000
                     if quantity > 0:
                         position = {
                             "entry_time": ts.isoformat(), "entry": open_price, "quantity": quantity,
@@ -243,6 +250,7 @@ def run_trend_breakout_backtest(
         "Protective stop fills model gap-through conservatively, but intrabar price path is unknown.",
         "Cost is a configurable aggregate basis-point estimate, not a broker-specific Indian tax engine.",
         "No survivorship-free historical universe or point-in-time symbol membership is supplied by this endpoint.",
+        "Position quantity is fractional so every positive capital value is usable; venues that require whole shares will differ.",
         "This result is not out-of-sample proof; use a locked walk-forward research protocol before relying on it.",
         (
             "Short exposure is hypothetical research exposure; no margin, borrow, or exchange execution is modelled."

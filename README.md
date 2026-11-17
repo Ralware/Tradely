@@ -208,7 +208,8 @@ that directory when present.
   depth can change without notice.
 - The backtest is a single-instrument research model with next-bar-open
   execution and aggregate basis-point costs. It is not a portfolio simulator,
-  tax engine or proof of profitability.
+  tax engine or proof of profitability. Position size is fractional so every
+  positive capital value is usable; venues that require whole shares will differ.
 - News, fundamentals, corporate events, currency conversion and remote access
   are not implemented. `/api/instruments/{symbol}/news` returns an explicit empty
   result.
