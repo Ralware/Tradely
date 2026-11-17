@@ -74,6 +74,54 @@ function numeric(value: number | string | null | undefined): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+function candlePoints(candles: Candle[]) {
+  return candles.flatMap((candle) => {
+    const time = toSeconds(candle.timestamp);
+    if (time === null) {
+      return [];
+    }
+    return [
+      {
+        time,
+        open: candle.open,
+        high: candle.high,
+        low: candle.low,
+        close: candle.close,
+      },
+    ];
+  });
+}
+
+function volumePoints(candles: Candle[]) {
+  return candles.flatMap((candle) => {
+    const time = toSeconds(candle.timestamp);
+    if (time === null) {
+      return [];
+    }
+    return [
+      {
+        time,
+        value: candle.volume,
+        color:
+          candle.close >= candle.open
+            ? 'rgba(47, 111, 235, 0.28)'
+            : 'rgba(255, 255, 255, 0.28)',
+      },
+    ];
+  });
+}
+
+function seriesPoints(
+  series: IndicatorSeriesRow[],
+  field: string,
+): Array<{ time: UTCTimestamp; value: number }> {
+  return series.flatMap((row) => {
+    const time = toSeconds(row.timestamp);
+    const value = numeric(row[field]);
+    return time === null || value === null ? [] : [{ time, value }];
+  });
+}
+
 export function PriceChart({
   candles,
   series,
@@ -84,10 +132,17 @@ export function PriceChart({
   height = 380,
 }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const overlaySeriesRef = useRef<ISeriesApi<'Line'>[]>([]);
+  const indicatorSeriesRef = useRef<Array<ISeriesApi<'Line'> | ISeriesApi<'Histogram'>>>([]);
 
+  // The chart is created once and kept alive across data changes. Timeframe
+  // switches only replace series data, so the canvas never unmounts or flashes.
   useEffect(() => {
     const element = containerRef.current;
-    if (!element || candles.length === 0) {
+    if (!element) {
       return;
     }
 
@@ -118,7 +173,7 @@ export function PriceChart({
       },
     });
 
-    const candleSeries: ISeriesApi<'Candlestick'> = chart.addSeries(CandlestickSeries, {
+    const candleSeries = chart.addSeries(CandlestickSeries, {
       upColor: '#2f6feb',
       downColor: '#ffffff',
       borderVisible: false,
@@ -126,23 +181,6 @@ export function PriceChart({
       wickDownColor: '#ffffff',
       priceLineVisible: false,
     });
-
-    const candleData = candles.flatMap((candle) => {
-      const time = toSeconds(candle.timestamp);
-      if (time === null) {
-        return [];
-      }
-      return [
-        {
-          time,
-          open: candle.open,
-          high: candle.high,
-          low: candle.low,
-          close: candle.close,
-        },
-      ];
-    });
-    candleSeries.setData(candleData);
 
     const volumeSeries = chart.addSeries(
       HistogramSeries,
@@ -155,57 +193,88 @@ export function PriceChart({
       0,
     );
     volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
-    volumeSeries.setData(
-      candles.flatMap((candle) => {
-        const time = toSeconds(candle.timestamp);
-        if (time === null) {
-          return [];
-        }
-        return [
-          {
-            time,
-            value: candle.volume,
-            color:
-              candle.close >= candle.open
-                ? 'rgba(47, 111, 235, 0.28)'
-                : 'rgba(255, 255, 255, 0.28)',
-          },
-        ];
-      }),
-    );
 
-    if (series && series.length > 0) {
-      for (const group of overlayGroups) {
-        if (!overlays[group.key]) {
-          continue;
-        }
-        for (const line of group.lines) {
-          const overlaySeries = chart.addSeries(
-            LineSeries,
-            {
-              color: line.color,
-              lineWidth: 1,
-              lineStyle: line.dashed ? LineStyle.Dashed : LineStyle.Solid,
-              priceLineVisible: false,
-              lastValueVisible: false,
-              title: line.title,
-            },
-            0,
-          );
-          overlaySeries.setData(
-            series.flatMap((row) => {
-              const time = toSeconds(row.timestamp);
-              const value = numeric(row[line.field]);
-              return time === null || value === null ? [] : [{ time, value }];
-            }),
-          );
-        }
+    chartRef.current = chart;
+    candleSeriesRef.current = candleSeries;
+    volumeSeriesRef.current = volumeSeries;
+
+    return () => {
+      chart.remove();
+      chartRef.current = null;
+      candleSeriesRef.current = null;
+      volumeSeriesRef.current = null;
+      overlaySeriesRef.current = [];
+      indicatorSeriesRef.current = [];
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    const candleSeries = candleSeriesRef.current;
+    const volumeSeries = volumeSeriesRef.current;
+    if (!chart || !candleSeries || !volumeSeries || candles.length === 0) {
+      return;
+    }
+    candleSeries.setData(candlePoints(candles));
+    volumeSeries.setData(volumePoints(candles));
+    chart.timeScale().fitContent();
+  }, [candles]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) {
+      return;
+    }
+    for (const overlaySeries of overlaySeriesRef.current) {
+      chart.removeSeries(overlaySeries);
+    }
+    overlaySeriesRef.current = [];
+    if (!series || series.length === 0) {
+      return;
+    }
+    for (const group of overlayGroups) {
+      if (!overlays[group.key]) {
+        continue;
       }
+      for (const line of group.lines) {
+        const overlaySeries = chart.addSeries(
+          LineSeries,
+          {
+            color: line.color,
+            lineWidth: 1,
+            lineStyle: line.dashed ? LineStyle.Dashed : LineStyle.Solid,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            title: line.title,
+          },
+          0,
+        );
+        overlaySeries.setData(seriesPoints(series, line.field));
+        overlaySeriesRef.current.push(overlaySeries);
+      }
+    }
+  }, [overlays, series]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) {
+      return;
+    }
+    for (const indicatorSeries of indicatorSeriesRef.current) {
+      chart.removeSeries(indicatorSeries);
+    }
+    indicatorSeriesRef.current = [];
+    while (chart.panes().length > 1) {
+      chart.removePane(chart.panes().length - 1);
+    }
+    if (!series || series.length === 0) {
+      return;
     }
 
     let paneIndex = 1;
 
-    if (showRsi && series && series.length > 0) {
+    if (showRsi) {
       const rsiSeries = chart.addSeries(
         LineSeries,
         {
@@ -217,13 +286,7 @@ export function PriceChart({
         },
         paneIndex,
       );
-      rsiSeries.setData(
-        series.flatMap((row) => {
-          const time = toSeconds(row.timestamp);
-          const value = numeric(row.rsi_14);
-          return time === null || value === null ? [] : [{ time, value }];
-        }),
-      );
+      rsiSeries.setData(seriesPoints(series, 'rsi_14'));
       for (const level of [70, 30]) {
         rsiSeries.createPriceLine({
           price: level,
@@ -236,10 +299,11 @@ export function PriceChart({
       }
       rsiSeries.priceScale().applyOptions({ scaleMargins: { top: 0.15, bottom: 0.15 } });
       chart.panes()[paneIndex]?.setHeight(110);
+      indicatorSeriesRef.current.push(rsiSeries);
       paneIndex += 1;
     }
 
-    if (showMacd && series && series.length > 0) {
+    if (showMacd) {
       const histogram = chart.addSeries(
         HistogramSeries,
         {
@@ -267,41 +331,34 @@ export function PriceChart({
         { color: '#2f6feb', lineWidth: 2, priceLineVisible: false, lastValueVisible: false },
         paneIndex,
       );
-      macdLine.setData(
-        series.flatMap((row) => {
-          const time = toSeconds(row.timestamp);
-          const value = numeric(row.macd);
-          return time === null || value === null ? [] : [{ time, value }];
-        }),
-      );
+      macdLine.setData(seriesPoints(series, 'macd'));
 
       const signalLine = chart.addSeries(
         LineSeries,
         { color: '#d6a45a', lineWidth: 1, priceLineVisible: false, lastValueVisible: false },
         paneIndex,
       );
-      signalLine.setData(
-        series.flatMap((row) => {
-          const time = toSeconds(row.timestamp);
-          const value = numeric(row.macd_signal);
-          return time === null || value === null ? [] : [{ time, value }];
-        }),
-      );
+      signalLine.setData(seriesPoints(series, 'macd_signal'));
 
       chart.panes()[paneIndex]?.setHeight(120);
-      paneIndex += 1;
+      indicatorSeriesRef.current.push(histogram, macdLine, signalLine);
     }
+  }, [series, showRsi, showMacd]);
 
-    chart.timeScale().fitContent();
+  useEffect(() => {
+    chartRef.current?.applyOptions({
+      timeScale: { timeVisible: intraday, secondsVisible: false },
+    });
+  }, [intraday]);
 
-    return () => {
-      chart.remove();
-    };
-  }, [candles, series, overlays, showRsi, showMacd, intraday]);
-
-  if (candles.length === 0) {
-    return <EmptyState title="No candles available" icon="chart" />;
-  }
-
-  return <div ref={containerRef} style={{ height }} className="w-full" aria-label="Price chart" />;
+  return (
+    <div className="relative" style={{ height }}>
+      <div ref={containerRef} className="h-full w-full" aria-label="Price chart" />
+      {candles.length === 0 ? (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/80">
+          <EmptyState title="No candles available" icon="chart" />
+        </div>
+      ) : null}
+    </div>
+  );
 }

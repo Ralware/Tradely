@@ -30,6 +30,20 @@ export default {
       fontSize: {
         '2xs': ['10px', '14px'],
       },
+      keyframes: {
+        'analysis-progress': {
+          '0%': { transform: 'translateX(-110%)' },
+          '100%': { transform: 'translateX(410%)' },
+        },
+        'panel-in': {
+          '0%': { opacity: '0', transform: 'translateY(2px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+      },
+      animation: {
+        'analysis-progress': 'analysis-progress 1.1s ease-in-out infinite',
+        'panel-in': 'panel-in 240ms ease-out',
+      },
     },
   },
   plugins: [],

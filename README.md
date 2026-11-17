@@ -32,8 +32,15 @@ frontend/
 tradingview-bridge/
   server.mjs               read-only HTTP bridge over the bundled TradingView library
 TradingView-API/
-  TradingView-API-main/    vendored unofficial TradingView Node.js library (prebuilt dist/)
+  TradingView-API-main/    vendored unofficial TradingView Node.js library
+                           (source, build config and licence only; dist/ is built on demand)
 ```
+
+The vendored library is [TradingView-API](https://github.com/Mathieu2301/TradingView-API)
+by Mathieu Colmon, used under the ISC licence reproduced in its `LICENSE` file.
+Only `src/`, the TypeScript build configuration and the package manifests are
+vendored; upstream documentation, tests, examples, scripts, assets and tooling
+are not part of this repository.
 
 The FastAPI process serves the API under `/api` and, when `frontend/dist/`
 exists, the production React bundle at `/` (client-side routes fall back to

@@ -100,7 +100,7 @@ export function AnalysisWorkspace() {
     {
       enabled,
       keepPreviousData: true,
-      keepPreviousDataKey: `${instrumentId}:${interval}:${days}`,
+      keepPreviousDataKey: instrumentId,
     },
   );
 
@@ -111,19 +111,22 @@ export function AnalysisWorkspace() {
         signal,
       ),
     [instrumentId, interval, days],
-    { enabled, keepPreviousData: true, keepPreviousDataKey: `${instrumentId}:${interval}:${days}` },
+    { enabled, keepPreviousData: true, keepPreviousDataKey: instrumentId },
   );
 
   const technicals = useApi(
     (signal) => analysisService.getTechnicals({ instrumentId, interval, days }, signal),
     [instrumentId, interval, days],
-    { enabled, keepPreviousData: true, keepPreviousDataKey: `${instrumentId}:${interval}:${days}` },
+    { enabled, keepPreviousData: true, keepPreviousDataKey: instrumentId },
   );
 
   const currency = selected.currency || (market === 'india' ? 'INR' : market === 'crypto' ? 'USDT' : 'USD');
-  const intraday = isIntradayInterval(interval);
   const data = analysis.data;
   const quote = selected.quote;
+  const displayedInterval = data?.interval ?? interval;
+  const intraday = isIntradayInterval(displayedInterval);
+  const updating =
+    analysis.refreshing || technicals.refreshing || indicatorSeries.refreshing;
 
   useEffect(() => {
     if (!enabled || !instrumentId || !data || data.interval !== interval) {
@@ -250,6 +253,15 @@ export function AnalysisWorkspace() {
         ) : null}
       </div>
 
+      <div aria-hidden="true" className="h-0.5 overflow-hidden rounded-full bg-terminal-borderSoft">
+        <div
+          className={cn(
+            'h-full w-1/3 rounded-full bg-terminal-accent transition-opacity duration-200',
+            updating ? 'animate-analysis-progress opacity-100' : 'opacity-0',
+          )}
+        />
+      </div>
+
       {!instrumentId ? (
         <EmptyState
           title="No Instrument Selected"
@@ -258,10 +270,15 @@ export function AnalysisWorkspace() {
         />
       ) : analysis.loading && !data ? (
         <LoadingPanel label={`Loading ${symbol}`} rows={10} />
-      ) : analysis.error ? (
+      ) : !data && analysis.error ? (
         <ErrorState message={analysis.error} onRetry={analysis.reload} />
       ) : data ? (
         <>
+          {analysis.error ? (
+            <Notice tone="warning">
+              Could Not Refresh {symbol} · {analysis.error}
+            </Notice>
+          ) : null}
           {data.warnings.length > 0 ? (
             <div className="space-y-1">
               {data.warnings.map((warning) => (
@@ -287,7 +304,10 @@ export function AnalysisWorkspace() {
                 </Badge>
                 {data.is_stale ? <Badge tone="warning">Stale</Badge> : null}
               </div>
-              <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <div
+                key={displayedInterval}
+                className="mt-1 flex animate-panel-in flex-wrap items-baseline gap-x-3 gap-y-1"
+              >
                 <span className="num text-xl font-semibold leading-none text-terminal-text">
                   {formatNumber(last, priceDigits(last))}
                   <span className="ml-1 text-2xs font-normal text-terminal-muted">{currency}</span>
@@ -307,7 +327,7 @@ export function AnalysisWorkspace() {
                   {formatPercent(changePct, 2, true)}
                 </span>
                 <span className="text-2xs text-terminal-muted">
-                  {intervalLabel(interval)} · As of {formatDate(data.as_of)}
+                  {intervalLabel(displayedInterval)} · As of {formatDate(data.as_of)}
                 </span>
               </div>
             </div>
@@ -323,11 +343,28 @@ export function AnalysisWorkspace() {
                   { value: 'long_short', label: 'Long + Short' },
                 ]}
               />
-              <TimeframeSelector
-                options={selected.timeframes}
-                value={interval}
-                onChange={changeTimeframe}
-              />
+              <div className="flex items-end gap-2">
+                <TimeframeSelector
+                  options={selected.timeframes}
+                  value={interval}
+                  onChange={changeTimeframe}
+                />
+                <span
+                  aria-live="polite"
+                  className={cn(
+                    'flex items-center gap-1 pb-1.5 text-2xs text-terminal-muted transition-opacity duration-300',
+                    updating ? 'opacity-100' : 'opacity-0',
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'h-1.5 w-1.5 rounded-full bg-terminal-accent',
+                      updating && 'animate-pulse',
+                    )}
+                  />
+                  Updating
+                </span>
+              </div>
             </div>
           </div>
 
@@ -335,12 +372,22 @@ export function AnalysisWorkspace() {
             <header className="flex flex-wrap items-center justify-between gap-2 border-b border-terminal-border px-3 py-1.5">
               <h2 className="text-xs font-semibold text-terminal-text">Technical Analysis</h2>
               <span className="truncate text-2xs text-terminal-muted">
-                {technicals.data ? `${technicals.data.source} · ${intervalLabel(interval)}` : intervalLabel(interval)}
+                {technicals.data
+                  ? `${technicals.data.source} · ${intervalLabel(technicals.data.interval)}`
+                  : intervalLabel(interval)}
               </span>
             </header>
-            <div className="px-3 py-3">
+            <div
+              className={cn(
+                'px-3 py-3 transition-opacity duration-300',
+                technicals.refreshing ? 'opacity-70' : 'opacity-100',
+              )}
+            >
               {technicals.data ? (
-                <div className="grid grid-cols-1 items-end gap-4 sm:grid-cols-3">
+                <div
+                  key={technicals.data.interval}
+                  className="grid animate-panel-in grid-cols-1 items-end gap-4 sm:grid-cols-3"
+                >
                   <div className="flex justify-center">
                     <TechnicalGauge label="Oscillators" summary={technicals.data.summary.oscillators} />
                   </div>
@@ -367,7 +414,13 @@ export function AnalysisWorkspace() {
           </section>
 
           {technicals.data ? (
-            <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+            <div
+              key={technicals.data.interval}
+              className={cn(
+                'grid animate-panel-in grid-cols-1 gap-3 transition-opacity duration-300 xl:grid-cols-2',
+                technicals.refreshing ? 'opacity-70' : 'opacity-100',
+              )}
+            >
               <TechnicalTable title="Oscillators" rows={technicals.data.oscillators} />
               <TechnicalTable title="Moving Averages" rows={technicals.data.moving_averages} />
             </div>
@@ -378,7 +431,7 @@ export function AnalysisWorkspace() {
               <div className="flex items-baseline gap-2">
                 <h2 className="text-xs font-semibold text-terminal-text">Price Chart</h2>
                 <span className="text-2xs text-terminal-muted">
-                  {intervalLabel(interval)} · {data.candles.length} Bars
+                  {intervalLabel(displayedInterval)} · {data.candles.length} Bars
                 </span>
               </div>
               <div className="flex flex-wrap items-center gap-1">
@@ -410,7 +463,12 @@ export function AnalysisWorkspace() {
                 </ToggleChip>
               </div>
             </header>
-            <div className="px-1.5 py-1.5">
+            <div
+              className={cn(
+                'px-1.5 py-1.5 transition-opacity duration-300',
+                analysis.refreshing ? 'opacity-80' : 'opacity-100',
+              )}
+            >
               <PriceChart
                 candles={data.candles}
                 series={indicatorSeries.data?.series ?? null}
@@ -431,9 +489,9 @@ export function AnalysisWorkspace() {
           <Tabs items={tabs} active={activeTab} onChange={setTab} />
 
           {activeTab === 'signal' ? (
-            <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+            <div key={displayedInterval} className="grid animate-panel-in grid-cols-1 gap-3 xl:grid-cols-2">
               <SignalCard signal={data.strategy} />
-              <Card title="Latest Bar" subtitle={intervalLabel(interval)}>
+              <Card title="Latest Bar" subtitle={intervalLabel(displayedInterval)}>
                 <dl className="divide-y divide-terminal-borderSoft">
                   <KeyValue label="Open" value={formatNumber(data.latest.open, priceDigits(last))} />
                   <KeyValue label="High" value={formatNumber(data.latest.high, priceDigits(last))} />
@@ -469,7 +527,7 @@ export function AnalysisWorkspace() {
           {activeTab === 'candles' ? (
             <Card
               title="Recent Candles"
-              subtitle={`Last ${Math.min(30, data.candles.length)} Bars · ${intervalLabel(interval)}`}
+              subtitle={`Last ${Math.min(30, data.candles.length)} Bars · ${intervalLabel(displayedInterval)}`}
             >
               <CandleTable candles={data.candles} limit={30} />
             </Card>

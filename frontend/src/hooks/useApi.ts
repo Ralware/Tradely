@@ -8,6 +8,8 @@ export interface ApiState<T> {
 }
 
 export interface UseApiResult<T> extends ApiState<T> {
+  /** True while a request is in flight and previous data is still on screen. */
+  refreshing: boolean;
   reload: () => void;
 }
 
@@ -81,7 +83,11 @@ export function useApi<T>(
         if (!active || isAbort(error)) {
           return;
         }
-        setState({ data: null, loading: false, error: toMessage(error) });
+        setState((previous) => ({
+          data: keepPreviousData && sameDataKey ? previous.data : null,
+          loading: false,
+          error: toMessage(error),
+        }));
       });
 
     return () => {
@@ -95,5 +101,5 @@ export function useApi<T>(
     setReloadToken((token) => token + 1);
   }, []);
 
-  return { ...state, reload };
+  return { ...state, refreshing: state.loading && state.data !== null, reload };
 }
