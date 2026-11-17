@@ -1,5 +1,5 @@
 import type { BadgeTone } from '../components/common/Badge';
-import type { Quote, QuoteFreshness, WatchlistItem } from '../types/api';
+import type { Quote, WatchlistItem } from '../types/api';
 import type { QuoteRef } from '../services/quoteHub';
 import { titleCase } from './format';
 
@@ -40,19 +40,6 @@ export function quoteTone(quote: Quote | null | undefined): BadgeTone {
   }
   if (quote.quote_type === 'real_time' && quote.freshness === 'live') {
     return 'positive';
-  }
-  return 'neutral';
-}
-
-export function freshnessTone(freshness: QuoteFreshness | undefined): BadgeTone {
-  if (freshness === 'live') {
-    return 'positive';
-  }
-  if (freshness === 'stale') {
-    return 'warning';
-  }
-  if (freshness === 'unavailable') {
-    return 'neutral';
   }
   return 'neutral';
 }
@@ -125,12 +112,3 @@ export function quoteRefFromWatchlist(item: WatchlistItem): QuoteRef {
   };
 }
 
-export function quoteRefFor(
-  instrumentId: string,
-  symbol: string,
-  market: QuoteRef['market'],
-  exchange: string,
-  currency?: string,
-): QuoteRef {
-  return { instrument_id: instrumentId, symbol, market, exchange, currency };
-}

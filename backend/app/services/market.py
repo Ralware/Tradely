@@ -138,17 +138,11 @@ class MarketService:
     # ------------------------------------------------------------------
     # Quotes and metadata (bridge-backed)
     # ------------------------------------------------------------------
-    def quote(self, provider_symbol: str) -> dict[str, Any]:
-        return self.tradingview.bridge.quote(provider_symbol)
-
     def quotes(self, provider_symbols: list[str]) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
         return self.tradingview.quotes(provider_symbols)
 
     def symbol_info(self, provider_symbol: str) -> dict[str, Any]:
         return self.tradingview.symbol_info(provider_symbol)
-
-    def search(self, query: str, *, limit: int = 20) -> list[dict[str, Any]]:
-        return self.tradingview.search(query, limit=limit)
 
     def bridge_health(self) -> dict[str, Any]:
         return self.tradingview.bridge.health()

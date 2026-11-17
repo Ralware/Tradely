@@ -195,9 +195,7 @@ export function SelectedInstrumentProvider({ children }: { children: ReactNode }
       void instrumentService
         .resolve(query, controller.signal)
         .then((res) => {
-          if (!controller.signal.aborted || !controller.signal.aborted) {
-            if (requestId !== selectionRequestRef.current) return;
-          }
+          if (controller.signal.aborted || requestId !== selectionRequestRef.current) return;
           if (res.status === 'resolved' && res.instrument) {
             const canonicalId = res.instrument.instrument_id;
             if (rawInstrument !== canonicalId || hasLegacyParams) {
@@ -337,41 +335,6 @@ export function SelectedInstrumentProvider({ children }: { children: ReactNode }
   const currency = instrument?.currency ?? '';
   const enabled = Boolean(instrument || resolvedIdentity);
   const instrumentId = instrument?.instrument_id ?? resolvedIdentity?.instrumentId ?? '';
-
-  const autoSelectedRef = useRef<string | null>(null);
-  useEffect(() => {
-    const noRouteSelection = !rawInstrument && !rawSymbol && location.pathname === '/analysis';
-    if (!noRouteSelection) {
-      autoSelectedRef.current = null;
-      return;
-    }
-    const guardKey = location.pathname;
-    if (autoSelectedRef.current === guardKey) {
-      return;
-    }
-    autoSelectedRef.current = guardKey;
-    portfolioService
-      .getWatchlist()
-      .then((res) => {
-        if (!res.items || res.items.length === 0) return;
-        const first = res.items[0];
-        const targetId = first.instrument_id ?? instrumentIdFromLegacy(first.symbol, first.market, first.exchange);
-        setParams(
-          (current) => {
-            if (current.get('instrument') || current.get('symbol')) {
-              return current;
-            }
-            const next = new URLSearchParams(current);
-            next.delete('market');
-            next.delete('exchange');
-            next.set('instrument', targetId);
-            return next;
-          },
-          { replace: true },
-        );
-      })
-      .catch(() => undefined);
-  }, [location.pathname, rawInstrument, rawSymbol, setParams]);
 
   const timeframes = useMemo<TimeframeOption[]>(() => {
     if (capabilities?.supported_intervals?.length) {

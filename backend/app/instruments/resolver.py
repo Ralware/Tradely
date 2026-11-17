@@ -7,7 +7,6 @@ from typing import Any
 from app.core.config import Settings
 from app.core.instruments import (
     TRADINGVIEW_PROVIDER,
-    canonical_instrument,
     parse_instrument_id,
     split_crypto_pair,
 )
@@ -20,7 +19,6 @@ from app.instruments.catalogue_data import (
 )
 from app.instruments.models import InstrumentSearchResponse
 from app.instruments.normalization import normalize_query, title_case_meta, upper
-from app.instruments.provider_mapping import provider_key_for, verify_instrument_mapping
 from app.instruments.search import (
     RankedInstrument,
     candidate_payload,
@@ -404,18 +402,6 @@ class InstrumentResolver:
         )
         return payload
 
-    def capabilities(self, instrument_id: str) -> dict[str, Any] | None:
-        instrument = self.get(instrument_id)
-        if instrument is None:
-            parsed = parse_instrument_id(instrument_id)
-            if parsed is None:
-                return None
-            market, exchange, symbol = parsed
-            instrument = instrument_payload(
-                canonical_instrument(symbol, market, exchange=exchange).model_dump()
-            )
-        return capabilities_payload(instrument, self.settings)
-
     def market_target(
         self,
         *,
@@ -575,7 +561,3 @@ class InstrumentResolver:
             "trading_pair": f"{base}/{quote}",
             "reason": "No verified Binance Spot listing exists for this exact pair in TradingView.",
         }
-
-    def provider_for(self, instrument: dict[str, Any]) -> str:
-        verify_instrument_mapping(instrument)
-        return provider_key_for(instrument)

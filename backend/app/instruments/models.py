@@ -7,28 +7,6 @@ from pydantic import BaseModel, Field
 RecognitionStatus = Literal["resolved", "ambiguous", "not_found", "unsupported"]
 
 
-class InstrumentCandidate(BaseModel):
-    instrument_id: str
-    symbol: str
-    name: str
-    market: str
-    exchange: str
-    currency: str
-    asset_type: str
-    provider: str
-    provider_symbol: str
-    base_currency: str | None = None
-    quote_currency: str | None = None
-    trading_pair: str | None = None
-    status: str = "active"
-    score: float = 0
-    match_type: Literal[
-        "instrument_id", "symbol", "provider_symbol", "alias", "name",
-        "partial_symbol", "partial_name",
-    ] = "partial_name"
-    asset_label: str = "Equity"
-
-
 class TradingQuantityRules(BaseModel):
     quantity_step: float | None = None
     min_quantity: float | None = None

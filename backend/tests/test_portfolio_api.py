@@ -425,7 +425,7 @@ def test_currency_mismatch_is_rejected(api):
     assert "does not match instrument currency" in response.json()["detail"]
 
 
-def test_market_quotes_endpoint_and_watchlist_quotes(api):
+def test_market_quotes_endpoint(api):
     assert trade(api.client).status_code == 200
     response = api.client.get("/api/market/quotes", params={
         "instrument_id": ["india:NSE:RELIANCE", "india:NSE:RELIANCE"],
@@ -434,7 +434,3 @@ def test_market_quotes_endpoint_and_watchlist_quotes(api):
     quotes = response.json()["quotes"]
     assert len(quotes) == 1
     assert quotes[0]["price"] == 120
-
-    watchlist_quotes = api.client.get("/api/watchlist/quotes").json()["quotes"]
-    assert len(watchlist_quotes) == 1
-    assert watchlist_quotes[0]["instrument_id"] == "india:NSE:RELIANCE"

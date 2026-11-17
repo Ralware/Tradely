@@ -21,7 +21,6 @@ from app.core.models import (
     WatchlistItem,
 )
 from app.core.trading_rules import calculate_amount_transaction
-from app.instruments.catalogue import refresh_catalogue
 from app.instruments.resolver import (
     AmbiguousInstrumentError,
     InstrumentNotFoundError,
@@ -31,10 +30,8 @@ from app.instruments.resolver import (
 from app.providers.base import ProviderError
 from app.services.backtest import run_trend_breakout_backtest
 from app.services.indicators import compute_indicators
-from app.services.market import MarketService
 from app.services.portfolio import build_ledger, detail_view, position_view, summary_view
 from app.services.strategy import STRATEGY_VERSION, evaluate_trend_breakout, position_size
-from app.services.strategy_config import StrategyConfig
 from app.services.technicals import build_technical_summary
 
 router = APIRouter(prefix="/api")
@@ -146,7 +143,7 @@ def provider_status(request: Request) -> dict[str, Any]:
             "name": "TradingView (unofficial)",
             "configured": True,
             "available": available,
-            "purpose": "OHLCV, quotes, symbol metadata, technical ratings and market search",
+            "purpose": "OHLCV, quotes, symbol metadata, technical summaries and market search",
             "note": (
                 "Served by the local tradingview-bridge; anonymous access is delayed "
                 "on many exchanges (NSE typically 15 minutes) and deep intraday history may be limited."
@@ -495,16 +492,6 @@ def backtest_trend_breakout(request: Request, payload: BacktestRequest) -> dict[
     return result
 
 
-@router.get("/signals/history")
-def signal_history(request: Request, limit: int = Query(50, ge=1, le=500)) -> dict[str, Any]:
-    import json
-    with request.app.state.db.connect() as connection:
-        rows = connection.execute(
-            "SELECT * FROM signal_audit ORDER BY id DESC LIMIT ?", (limit,)
-        ).fetchall()
-    return {"signals": [json.loads(row["payload_json"]) for row in rows]}
-
-
 @router.post("/risk/position-size", response_model=RiskResult)
 def calculate_position_size(request: Request, payload: RiskRequest) -> RiskResult:
     settings = request.app.state.settings
@@ -585,87 +572,6 @@ def resolve_instrument(
     return payload
 
 
-@router.post("/instruments/catalogue/refresh")
-def refresh_instrument_catalogue(
-    request: Request,
-    q: str | None = Query(None, min_length=1),
-    limit: int = Query(50, ge=1, le=50),
-) -> dict[str, Any]:
-    """Best-effort import of supported listings from live TradingView search."""
-    report = refresh_catalogue(
-        request.app.state.db, request.app.state.settings, query=q, limit=limit
-    )
-    request.app.state.instrument_resolver.invalidate_cache()
-    report["catalogue_version"] = request.app.state.db.catalogue_version()
-    report["catalogue_source"] = request.app.state.db.catalogue_meta("source")
-    return report
-
-
-@router.get("/instruments/{instrument_id}/capabilities")
-def instrument_capabilities(request: Request, instrument_id: str) -> dict[str, Any]:
-    capabilities = request.app.state.instrument_resolver.capabilities(instrument_id)
-    if capabilities is None:
-        raise HTTPException(status_code=404, detail=f"Unknown instrument {instrument_id}")
-    return capabilities
-
-
-@router.get("/instruments/{instrument_id}/quote")
-def instrument_quote(
-    request: Request,
-    instrument_id: str,
-    force: bool = False,
-) -> dict[str, Any]:
-    instrument = request.app.state.instrument_resolver.get(instrument_id)
-    if instrument is None:
-        raise HTTPException(status_code=404, detail=f"Unknown instrument {instrument_id}")
-    capabilities = instrument.get("capabilities") or {}
-    if not capabilities.get("quote_available", True):
-        raise HTTPException(status_code=422, detail="Instrument Recognized — Market Data Unavailable")
-    quote = request.app.state.quote_service.quote_for(instrument, force=force)
-    return _quote_payload(instrument, quote)
-
-
-@router.get("/instruments/{instrument_id}/history")
-def instrument_history(
-    request: Request,
-    instrument_id: str,
-    interval: str | None = None,
-    days: int = Query(365, ge=1, le=3650),
-) -> dict[str, Any]:
-    instrument = request.app.state.instrument_resolver.get(instrument_id)
-    if instrument is None:
-        raise HTTPException(status_code=404, detail=f"Unknown instrument {instrument_id}")
-    capabilities = instrument.get("capabilities") or {}
-    selected = interval or ("1d" if "1d" in capabilities.get("supported_intervals", []) else None)
-    supported = capabilities.get("supported_intervals") or []
-    if not selected:
-        raise HTTPException(status_code=422, detail="No historical timeframe is available")
-    if supported and selected not in supported:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Unsupported Timeframe · {selected} is not available for {instrument['symbol']}",
-        )
-    try:
-        frame, source = request.app.state.market_service.candles(
-            instrument["symbol"], market=instrument["market"],
-            exchange=instrument["exchange"], interval=selected, days=days, provider="auto",
-        )
-    except (ProviderError, ValueError) as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return {
-        "instrument": instrument,
-        "symbol": instrument["symbol"],
-        "market": instrument["market"],
-        "exchange": instrument["exchange"],
-        "interval": selected,
-        "source": source,
-        "is_adjusted": bool(frame.attrs.get("is_adjusted", False)),
-        "is_stale": _is_stale(frame, instrument["market"], selected),
-        "count": len(frame),
-        "candles": _to_json_records(frame),
-    }
-
-
 @router.get("/instruments/{instrument_id}")
 def get_instrument(request: Request, instrument_id: str) -> dict[str, Any]:
     instrument = request.app.state.instrument_resolver.get(instrument_id)
@@ -701,17 +607,6 @@ def delete_watchlist_instrument(request: Request, instrument_id: str) -> dict[st
 def delete_watchlist(request: Request, market: str, symbol: str, exchange: str | None = None) -> dict[str, Any]:
     removed = request.app.state.db.remove_watchlist(_clean_symbol(symbol), market, exchange)
     return {"removed": removed}
-
-
-@router.get("/watchlist/quotes")
-def watchlist_quotes(request: Request, force: bool = False) -> dict[str, Any]:
-    items = request.app.state.db.get_watchlist()
-    quotes = request.app.state.quote_service.quotes_for(items, force=force)
-    return {
-        "quotes": [_quote_payload(item, quote) for item, quote in zip(items, quotes)],
-        "as_of": datetime.now(timezone.utc).isoformat(),
-        "accounting_method": "centralised-quote-service",
-    }
 
 
 # ----------------------------------------------------------------------

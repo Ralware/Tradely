@@ -20,6 +20,14 @@ def test_root_serves_react_production_build():
     assert 'id="root"' in response.text
 
 
+def test_client_side_routes_serve_the_spa_and_unknown_api_paths_stay_404():
+    for route in ("/analysis", "/portfolio", "/backtesting"):
+        response = client.get(route)
+        assert response.status_code == 200
+        assert 'id="root"' in response.text
+    assert client.get("/api/unknown-route").status_code == 404
+
+
 def test_risk_endpoint_returns_expected_sizing():
     response = client.post("/api/risk/position-size", json={
         "capital": 100000, "risk_fraction": 0.005, "entry": 1000, "stop": 980
@@ -61,6 +69,12 @@ def test_removed_endpoints_return_not_found():
     assert client.get("/api/instruments/AAPL/fundamentals?market=global").status_code == 404
     assert client.get("/api/instruments/AAPL/events?market=global").status_code == 404
     assert client.get("/api/us/issuers/0000320193/filings").status_code == 404
+    assert client.get("/api/signals/history").status_code == 404
+    assert client.get("/api/watchlist/quotes").status_code == 404
+    assert client.get("/api/instruments/india:NSE:RELIANCE/quote").status_code == 404
+    assert client.get("/api/instruments/india:NSE:RELIANCE/history").status_code == 404
+    assert client.get("/api/instruments/india:NSE:RELIANCE/capabilities").status_code == 404
+    assert client.post("/api/instruments/catalogue/refresh").status_code == 404
 
 
 def test_provider_status_reports_only_tradingview_and_bridge():
@@ -96,16 +110,6 @@ def test_news_accepts_an_instrument_id():
     body = response.json()
     assert body["instrument"]["instrument_id"] == "india:NSE:RELIANCE"
     assert body["count"] == 0
-
-
-def test_catalogue_refresh_without_query_explains_live_search():
-    response = client.post("/api/instruments/catalogue/refresh")
-    assert response.status_code == 200
-    body = response.json()
-    assert body["updated"] == 0
-    source = body["sources"]["TradingView market search"]
-    assert source["entries"] == 0
-    assert "q=" in source["note"]
 
 
 def test_indicator_series_is_additive_and_uses_backend_calculations(monkeypatch):

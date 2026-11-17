@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 from app.instruments.normalization import (
-    alias_variants,
     compact_symbol,
     exchange_priority,
     name_core,

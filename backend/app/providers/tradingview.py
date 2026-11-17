@@ -160,17 +160,6 @@ class TradingViewBridge:
             raise ProviderError("TradingView bridge returned no candle list")
         return rows
 
-    def quote(self, symbol: str) -> dict[str, Any]:
-        payload = self._request(
-            "/quote",
-            {"symbol": symbol},
-            timeout=self.settings.tradingview_quotes_timeout_seconds,
-        )
-        quote = payload.get("quote")
-        if not isinstance(quote, dict):
-            raise ProviderError(f"TradingView bridge returned no quote for {symbol}")
-        return quote
-
     def quotes(self, symbols: list[str]) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
         if not symbols:
             return {}, {}
@@ -211,17 +200,6 @@ class TradingViewBridge:
         if not isinstance(results, list):
             raise ProviderError("TradingView bridge returned no search results")
         return [item for item in results if isinstance(item, dict)]
-
-    def technical_analysis(self, symbol: str) -> dict[str, Any] | None:
-        payload = self._request(
-            "/technical-analysis",
-            {"symbol": symbol},
-            timeout=self.settings.tradingview_bridge_timeout_seconds,
-        )
-        analysis = payload.get("analysis")
-        if analysis is not None and not isinstance(analysis, dict):
-            raise ProviderError("TradingView bridge returned unexpected technical analysis")
-        return analysis
 
 
 def _drop_incomplete_final_bar(
@@ -354,11 +332,6 @@ class TradingViewProvider(MarketDataProvider):
         frame.attrs["provider_symbol"] = tv_symbol
         frame.attrs["candle_timeframe"] = timeframe
         return frame
-
-    def quote(self, symbol: str, *, exchange: str | None = None) -> dict[str, Any]:
-        if not exchange:
-            raise ProviderError("TradingView quotes require an exchange-qualified symbol")
-        return self.bridge.quote(f"{exchange.upper()}:{symbol.upper()}")
 
     def quotes(self, symbols: list[str]) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
         return self.bridge.quotes(symbols)

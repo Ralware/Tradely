@@ -10,10 +10,8 @@
  *   GET /health
  *   GET /candles?symbol=NSE:RELIANCE&timeframe=D&from=...&to=...
  *   GET /quotes?symbols=NSE:RELIANCE,BINANCE:BTCUSDT
- *   GET /quote?symbol=NSE:RELIANCE
  *   GET /symbol?symbol=NSE:RELIANCE
  *   GET /search?q=RELIANCE&limit=20
- *   GET /technical-analysis?symbol=NSE:RELIANCE
  *
  * No order execution, no account mutation, no news.
  */
@@ -28,7 +26,6 @@ import {
   getQuote,
   getQuotes,
   getSymbolInfo,
-  getTechnicalAnalysis,
   searchMarkets,
 } from "../TradingView-API/TradingView-API-main/dist/index.js";
 
@@ -414,14 +411,6 @@ async function search(query) {
   };
 }
 
-async function technicalAnalysis(symbol) {
-  const key = cacheKey("technical", symbol);
-  const result = await cached(key, 5 * 60 * 1000, () =>
-    withSlot(() => getTechnicalAnalysis(symbol)),
-  );
-  return { symbol, analysis: result, source: "TradingView (unofficial)" };
-}
-
 // --- HTTP plumbing ---------------------------------------------------------
 function errorMessage(error) {
   if (!error) return "unknown error";
@@ -469,23 +458,6 @@ async function route(request, response) {
       return candles(url.searchParams);
     case "/quotes":
       return quotes(parseSymbols(url.searchParams.get("symbols")));
-    case "/quote": {
-      const symbol = parseSymbol(url.searchParams.get("symbol"));
-      const result = await quotes([symbol]);
-      if (!result.quotes[symbol]) {
-        throw new BridgeError(
-          502,
-          "UPSTREAM_QUOTE_FAILED",
-          result.errors[symbol] || `no quote for ${symbol}`,
-        );
-      }
-      return {
-        symbol,
-        quote: result.quotes[symbol],
-        source: result.source,
-        fetched_at: result.fetched_at,
-      };
-    }
     case "/symbol": {
       const symbol = parseSymbol(url.searchParams.get("symbol"));
       return {
@@ -496,10 +468,6 @@ async function route(request, response) {
     }
     case "/search":
       return search(url.searchParams);
-    case "/technical-analysis": {
-      const symbol = parseSymbol(url.searchParams.get("symbol"));
-      return technicalAnalysis(symbol);
-    }
     default:
       throw new BridgeError(
         404,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 import math
 from typing import Literal
 
@@ -24,64 +24,6 @@ QuoteType = Literal[
     "real_time", "delayed", "last_available", "previous_close",
     "end_of_day", "historical", "cached", "stale", "unavailable",
 ]
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-class Candle(BaseModel):
-    timestamp: datetime
-    open: float
-    high: float
-    low: float
-    close: float
-    volume: float = 0
-    currency: str | None = None
-    source: str
-    is_adjusted: bool = False
-    is_final: bool = True
-
-    @field_validator("timestamp")
-    @classmethod
-    def require_timezone(cls, value: datetime) -> datetime:
-        if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
-
-    @field_validator("open", "high", "low", "close", "volume")
-    @classmethod
-    def finite_numbers(cls, value: float) -> float:
-        if value != value or value in (float("inf"), float("-inf")):
-            raise ValueError("OHLCV values must be finite")
-        return value
-
-
-class ProviderStatus(BaseModel):
-    name: str
-    configured: bool
-    available: bool | None = None
-    note: str
-    last_checked: datetime | None = None
-
-
-class NewsItem(BaseModel):
-    id: str
-    title: str
-    url: str
-    publisher: str | None = None
-    published_at: datetime | None = None
-    retrieved_at: datetime = Field(default_factory=utc_now)
-    summary: str | None = None
-    category: str = "general"
-    source: str
-    related_symbols: list[str] = Field(default_factory=list)
-    official: bool = False
-
-
-class IndicatorSnapshot(BaseModel):
-    timestamp: datetime
-    values: dict[str, float | None]
 
 
 class SignalCondition(BaseModel):

@@ -264,14 +264,3 @@ def compute_indicators(frame: pd.DataFrame, *, strategy_config=None) -> pd.DataF
     result["cci_20"] = cci(data, 20)
     result["stoch_rsi_14"] = stochastic_rsi(data["close"])
     return result
-
-
-def latest_values(frame: pd.DataFrame) -> dict[str, float | None]:
-    indicators = compute_indicators(frame)
-    row = indicators.iloc[-1]
-    result: dict[str, float | None] = {}
-    for column, value in row.items():
-        if column in REQUIRED_COLUMNS:
-            continue
-        result[column] = None if pd.isna(value) else float(value)
-    return result

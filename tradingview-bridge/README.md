@@ -26,10 +26,8 @@ FastAPI.
 | `GET /candles?symbol=NSE:RELIANCE&timeframe=D&count=365` | OHLCV bars, split-adjusted by default; `count` pages until that many bars or exhaustion |
 | `GET /candles?symbol=NSE:RELIANCE&timeframe=D&from=...&to=...` | OHLCV bars for an explicit Unix-seconds range |
 | `GET /quotes?symbols=NSE:RELIANCE,BINANCE:BTCUSDT` | Batched quotes with per-symbol fallback |
-| `GET /quote?symbol=NSE:RELIANCE` | One quote |
 | `GET /symbol?symbol=NSE:RELIANCE` | Symbol metadata (`pricescale`, `minmov`, session, currency) |
 | `GET /search?q=RELIANCE&limit=20` | Live market search |
-| `GET /technical-analysis?symbol=NSE:RELIANCE` | TradingView scanner ratings |
 
 ## Environment
 

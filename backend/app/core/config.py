@@ -6,7 +6,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     host: str = "127.0.0.1"
-    port: int = 8765
     database_path: str = "./data/tradely.sqlite3"
 
     # The unofficial TradingView API runs in a local Node.js bridge because the
@@ -27,7 +26,6 @@ class Settings(BaseSettings):
     quote_stream_interval_seconds: float = 5.0
 
     default_account_currency: str = "INR"
-    default_risk_fraction: float = 0.005
     max_risk_fraction: float = 0.02
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")

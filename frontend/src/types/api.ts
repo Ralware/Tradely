@@ -694,6 +694,3 @@ export interface TechnicalSummaryResponse {
   method: string;
 }
 
-export interface ApiErrorPayload {
-  detail?: string;
-}

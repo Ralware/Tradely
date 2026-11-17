@@ -7,7 +7,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import pandas as pd
 from pydantic import BaseModel
 
 from app.core.config import Settings

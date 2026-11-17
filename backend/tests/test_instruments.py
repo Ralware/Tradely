@@ -12,7 +12,6 @@ from app.core.database import Database
 from app.core.models import WatchlistItem
 from app.instruments.capabilities import capabilities_for
 from app.instruments.catalogue_data import CATALOGUE_VERSION
-from app.instruments.provider_mapping import provider_chain, verify_instrument_mapping
 from app.instruments.resolver import (
     NO_MATCH_MESSAGE,
     UNAVAILABLE_MESSAGE,
@@ -222,48 +221,13 @@ def test_catalogue_seed_is_versioned_and_repeatable(resolver):
 @pytest.mark.parametrize("query", ["RELIANCE", "AAPL", "BTCUSDT"])
 def test_provider_routing_is_derived_from_the_resolved_instrument(resolver, query):
     instrument = resolver.resolve(query)["instrument"]
-    assert provider_chain(instrument) == ["tradingview"]
     assert instrument["provider"] == "TradingView (unofficial)"
+    assert instrument["capabilities"]["provider_key"] == "tradingview"
     assert ":" in instrument["provider_symbol"]
 
 
-def test_provider_mapping_rejects_unverified_exchange():
-    mismatched = {
-        "instrument_id": "global:BSE:AAPL",
-        "symbol": "AAPL",
-        "market": "global",
-        "exchange": "BSE",
-        "asset_type": "equity",
-        "provider_symbol": "BSE:AAPL",
-    }
-    with pytest.raises(ValueError):
-        verify_instrument_mapping(mismatched)
-
-    wrong_asset = {
-        "instrument_id": "crypto:NASDAQ:BTCUSDT",
-        "symbol": "BTCUSDT",
-        "market": "crypto",
-        "exchange": "NASDAQ",
-        "asset_type": "crypto",
-        "provider_symbol": "NASDAQ:BTCUSDT",
-    }
-    with pytest.raises(ValueError):
-        verify_instrument_mapping(wrong_asset)
-
-    wrong_prefix = {
-        "instrument_id": "india:NSE:RELIANCE",
-        "symbol": "RELIANCE",
-        "market": "india",
-        "exchange": "NSE",
-        "asset_type": "equity",
-        "provider_symbol": "BSE:RELIANCE",
-    }
-    with pytest.raises(ValueError, match="EXCHANGE:SYMBOL"):
-        verify_instrument_mapping(wrong_prefix)
-
-
 def test_capabilities_reflect_the_single_tradingview_provider(resolver):
-    india = resolver.capabilities("india:NSE:RELIANCE")
+    india = resolver.get("india:NSE:RELIANCE")["capabilities"]
     assert india["provider_key"] == "tradingview"
     assert {"1d", "1h", "1m"} <= set(india["supported_intervals"])
     assert india["real_time_streaming"] is False
@@ -272,12 +236,12 @@ def test_capabilities_reflect_the_single_tradingview_provider(resolver):
     assert india["news"] is False
     assert any("15 minutes delayed" in item for item in india["data_limitations"])
 
-    global_caps = resolver.capabilities("global:NASDAQ:AAPL")
+    global_caps = resolver.get("global:NASDAQ:AAPL")["capabilities"]
     assert global_caps["provider_key"] == "tradingview"
     assert global_caps["adjusted_history"] is True
     assert global_caps["backtesting_eligible"] is True
 
-    crypto = resolver.capabilities("crypto:BINANCE:BTCUSDT")
+    crypto = resolver.get("crypto:BINANCE:BTCUSDT")["capabilities"]
     assert crypto["provider_key"] == "tradingview"
     assert crypto["real_time_streaming"] is False
     assert crypto["backtesting_eligible"] is True
@@ -288,7 +252,7 @@ def test_capabilities_reflect_the_single_tradingview_provider(resolver):
 
 def test_india_history_is_always_split_adjusted(tmp_path):
     resolver = make_resolver(tmp_path)
-    capabilities = resolver.capabilities("india:NSE:RELIANCE")
+    capabilities = resolver.get("india:NSE:RELIANCE")["capabilities"]
     assert capabilities["adjusted_history"] is True
     assert capabilities["backtesting_eligible"] is True
     assert capabilities["quote_freshness"] == "real_time_or_delayed"
@@ -302,7 +266,7 @@ def test_inactive_instrument_is_recognized_but_unavailable(resolver):
     assert result["status"] == "unsupported"
     assert result["message"] == UNAVAILABLE_MESSAGE
 
-    capabilities = resolver.capabilities("crypto:BINANCE:BTCUSDT")
+    capabilities = resolver.get("crypto:BINANCE:BTCUSDT")["capabilities"]
     assert capabilities["quote_available"] is False
     assert capabilities["historical_ohlcv"] is False
     assert any("delisted" in limitation for limitation in capabilities["data_limitations"])
@@ -388,17 +352,6 @@ def test_api_watchlist_accepts_instrument_id_only(instrument_api):
     assert removed.status_code == 200
     assert removed.json()["removed"] is True
     assert instrument_api.client.get("/api/watchlist").json()["items"] == []
-
-
-def test_api_capabilities_endpoint(instrument_api):
-    response = instrument_api.client.get(
-        "/api/instruments/crypto:BINANCE:BTCUSDT/capabilities"
-    )
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["provider_key"] == "tradingview"
-    assert payload["supported_intervals"]
-    assert payload["instrument_id"] == "crypto:BINANCE:BTCUSDT"
 
 
 # ----------------------------------------------------------------------

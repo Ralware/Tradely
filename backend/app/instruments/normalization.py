@@ -3,8 +3,6 @@ from __future__ import annotations
 import re
 import unicodedata
 
-from app.core.instruments import CRYPTO_QUOTE_ASSETS, split_crypto_pair
-
 # Normalisation is deliberately conservative. It removes formatting noise but
 # never rewrites a legitimate ticker (for example BRK.B or BAJAJ-AUTO).
 _ZERO_WIDTH = dict.fromkeys(map(ord, "\u200b\u200c\u200d\ufeff"), None)
@@ -56,27 +54,6 @@ def name_core(value: str) -> str:
     while words and words[-1] in _CORPORATE_SUFFIXES:
         words.pop()
     return " ".join(words)
-
-
-def alias_variants(value: str) -> set[str]:
-    text = normalize_query(value)
-    variants = {text, upper(text), compact_symbol(text)}
-    core = name_core(text)
-    if core:
-        variants.update({core, upper(core)})
-    return {variant for variant in variants if variant}
-
-
-def looks_like_crypto_pair(value: str) -> tuple[str, str] | None:
-    """Return ``(base, quote)`` for a compact crypto pair candidate."""
-    candidate = compact_symbol(value)
-    if len(candidate) < 5:
-        return None
-    return split_crypto_pair(candidate)
-
-
-def is_known_quote_asset(value: str) -> bool:
-    return upper(value) in CRYPTO_QUOTE_ASSETS
 
 
 def exchange_priority(exchange: str) -> int:

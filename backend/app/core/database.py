@@ -10,9 +10,7 @@ from app.core.instruments import (
     TRADINGVIEW_PROVIDER,
     canonical_instrument,
     instrument_id_for,
-    normalize_symbol,
     parse_instrument_id,
-    resolve_exchange,
 )
 from app.core.models import HoldingTransaction, Instrument, WatchlistItem
 
