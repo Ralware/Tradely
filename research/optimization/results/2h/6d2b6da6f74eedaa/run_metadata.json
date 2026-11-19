@@ -1,0 +1,269 @@
+{
+  "tester_version": "1.0.0",
+  "status": "paused_cap_reached",
+  "interrupted": false,
+  "cap_reached": true,
+  "search_id": "6d2b6da6f74eedaa",
+  "search_signature": {
+    "tester_version": "1.0.0",
+    "timeframe": "2h",
+    "parameter_ranges": {
+      "fast_ema": {
+        "min": 5,
+        "max": 40,
+        "step": 5
+      },
+      "medium_ema": {
+        "min": 20,
+        "max": 100,
+        "step": 10
+      },
+      "slow_ema": {
+        "min": 100,
+        "max": 365,
+        "step": 25
+      },
+      "adx_period": {
+        "min": 7,
+        "max": 28,
+        "step": 3
+      },
+      "adx_min": {
+        "min": 15,
+        "max": 30,
+        "step": 3
+      },
+      "atr_period": {
+        "min": 7,
+        "max": 28,
+        "step": 3
+      },
+      "htf_ema": {
+        "min": 20,
+        "max": 100,
+        "step": 10
+      },
+      "pullback_n": {
+        "min": 2,
+        "max": 10,
+        "step": 2
+      },
+      "pullback_depth_atr": {
+        "min": 0.0,
+        "max": 1.0,
+        "step": 0.1
+      },
+      "trigger_close_location": {
+        "min": 0.55,
+        "max": 0.8,
+        "step": 0.05
+      },
+      "stop_buffer_atr": {
+        "min": 0.1,
+        "max": 1.0,
+        "step": 0.1
+      },
+      "min_stop_atr": {
+        "min": 0.25,
+        "max": 1.0,
+        "step": 0.25
+      },
+      "max_stop_atr": {
+        "min": 1.5,
+        "max": 4.0,
+        "step": 0.5
+      },
+      "chandelier_atr": {
+        "min": 1.5,
+        "max": 5.0,
+        "step": 0.5
+      },
+      "time_stop": {
+        "min": 10,
+        "max": 60,
+        "step": 10
+      }
+    },
+    "target_r_values": [
+      2.0
+    ],
+    "min_trades": 10,
+    "engine_source_sha256": "11d52caaff72ddae3fa197db23f6816ee21e0e5fc489de6be42031e30a464f13",
+    "base_source_sha256": "230dfcd657ce8bdb3fd91fa3c8d1a8e88474caa1546d0b5055b3b21517659f5b",
+    "htf_source_sha256": "ba9178eeae660d030dbfa953e4a3a79151b632d51836df9560d282bd0104b71d",
+    "data_cutoff": "2026-10-25 00:00:00+00:00",
+    "data_cutoff_source": "explicit",
+    "data_cutoff_verified": true,
+    "cutoff_mode": "strict"
+  },
+  "timeframe": "2h",
+  "started_at_utc": "2026-11-19T15:51:42.338556+00:00",
+  "finished_at_utc": "2026-11-19T17:10:53.156983+00:00",
+  "resumed": true,
+  "resume_count": 1,
+  "max_combinations_this_invocation": 500,
+  "newly_evaluated": 500,
+  "skipped_completed": 17,
+  "duplicate_skipped": 0,
+  "checkpoint_total": 517,
+  "ok_count": 517,
+  "error_count": 0,
+  "insufficient_trade_count": 0,
+  "rankable_count": 517,
+  "min_trades": 10,
+  "rank_by": "total_gross_R",
+  "top_n": 100,
+  "cartesian_upper_bound": 11351516774400,
+  "candidate_generation": "deterministic Cartesian product; this prefix is biased toward the lowest values of each axis. Use broader coverage or multiple bounded runs before drawing conclusions.",
+  "accounting": {
+    "gross_only": true,
+    "cost_model": "EXCLUDED_BY_USER_REQUEST",
+    "funding_model": "EXCLUDED_BY_USER_REQUEST",
+    "short_mode": "hypothetical/signal-only for Spot inputs"
+  },
+  "engine": {
+    "engine_version": "V4.2",
+    "data_processing_version": "V4.2-bugfix2",
+    "source_path": "C:\\Users\\Ral\\OneDrive - PESUNIVERSITY\\Documents\\PlayGround\\Tradely\\research\\strategy_analyzer.py",
+    "source_sha256": "11d52caaff72ddae3fa197db23f6816ee21e0e5fc489de6be42031e30a464f13"
+  },
+  "data": {
+    "base_path": "C:\\Users\\Ral\\OneDrive - PESUNIVERSITY\\Documents\\PlayGround\\Tradely\\research\\data\\BTCUSDT\\BTCUSDT_2hours.csv",
+    "htf_path": "C:\\Users\\Ral\\OneDrive - PESUNIVERSITY\\Documents\\PlayGround\\Tradely\\research\\data\\BTCUSDT\\BTCUSDT_1day.csv",
+    "base_source_sha256": "230dfcd657ce8bdb3fd91fa3c8d1a8e88474caa1546d0b5055b3b21517659f5b",
+    "htf_source_sha256": "ba9178eeae660d030dbfa953e4a3a79151b632d51836df9560d282bd0104b71d",
+    "data_cutoff": "2026-10-25 00:00:00+00:00",
+    "data_cutoff_source": "explicit",
+    "data_cutoff_verified": true,
+    "cutoff_mode": "strict",
+    "excluded_incomplete_candles": 26
+  },
+  "parameter_ranges": {
+    "fast_ema": {
+      "min": 5,
+      "max": 40,
+      "step": 5
+    },
+    "medium_ema": {
+      "min": 20,
+      "max": 100,
+      "step": 10
+    },
+    "slow_ema": {
+      "min": 100,
+      "max": 365,
+      "step": 25
+    },
+    "adx_period": {
+      "min": 7,
+      "max": 28,
+      "step": 3
+    },
+    "adx_min": {
+      "min": 15,
+      "max": 30,
+      "step": 3
+    },
+    "atr_period": {
+      "min": 7,
+      "max": 28,
+      "step": 3
+    },
+    "htf_ema": {
+      "min": 20,
+      "max": 100,
+      "step": 10
+    },
+    "pullback_n": {
+      "min": 2,
+      "max": 10,
+      "step": 2
+    },
+    "pullback_depth_atr": {
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.1
+    },
+    "trigger_close_location": {
+      "min": 0.55,
+      "max": 0.8,
+      "step": 0.05
+    },
+    "stop_buffer_atr": {
+      "min": 0.1,
+      "max": 1.0,
+      "step": 0.1
+    },
+    "min_stop_atr": {
+      "min": 0.25,
+      "max": 1.0,
+      "step": 0.25
+    },
+    "max_stop_atr": {
+      "min": 1.5,
+      "max": 4.0,
+      "step": 0.5
+    },
+    "chandelier_atr": {
+      "min": 1.5,
+      "max": 5.0,
+      "step": 0.5
+    },
+    "time_stop": {
+      "min": 10,
+      "max": 60,
+      "step": 10
+    }
+  },
+  "target_r_values": [
+    2.0
+  ],
+  "outputs": {
+    "results_dir": "C:\\Users\\Ral\\OneDrive - PESUNIVERSITY\\Documents\\PlayGround\\Tradely\\research\\optimization\\results\\2h\\6d2b6da6f74eedaa",
+    "all_results_csv": "C:\\Users\\Ral\\OneDrive - PESUNIVERSITY\\Documents\\PlayGround\\Tradely\\research\\optimization\\results\\2h\\6d2b6da6f74eedaa\\all_results.csv",
+    "top_configs_csv": "C:\\Users\\Ral\\OneDrive - PESUNIVERSITY\\Documents\\PlayGround\\Tradely\\research\\optimization\\results\\2h\\6d2b6da6f74eedaa\\top_configs.csv",
+    "failed_combinations_csv": "C:\\Users\\Ral\\OneDrive - PESUNIVERSITY\\Documents\\PlayGround\\Tradely\\research\\optimization\\results\\2h\\6d2b6da6f74eedaa\\failed_combinations.csv",
+    "run_metadata_json": "C:\\Users\\Ral\\OneDrive - PESUNIVERSITY\\Documents\\PlayGround\\Tradely\\research\\optimization\\results\\2h\\6d2b6da6f74eedaa\\run_metadata.json",
+    "search_config_json": "C:\\Users\\Ral\\OneDrive - PESUNIVERSITY\\Documents\\PlayGround\\Tradely\\research\\optimization\\results\\2h\\6d2b6da6f74eedaa\\search_config.json",
+    "config_snapshot_json": "C:\\Users\\Ral\\OneDrive - PESUNIVERSITY\\Documents\\PlayGround\\Tradely\\research\\optimization\\configs\\2h\\6d2b6da6f74eedaa.json",
+    "checkpoint_jsonl": "C:\\Users\\Ral\\OneDrive - PESUNIVERSITY\\Documents\\PlayGround\\Tradely\\research\\optimization\\checkpoints\\2h\\6d2b6da6f74eedaa.jsonl",
+    "log_file": "C:\\Users\\Ral\\OneDrive - PESUNIVERSITY\\Documents\\PlayGround\\Tradely\\research\\optimization\\logs\\2h\\6d2b6da6f74eedaa.log"
+  },
+  "best_rankable": [
+    {
+      "config_id": "9d873ea243e4a17c",
+      "trades": 1184,
+      "total_gross_R": 90.44527397327793,
+      "compounded_equity_return_pct": 52.36844539928482,
+      "max_drawdown_pct": -19.82205777400572
+    },
+    {
+      "config_id": "5afa78146dbb99ff",
+      "trades": 1176,
+      "total_gross_R": 87.47130578448447,
+      "compounded_equity_return_pct": 49.917682239092656,
+      "max_drawdown_pct": -21.243961338047058
+    },
+    {
+      "config_id": "9e211af151e8fbb5",
+      "trades": 1173,
+      "total_gross_R": 87.47130578448446,
+      "compounded_equity_return_pct": 49.78323880833355,
+      "max_drawdown_pct": -21.01271675098767
+    },
+    {
+      "config_id": "ac5293280efdc071",
+      "trades": 1183,
+      "total_gross_R": 87.09340687006176,
+      "compounded_equity_return_pct": 49.817847360112964,
+      "max_drawdown_pct": -19.661106091639535
+    },
+    {
+      "config_id": "7a5bd9e3058d2119",
+      "trades": 1167,
+      "total_gross_R": 86.16546995239756,
+      "compounded_equity_return_pct": 48.57528572828444,
+      "max_drawdown_pct": -21.597590365050344
+    }
+  ]
+}
