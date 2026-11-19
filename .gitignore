@@ -1,14 +1,9 @@
-research/data/BTCUSDT/BTCUSDT_1minute.csv
-research/data/BTCUSDT/BTCUSDT_3minutes.csv
-research/data.zip
 research/data/
-.venv/
-venv/
-env/
 __pycache__/
 *.py[cod]
 .pytest_cache/
-.ruff_cache/
 .mypy_cache/
-.coverage
+.ruff_cache/
+.coverage*
 htmlcov/
+research/benchmarks/run_*/

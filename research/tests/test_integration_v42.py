@@ -295,7 +295,6 @@ class OutputIntegrationTests(unittest.TestCase):
                 "2024-01-01", periods=10, freq="1D", tz="UTC"
             )), htf)
             base_frame = engine.read_ohlcv(base)
-            htf_frame = engine.read_ohlcv(htf)
             signals = pd.DataFrame({
                 "signal": "WAIT",
                 "wait_reason": "NO_DATA",

@@ -16,7 +16,7 @@ Key guarantees
   unverified, exactly as the analyzer reports them.
 * Deterministic candidate generation, deterministic configuration IDs and a
   deterministic search signature.
-* Resumable, append-only checkpoints.
+* Resumable, atomic per-configuration checkpoints.
 * Results, checkpoints, logs, configuration snapshots and metadata are stored
   per timeframe under ``research/optimization/``.
 
@@ -49,15 +49,19 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import heapq
 import itertools
 import json
+import logging
 import math
 import os
-import tempfile
-import traceback
-from datetime import datetime, timezone
+import platform
+import sys
+import time
+from collections.abc import Callable, Iterable, Mapping
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping, Optional
+from typing import Any
 
 # =============================================================================
 # USER CONFIGURATION - EDIT SEARCH RANGES HERE
@@ -172,6 +176,7 @@ RESULT_FIELDS = [
     "engine_version", "data_processing_version",
     "cost_model", "funding_model", "market_mode",
     "run_id", "configuration_json", "error_type", "error", "timestamp",
+    "worker_pid", "elapsed_seconds", "started_monotonic", "finished_monotonic",
 ]
 FAILED_FIELDS = [
     "config_id", "timeframe", "status", "configuration_json",
@@ -182,9 +187,12 @@ RANK_METRICS = {
     "compounded_equity_return_pct",
     "average_gross_R",
     "profit_factor_gross_R",
+    "max_drawdown_pct",
+    "win_rate_pct",
 }
 
-TESTER_VERSION = "1.0.0"
+TESTER_VERSION = "2.0.0"
+DEFAULT_WORKERS = 4
 DEFAULT_RANK_BY = "total_gross_R"
 
 
@@ -197,14 +205,17 @@ PROJECT_ROOT = RESEARCH_DIR.parent
 OUTPUT_ROOT = RESEARCH_DIR / "optimization"
 
 try:  # keeps the import error actionable when prerequisites are missing
+    import optimization_runtime as runtime
     import strategy_analyzer as engine
-except Exception as exc:  # pragma: no cover - exercised only on broken installs
+except ImportError as exc:  # pragma: no cover - exercised only on broken installs
     raise SystemExit(
         "Could not import strategy_analyzer.py. Place this file in the same "
         "research/ directory as strategy_analyzer.py and install "
         "requirements.txt.\n"
         f"Import error: {exc}"
     )
+
+
 
 
 class TesterError(RuntimeError):
@@ -216,7 +227,7 @@ class TesterError(RuntimeError):
 # =============================================================================
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _canonical_json(payload: Any) -> str:
@@ -228,13 +239,7 @@ def _json_safe(value: Any) -> Any:
 
 
 def write_json(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(_json_safe(payload), indent=2, allow_nan=False),
-        encoding="utf-8",
-    )
-    os.replace(temporary, path)
+    runtime.atomic_json(path, payload)
 
 
 def read_json(path: Path) -> Any:
@@ -262,13 +267,26 @@ def write_csv(path: Path, rows: Iterable[Mapping[str, Any]],
 
 
 def log_message(log_path: Path, message: str, echo: bool = True,
-                progress: Optional[Callable[[str], None]] = None) -> None:
-    line = f"{utc_now()} {message}"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("a", encoding="utf-8") as handle:
-        handle.write(line + "\n")
-    if echo:
-        print(message)
+                progress: Callable[[str], None] | None = None,
+                level: int = logging.INFO) -> None:
+    logger = logging.getLogger(f"v42.{log_path}")
+    logger.setLevel(logging.DEBUG)
+    logger.propagate = False
+    handler = logging.FileHandler(log_path, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logger.addHandler(handler)
+    console = logging.StreamHandler(sys.stdout) if echo else None
+    if console is not None:
+        console.setFormatter(logging.Formatter("%(message)s"))
+        logger.addHandler(console)
+    try:
+        logger.log(level, message)
+    finally:
+        logger.removeHandler(handler)
+        handler.close()
+        if console is not None:
+            logger.removeHandler(console)
+            console.close()
     if progress is not None:
         progress(message)
 
@@ -278,7 +296,7 @@ def log_message(log_path: Path, message: str, echo: bool = True,
 # =============================================================================
 
 def range_values(name: str, spec: Mapping[str, Any],
-                 timeframe: Optional[str] = None) -> list[Any]:
+                 timeframe: str | None = None) -> list[Any]:
     """Return inclusive values for one range, enforcing approved bounds.
 
     The endpoint is included even when ``step`` does not divide the interval.
@@ -287,6 +305,10 @@ def range_values(name: str, spec: Mapping[str, Any],
     lo = float(spec["min"])
     hi = float(spec["max"])
     step = float(spec["step"])
+    if not all(math.isfinite(value) for value in (lo, hi, step)):
+        raise ValueError(f"{name}: min, max and step must be finite")
+    if name in INTEGER_PARAMETERS and any(value != int(value) for value in (lo, hi, step)):
+        raise ValueError(f"{name}: integer parameters require integer bounds and step")
     if step <= 0:
         raise ValueError(f"{name}: step must be positive, got {spec['step']!r}")
     if hi < lo:
@@ -301,6 +323,8 @@ def range_values(name: str, spec: Mapping[str, Any],
 
     raw: list[float] = []
     count = int(math.floor((hi - lo) / step + 1e-9))
+    if count > 1_000_000:
+        raise ValueError(f"{name}: more than one million axis values; increase step")
     for index in range(count + 1):
         raw.append(lo + index * step)
     if not raw or raw[-1] < hi - 1e-9:
@@ -350,13 +374,13 @@ def validate_parameter_ranges(ranges: Mapping[str, Mapping[str, Any]]) -> None:
 
 
 def build_axes(timeframe: str,
-               parameter_ranges: Optional[Mapping[str, Mapping[str, Any]]] = None
+               parameter_ranges: Mapping[str, Mapping[str, Any]] | None = None
                ) -> tuple[list[str], list[list[Any]]]:
     if timeframe not in engine.BASELINE_CONFIGS:
         raise ValueError("Timeframe must be 2h, 4h or 1d")
     ranges = parameter_ranges if parameter_ranges is not None else PARAMETER_RANGES
     validate_parameter_ranges(ranges)
-    names = list(ranges)
+    names = list(ANALYZER_PARAMETER_MAP)
     axes = [range_values(name, ranges[name], timeframe) for name in names]
     return names, axes
 
@@ -443,6 +467,11 @@ def validate_candidate(timeframe: str, config: Mapping[str, Any]) -> None:
         raise ValueError(
             f"V4.2 target is fixed at {FIXED_TARGET_R}R (got {target_r})"
         )
+    if not math.isclose(trigger_short, 1.0 - trigger_long, abs_tol=1e-10):
+        raise ValueError("Short trigger must complement long trigger")
+    for name in INTEGER_PARAMETERS:
+        if float(config[name]) != int(config[name]):
+            raise ValueError(f"{name} must be an integer")
     if int(config["time_stop"]) < 1:
         raise ValueError("time_stop must be at least 1 candle")
     if int(config["pullback_n"]) < 1:
@@ -467,8 +496,8 @@ def validate_candidate(timeframe: str, config: Mapping[str, Any]) -> None:
 
 def iter_candidates(
     timeframe: str,
-    parameter_ranges: Optional[Mapping[str, Mapping[str, Any]]] = None,
-    target_r_values: Optional[Iterable[float]] = None,
+    parameter_ranges: Mapping[str, Mapping[str, Any]] | None = None,
+    target_r_values: Iterable[float] | None = None,
 ) -> Iterable[dict[str, Any]]:
     """Yield valid analyzer configurations in deterministic Cartesian order.
 
@@ -476,21 +505,44 @@ def iter_candidates(
     analyzer is never called with a configuration it would reject.
     """
     names, axes = build_axes(timeframe, parameter_ranges)
-    targets = list(target_r_values if target_r_values is not None else TARGET_R_VALUES)
-    for target in targets:
-        if not math.isclose(float(target), FIXED_TARGET_R):
-            raise ValueError(
-                f"V4.2 target is fixed at {FIXED_TARGET_R}R (got {target})"
-            )
-    for values in itertools.product(*axes, targets):
-        raw = dict(zip(names, values[:-1]))
-        raw["target_r"] = values[-1]
-        config = to_analyzer_config(raw)
-        try:
+    targets = list(dict.fromkeys(float(value) for value in (
+        target_r_values if target_r_values is not None else TARGET_R_VALUES
+    )))
+    if targets != [FIXED_TARGET_R]:
+        raise ValueError("V4.2 requires the single fixed target 2R")
+
+    def walk(index: int, raw: dict[str, Any]):
+        if index == len(names):
+            config = to_analyzer_config(raw)
             validate_candidate(timeframe, config)
-        except ValueError:
-            continue
-        yield config
+            yield config
+            return
+        name = names[index]
+        for value in axes[index]:
+            raw[name] = value
+            # Prune before visiting the enormous suffix of an invalid EMA tuple.
+            if name == "medium_ema" and raw["fast_ema"] >= value:
+                continue
+            if name == "slow_ema" and raw["medium_ema"] >= value:
+                continue
+            if name == "max_stop_atr" and raw["min_stop_atr"] >= value:
+                continue
+            yield from walk(index + 1, raw)
+
+    yield from walk(0, {"target_r": FIXED_TARGET_R})
+
+
+def valid_combination_count(timeframe: str, parameter_ranges=None) -> int:
+    names, axes = build_axes(timeframe, parameter_ranges)
+    by_name = dict(zip(names, axes))
+    emas = sum(f < m < slow for f, m, slow in itertools.product(
+        by_name["fast_ema"], by_name["medium_ema"], by_name["slow_ema"],
+    ))
+    stops = sum(lo < hi for lo, hi in itertools.product(
+        by_name["min_stop_atr"], by_name["max_stop_atr"],
+    ))
+    dependent = {"fast_ema", "medium_ema", "slow_ema", "min_stop_atr", "max_stop_atr"}
+    return emas * stops * math.prod(len(by_name[name]) for name in names if name not in dependent)
 
 
 def config_id(timeframe: str, config: Mapping[str, Any]) -> str:
@@ -508,9 +560,21 @@ def search_signature(
     base_source_sha256: str,
     htf_source_sha256: str,
     cutoff_policy: Mapping[str, Any],
+    rank_by: str = DEFAULT_RANK_BY,
+    max_drawdown: float | None = None,
+    min_average_r: float | None = None,
 ) -> dict[str, Any]:
     return {
         "tester_version": TESTER_VERSION,
+        "optimizer_hashes": {path.name: engine.sha256_file(path) for path in (
+            Path(__file__).resolve(), Path(runtime.__file__).resolve(),
+        )},
+        "environment": {"python": platform.python_version(),
+                        "numpy": engine.np.__version__, "pandas": engine.pd.__version__},
+        "methodology": "exhaustive",
+        "ranking": {"rank_by": rank_by, "max_drawdown": max_drawdown,
+                    "min_average_r": min_average_r, "min_trades": min_trades},
+        "axis_order": list(ANALYZER_PARAMETER_MAP),
         "timeframe": timeframe,
         "parameter_ranges": _json_safe(dict(parameter_ranges)),
         "target_r_values": [float(value) for value in target_r_values],
@@ -558,12 +622,22 @@ def load_checkpoint(path: Path) -> dict[str, dict[str, Any]]:
 
 
 def append_checkpoint(path: Path, rows: Iterable[Mapping[str, Any]]) -> None:
+    # Backward-compatible JSONL helper. Runtime commits individual records;
+    # callers of this older API still receive atomic replacement semantics.
+    existing = load_checkpoint(path)
+    for row in rows:
+        existing[str(row["config_id"])] = dict(row)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        for row in rows:
-            handle.write(_canonical_json(_json_safe(dict(row))) + "\n")
-        handle.flush()
-        os.fsync(handle.fileno())
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    try:
+        with temporary.open("w", encoding="utf-8") as handle:
+            for row in existing.values():
+                handle.write(_canonical_json(_json_safe(row)) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 # =============================================================================
@@ -579,7 +653,7 @@ def _numeric(value: Any) -> Any:
     return None
 
 
-def _as_float(value: Any) -> Optional[float]:
+def _as_float(value: Any) -> float | None:
     if value is None or value == "":
         return None
     try:
@@ -587,20 +661,6 @@ def _as_float(value: Any) -> Optional[float]:
     except (TypeError, ValueError):
         return None
     return number if math.isfinite(number) else None
-
-
-def _gross_model_error(report: Mapping[str, Any]) -> Optional[str]:
-    checks = (
-        ("cost_model", engine.COST_MODEL),
-        ("funding_model", engine.FUNDING_MODEL),
-    )
-    for key, expected in checks:
-        if key in report and report[key] != expected:
-            return (
-                f"{key}={report[key]!r} does not match the gross-only "
-                f"constant {expected!r}"
-            )
-    return None
 
 
 def make_row(
@@ -612,12 +672,12 @@ def make_row(
     run_id: str,
     min_trades: int,
     status: str,
-    report: Optional[Mapping[str, Any]] = None,
+    report: Mapping[str, Any] | None = None,
     error_type: str = "",
     error: str = "",
     tb: str = "",
     fallback_cutoff: str = "",
-    fallback_verified: Optional[bool] = None,
+    fallback_verified: bool | None = None,
     fallback_mode: str = "",
 ) -> dict[str, Any]:
     metrics = dict(report.get("metrics", {})) if report else {}
@@ -713,18 +773,13 @@ def ranked_rows(rows: Iterable[Mapping[str, Any]], rank_by: str,
         and int(row.get("trades") or 0) >= min_trades
     ]
 
-    def key(row: Mapping[str, Any]) -> tuple[Any, ...]:
-        total = _as_float(row.get("total_gross_R")) or float("-inf")
-        drawdown = _as_float(row.get("max_drawdown_pct"))
-        drawdown = drawdown if drawdown is not None else float("-inf")
-        return (
-            _rank_value(row, rank_by),
-            total,
-            drawdown,
-            str(row.get("config_id", "")),
-        )
+    return sorted(rankable, key=lambda row: ranking_key(row, rank_by), reverse=True)
 
-    return sorted(rankable, key=key, reverse=True)
+
+def ranking_key(row: Mapping[str, Any], rank_by: str) -> tuple[Any, ...]:
+    total, drawdown = _as_float(row.get("total_gross_R")), _as_float(row.get("max_drawdown_pct"))
+    return (_rank_value(row, rank_by), total if total is not None else -math.inf,
+            drawdown if drawdown is not None else -math.inf, str(row.get("config_id", "")))
 
 
 # =============================================================================
@@ -746,9 +801,10 @@ def _preflight(timeframe: str, base_path: Path, htf_path: Path,
     if not htf_path.is_file():
         raise TesterError(f"HTF data file not found: {htf_path}")
 
-    base = engine.read_ohlcv(base_path)
-    policy = engine.resolve_data_cutoff(base, timeframe, data_cutoff, cutoff_mode)
-    return policy, engine.sha256_file(base_path), engine.sha256_file(htf_path)
+    prepared = engine.prepare_analysis_data(
+        timeframe, base_path, htf_path, data_cutoff, cutoff_mode, reject_suspicious=True,
+    )
+    return prepared.policy, prepared.base_hash, prepared.htf_hash
 
 
 def _existing_search_error(results_dir: Path, checkpoint_path: Path) -> None:
@@ -762,379 +818,301 @@ def _existing_search_error(results_dir: Path, checkpoint_path: Path) -> None:
 
 
 def run_search(
-    *,
-    timeframe: str,
-    output_root: Path | str = OUTPUT_ROOT,
-    base_path: Path | str | None = None,
-    htf_path: Path | str | None = None,
-    data_cutoff: Any = None,
-    cutoff_mode: str = engine.DEFAULT_CUTOFF_MODE,
-    max_combinations: int = DEFAULT_MAX_COMBINATIONS,
-    min_trades: int = MIN_TRADES_FOR_RANKING,
-    resume: bool = False,
-    retry_failed: bool = False,
-    rank_by: str = DEFAULT_RANK_BY,
-    parameter_ranges: Optional[Mapping[str, Mapping[str, Any]]] = None,
-    target_r_values: Optional[Iterable[float]] = None,
-    top_n: int = TOP_N_CONFIGS,
-    progress_every: int = PROGRESS_EVERY,
-    echo: bool = True,
-    progress: Optional[Callable[[str], None]] = None,
+    *, timeframe: str, output_root: Path | str = OUTPUT_ROOT,
+    base_path: Path | str | None = None, htf_path: Path | str | None = None,
+    data_cutoff: Any = None, cutoff_mode: str = engine.DEFAULT_CUTOFF_MODE,
+    max_combinations: int | None = DEFAULT_MAX_COMBINATIONS,
+    min_trades: int = MIN_TRADES_FOR_RANKING, resume: bool = False,
+    retry_failed: bool = False, rank_by: str = DEFAULT_RANK_BY,
+    parameter_ranges: Mapping[str, Mapping[str, Any]] | None = None,
+    target_r_values: Iterable[float] | None = None, top_n: int = TOP_N_CONFIGS,
+    progress_every: int = PROGRESS_EVERY, echo: bool = True,
+    progress: Callable[[str], None] | None = None,
+    workers: int = DEFAULT_WORKERS, resume_run: str | None = None,
+    checkpoint_every: int = 10, max_drawdown: float | None = None,
+    min_average_r: float | None = None, audit_ids: Iterable[str] = (),
+    log_level: str = "INFO",
 ) -> dict[str, Any]:
-    """Run or resume one bounded search for one timeframe.
+    """Evaluate a bounded deterministic prefix; None explicitly requests all.
 
-    ``max_combinations`` limits *newly evaluated valid combinations in this
-    invocation*. Completed checkpoint entries are skipped and do not count
-    toward the cap.
+    Workers own immutable snapshots; the parent exclusively commits results.
+    Returned rows are a disk-backed Mapping, not an in-memory result archive.
     """
-    if max_combinations < 1:
+    if workers < 1 or workers > 61:
+        raise ValueError("workers must be between 1 and 61 (Windows-compatible limit)")
+    if max_combinations is not None and max_combinations < 1:
         raise ValueError("max_combinations must be at least 1")
-    if min_trades < 0:
-        raise ValueError("min_trades must be non-negative")
+    if min_trades < 0 or top_n < 0 or checkpoint_every < 1:
+        raise ValueError("min_trades/top_n must be non-negative; checkpoint_every positive")
     if rank_by not in RANK_METRICS:
         raise ValueError(f"rank_by must be one of {sorted(RANK_METRICS)}")
-    if top_n < 0:
-        raise ValueError("top_n must be non-negative")
-
-    ranges = (dict(parameter_ranges) if parameter_ranges is not None
-              else {name: dict(spec) for name, spec in PARAMETER_RANGES.items()})
-    targets = [float(value) for value in
-               (target_r_values if target_r_values is not None else TARGET_R_VALUES)]
-    validate_parameter_ranges(ranges)
-    if any(not math.isclose(value, FIXED_TARGET_R) for value in targets):
-        raise ValueError(f"V4.2 target is fixed at {FIXED_TARGET_R}R")
-
-    _, axes = build_axes(timeframe, ranges)
+    if log_level not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
+        raise ValueError("Invalid log level")
+    for name, value in (("max_drawdown", max_drawdown), ("min_average_r", min_average_r)):
+        if value is not None and not math.isfinite(value):
+            raise ValueError(f"{name} must be finite")
+    if max_drawdown is not None and max_drawdown < 0:
+        raise ValueError("max_drawdown is an absolute non-negative percentage")
+    if retry_failed and not (resume or resume_run):
+        raise ValueError("retry_failed requires resume")
+    ranges = {name: dict(spec) for name, spec in (
+        parameter_ranges if parameter_ranges is not None else PARAMETER_RANGES
+    ).items()}
+    names, axes = build_axes(timeframe, ranges)
+    targets = list(dict.fromkeys(float(value) for value in (
+        target_r_values if target_r_values is not None else TARGET_R_VALUES
+    )))
+    if targets != [FIXED_TARGET_R]:
+        raise ValueError("V4.2 requires the single fixed target 2R")
     upper_bound = cartesian_upper_bound(axes, targets)
-
-    base = (Path(base_path) if base_path is not None
-            else engine.BASE_DATA_FILES[timeframe])
-    htf = (Path(htf_path) if htf_path is not None
-           else engine.HTF_DATA_FILES[timeframe])
-    base = base.expanduser().resolve()
-    htf = htf.expanduser().resolve()
-
-    policy, base_hash, htf_hash = _preflight(
-        timeframe, base, htf, data_cutoff, cutoff_mode
-    )
+    valid_count = valid_combination_count(timeframe, ranges)
+    base = Path(base_path or engine.BASE_DATA_FILES[timeframe]).expanduser().resolve()
+    htf = Path(htf_path or engine.HTF_DATA_FILES[timeframe]).expanduser().resolve()
+    started_clock = time.perf_counter()
+    policy, base_hash, htf_hash = _preflight(timeframe, base, htf, data_cutoff, cutoff_mode)
+    preflight_seconds = time.perf_counter() - started_clock
     engine_hash = engine.engine_source_hash()
-
     signature = search_signature(
-        timeframe=timeframe,
-        parameter_ranges=ranges,
-        target_r_values=targets,
-        min_trades=min_trades,
-        engine_source_sha256=engine_hash,
-        base_source_sha256=base_hash,
-        htf_source_sha256=htf_hash,
-        cutoff_policy=policy,
+        timeframe=timeframe, parameter_ranges=ranges, target_r_values=targets,
+        min_trades=min_trades, engine_source_sha256=engine_hash,
+        base_source_sha256=base_hash, htf_source_sha256=htf_hash, cutoff_policy=policy,
+        rank_by=rank_by, max_drawdown=max_drawdown, min_average_r=min_average_r,
     )
     sid = search_id_from_signature(signature)
-
+    if resume_run:
+        if len(resume_run) != 16 or any(c not in "0123456789abcdef" for c in resume_run):
+            raise ValueError("resume_run must be a 16-character search ID")
+        sid, resume = resume_run, True
     root = Path(output_root).expanduser().resolve()
     results_dir = root / "results" / timeframe / sid
-    configs_dir = root / "configs" / timeframe
-    checkpoints_dir = root / "checkpoints" / timeframe
-    logs_dir = root / "logs" / timeframe
-    checkpoint_path = checkpoints_dir / f"{sid}.jsonl"
-    log_path = logs_dir / f"{sid}.log"
-    config_path = configs_dir / f"{sid}.json"
     manifest_path = results_dir / "run_metadata.json"
+    checkpoint_path = root / "checkpoints" / timeframe / f"{sid}.jsonl"
+    state_path = results_dir / "checkpoint.json"
+    config_path = root / "configs" / timeframe / f"{sid}.json"
+    log_path = root / "logs" / timeframe / f"{sid}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if resume:
-        if not manifest_path.exists():
-            raise TesterError(
-                f"Cannot resume: no run metadata found at {manifest_path}."
-            )
-        previous = read_json(manifest_path)
-        previous_signature = previous.get("search_signature")
-        if previous_signature != _json_safe(signature):
-            raise TesterError(
-                "Cannot resume: the search signature changed. Existing results "
-                "would be mixed with a different engine, dataset, cutoff, "
-                "ranges or minimum-trade threshold. Start a new search instead."
-            )
-        rows = load_checkpoint(checkpoint_path)
-        if retry_failed:
-            # Keep the old error rows visible in outputs until a retry replaces
-            # them, but do not count them as completed.
-            completed = {
-                key for key, row in rows.items()
-                if row.get("status") == "ok"
-            }
+    with runtime.writer_lock(results_dir / ".writer.lock"):
+        previous = {}
+        if resume:
+            if not manifest_path.exists():
+                raise TesterError("Cannot resume: no matching metadata; timeframe, engine, data, "
+                                  "cutoff, ranges or ranking may differ. Use --resume-run ID to "
+                                  "compare against a specific original run.")
+            previous = read_json(manifest_path)
+            old_signature = previous.get("search_signature", {})
+            differences = [key for key in set(old_signature) | set(signature)
+                           if old_signature.get(key) != _json_safe(signature.get(key))]
+            if differences:
+                raise TesterError("Cannot resume: incompatible " + ", ".join(sorted(differences)))
         else:
-            completed = set(rows)
-        started_at = previous.get("started_at_utc", utc_now())
-        resume_count = int(previous.get("resume_count", 0)) + 1
-    else:
-        _existing_search_error(results_dir, checkpoint_path)
-        rows = {}
-        completed = set()
-        started_at = utc_now()
-        resume_count = 0
+            _existing_search_error(results_dir, checkpoint_path)
+        log_path.touch(exist_ok=True)
+        rows = runtime.ResultStore(results_dir / "records")
+        for cid, row in rows.items():
+            if row.get("search_id") != sid or config_id(timeframe, json.loads(row["configuration_json"])) != cid:
+                raise TesterError(f"Checkpoint identity mismatch for {cid}")
+        if resume and previous.get("checkpoint_total", 0) > len(rows):
+            raise TesterError("Checkpoint records are missing; refusing an incomplete recovery")
+        snapshot = {
+            "tester_version": TESTER_VERSION, "search_id": sid,
+            "search_signature": signature, "parameter_ranges": ranges,
+            "target_r_values": targets, "analyzer_parameter_map": ANALYZER_PARAMETER_MAP,
+            "approved_bounds": APPROVED_BOUNDS, "slow_ema_1d_cap": SLOW_EMA_1D_CAP,
+            "cartesian_upper_bound": upper_bound, "valid_combinations": valid_count,
+            "order": names, "methodology": "exhaustive", "ranking": signature["ranking"],
+        }
+        if not resume:
+            write_json(config_path, snapshot)
+            write_json(results_dir / "search_config.json", snapshot)
+        metadata = {
+            "tester_version": TESTER_VERSION, "status": "running", "search_id": sid,
+            "search_signature": signature, "timeframe": timeframe,
+            "started_at_utc": previous.get("started_at_utc", utc_now()),
+            "resumed": resume, "resume_count": int(previous.get("resume_count", -1)) + 1,
+            "max_combinations_this_invocation": max_combinations,
+            "checkpoint_total": len(rows), "cartesian_upper_bound": upper_bound,
+            "valid_combinations": valid_count, "workers": workers,
+            "start_method": "spawn" if workers > 1 else "in_process",
+            "max_in_flight": 2 * workers if workers > 1 else 1,
+            "numerical_threads_per_child": 1, "preflight_seconds": preflight_seconds,
+            "min_trades": min_trades, "rank_by": rank_by, "top_n": top_n,
+            "engine": {"source_sha256": engine_hash, "engine_version": engine.ENGINE_VERSION,
+                       "data_processing_version": engine.DATA_PROCESSING_VERSION},
+            "data": {"base_path": str(base), "htf_path": str(htf),
+                     "base_source_sha256": base_hash, "htf_source_sha256": htf_hash,
+                     "data_cutoff": str(policy["value"]), "data_cutoff_source": policy["source"],
+                     "data_cutoff_verified": policy["verified"], "cutoff_mode": policy["mode"],
+                     "excluded_incomplete_candles": policy["excluded_incomplete_candles"]},
+            "accounting": {"gross_only": True, "cost_model": engine.COST_MODEL,
+                           "funding_model": engine.FUNDING_MODEL,
+                           "short_mode": "hypothetical/signal-only for Spot inputs"},
+            "candidate_generation": "Deterministic exhaustive prefix, biased toward low axis values; not a random sample.",
+            "parameter_ranges": ranges, "target_r_values": targets,
+        }
+        write_json(manifest_path, metadata)
+        counters = {"new": 0, "submitted": 0, "skipped": 0, "duplicates": 0}
+        pending_ids: set[str] = set()
+        timing = {"seconds": 0.0, "last_progress": 0.0}
+        worker_info: dict[int, dict[str, Any]] = {}
+        cap_reached = False
 
-    results_dir.mkdir(parents=True, exist_ok=True)
-    configs_dir.mkdir(parents=True, exist_ok=True)
-    checkpoints_dir.mkdir(parents=True, exist_ok=True)
-    logs_dir.mkdir(parents=True, exist_ok=True)
+        def log(message: str, level: str = "INFO") -> None:
+            if logging.getLevelNamesMapping()[level] >= logging.getLevelNamesMapping()[log_level]:
+                log_message(log_path, message, echo=echo, progress=progress,
+                            level=logging.getLevelNamesMapping()[level])
 
-    snapshot = {
-        "tester_version": TESTER_VERSION,
-        "search_id": sid,
-        "search_signature": _json_safe(signature),
-        "timeframe": timeframe,
-        "parameter_ranges": _json_safe(ranges),
-        "target_r_values": targets,
-        "analyzer_parameter_map": _json_safe(ANALYZER_PARAMETER_MAP),
-        "approved_bounds": _json_safe(APPROVED_BOUNDS),
-        "slow_ema_1d_cap": SLOW_EMA_1D_CAP,
-        "min_trades": min_trades,
-        "rank_by": rank_by,
-        "max_combinations_per_invocation": max_combinations,
-        "cartesian_upper_bound": upper_bound,
-        "order": "deterministic Cartesian product in PARAMETER_RANGES key order",
-    }
-    write_json(config_path, snapshot)
-    write_json(results_dir / "search_config.json", snapshot)
+        def checkpoint() -> None:
+            write_json(state_path, {"search_id": sid, "ok_count": rows.ok,
+                       "error_count": rows.errors, "checkpoint_total": len(rows),
+                       "updated_at_utc": utc_now(), "records_directory": str(rows.directory)})
 
-    newly_evaluated = 0
-    skipped_completed = 0
-    duplicate_skipped = 0
-    interrupted = False
-    cap_reached = False
-    seen: set[str] = set()
+        def candidates():
+            nonlocal cap_reached
+            for config in iter_candidates(timeframe, ranges, targets):
+                cid = config_id(timeframe, config)
+                if cid in pending_ids:
+                    counters["duplicates"] += 1
+                    continue
+                old = rows.get(cid)
+                if old is not None and json.loads(old["configuration_json"]) != _json_safe(config):
+                    raise TesterError(f"Configuration ID collision for {cid}")
+                if old is not None and (old["status"] == "ok" or not retry_failed):
+                    counters["skipped"] += 1
+                    # An occurrence committed during this invocation is a duplicate.
+                    if old.get("invocation_started") == metadata["invocation_started"]:
+                        counters["duplicates"] += 1
+                    continue
+                if max_combinations is not None and counters["submitted"] >= max_combinations:
+                    cap_reached = True
+                    break
+                pending_ids.add(cid)
+                counters["submitted"] += 1
+                yield config, cid
 
-    # Write a resumable manifest before any candidate runs. If the process is
-    # killed hard, --resume still finds a signature-matched manifest.
-    write_json(manifest_path, {
-        "tester_version": TESTER_VERSION,
-        "status": "running",
-        "search_id": sid,
-        "search_signature": _json_safe(signature),
-        "timeframe": timeframe,
-        "started_at_utc": started_at,
-        "resumed": resume,
-        "resume_count": resume_count,
-        "max_combinations_this_invocation": max_combinations,
-        "checkpoint_total": len(rows),
-        "cartesian_upper_bound": upper_bound,
-    })
+        def rankable(row: Mapping[str, Any]) -> bool:
+            if row.get("status") != "ok" or int(row.get("trades") or 0) < min_trades:
+                return False
+            drawdown, average = _as_float(row.get("max_drawdown_pct")), _as_float(row.get("average_gross_R"))
+            if max_drawdown is not None and (drawdown is None or abs(drawdown) > max_drawdown):
+                return False
+            if min_average_r is not None and (average is None or average < min_average_r):
+                return False
+            return True
 
-    log_message(
-        log_path,
-        f"[{timeframe}] search {sid} started (resume={resume}, "
-        f"cap={max_combinations}, upper_bound={upper_bound:,})",
-        echo=echo, progress=progress,
-    )
+        def collect(result: runtime.Evaluation) -> None:
+            cid = result.config_id
+            # Handles a Ctrl+C between durable commit and bookkeeping safely.
+            old = rows.get(cid)
+            if old is not None and old.get("invocation_started") == metadata["invocation_started"]:
+                pending_ids.discard(cid)
+                return
+            row = make_row(
+                timeframe=timeframe, config=result.config, cid=cid, sid=sid,
+                run_id=f"opt_{timeframe}_{sid}_{cid}", min_trades=min_trades,
+                status="error" if result.error_type else "ok", report=result.report,
+                error_type=result.error_type, error=result.error, tb=result.traceback,
+                fallback_cutoff=str(policy["value"]), fallback_verified=policy["verified"],
+                fallback_mode=cutoff_mode,
+            )
+            row.update(worker_pid=result.worker_pid, elapsed_seconds=result.elapsed_seconds,
+                       started_monotonic=result.started_monotonic, finished_monotonic=result.finished_monotonic,
+                       invocation_started=metadata["invocation_started"])
+            row["rankable"] = rankable(row)
+            if result.audit is not None:
+                write_json(results_dir / "audits" / f"{cid}.json", result.audit)
+            rows.put(row)
+            pending_ids.discard(cid)
+            counters["new"] += 1
+            timing["seconds"] += result.elapsed_seconds
+            worker_info[result.worker_pid] = {"initialization_seconds": result.initialized_seconds}
+            metadata["current_configuration_id"] = cid
+            if result.error_type:
+                log(f"ERROR {cid} pid={result.worker_pid}: {result.error_type}: {result.error}", "ERROR")
+            if counters["new"] % checkpoint_every == 0:
+                checkpoint()
 
-    try:
-        for config in iter_candidates(timeframe, ranges, targets):
-            cid = config_id(timeframe, config)
-            if cid in seen:
-                duplicate_skipped += 1
-                continue
-            seen.add(cid)
-            if cid in completed:
-                skipped_completed += 1
-                continue
-            if newly_evaluated >= max_combinations:
-                cap_reached = True
-                break
+        def show_progress(active: int) -> None:
+            elapsed = time.perf_counter() - started_clock
+            if elapsed - timing["last_progress"] < 1.0:
+                return
+            timing["last_progress"] = elapsed
+            rate = counters["new"] / elapsed if elapsed else 0.0
+            remaining = max(0, valid_count - rows.ok)
+            budget_left = remaining if max_combinations is None else max(0, max_combinations - counters["new"])
+            eta = min(remaining, budget_left) / rate if rate else None
+            if progress_every > 0:
+                log(f"[{timeframe}] completed={rows.ok:,} failed={rows.errors:,} active_or_queued={active} "
+                    f"remaining={remaining:,} workers={workers} elapsed={elapsed:.1f}s "
+                    f"avg={timing['seconds'] / max(1, counters['new']):.3f}s rate={rate * 60:.1f}/min "
+                    f"invocation_ETA={eta if eta is not None else 'unknown'}s "
+                    f"config={metadata.get('current_configuration_id', '-')}")
 
-            run_id = f"opt_{timeframe}_{sid}_{cid}"
-            try:
-                validate_candidate(timeframe, config)
-                with tempfile.TemporaryDirectory(
-                    prefix=f"v42opt_{timeframe}_{cid}_"
-                ) as temporary:
-                    result = engine.run_analysis(
-                        timeframe=timeframe,
-                        base_path=base,
-                        htf_path=htf,
-                        config_override=config,
-                        output_dir=Path(temporary),
-                        run_id=run_id,
-                        force=False,
-                        data_cutoff=data_cutoff,
-                        cutoff_mode=cutoff_mode,
-                    )
-                report = result["report"]
-                model_error = _gross_model_error(report)
-                if model_error:
-                    raise TesterError(model_error)
-                row = make_row(
-                    timeframe=timeframe, config=config, cid=cid, sid=sid,
-                    run_id=run_id, min_trades=min_trades, status="ok",
-                    report=report,
-                    fallback_cutoff=str(policy["value"]),
-                    fallback_verified=bool(policy["verified"]),
-                    fallback_mode=cutoff_mode,
-                )
-            except KeyboardInterrupt:
-                interrupted = True
-                break
-            except Exception as exc:  # keep the search alive and logged
-                row = make_row(
-                    timeframe=timeframe, config=config, cid=cid, sid=sid,
-                    run_id=run_id, min_trades=min_trades,
-                    status="error",
-                    error_type=type(exc).__name__,
-                    error=str(exc),
-                    tb=traceback.format_exc(),
-                    fallback_cutoff=str(policy["value"]),
-                    fallback_verified=bool(policy["verified"]),
-                    fallback_mode=cutoff_mode,
-                )
-                log_message(
-                    log_path,
-                    f"[{timeframe}] ERROR {cid}: {type(exc).__name__}: {exc}",
-                    echo=echo, progress=progress,
-                )
+        metadata["invocation_started"] = utc_now()
+        log(f"[{timeframe}] search={sid} total={upper_bound:,} valid={valid_count:,} "
+            f"workers={workers} cap={max_combinations}; cutoff_verified={policy['verified']}")
+        if policy["mode"] == "diagnostic":
+            log(engine.DIAGNOSTIC_WARNING, "WARNING")
+        settings = runtime.WorkerSettings(timeframe, base, htf, data_cutoff, cutoff_mode,
+                                          base_hash, htf_hash, engine_hash, sid, tuple(audit_ids))
+        interrupted, broken = runtime.execute_candidates(
+            iter(candidates()), settings, workers, collect, show_progress,
+        )
+        checkpoint()
+        # Stream complete exports and retain only the bounded top-N heap.
+        export_start = time.perf_counter()
+        all_results_path, top_path = results_dir / "all_results.csv", results_dir / "top_configs.csv"
+        failed_path = results_dir / "failed_combinations.csv"
+        write_csv(all_results_path, rows.values(), RESULT_FIELDS)
+        write_csv(failed_path, (row for row in rows.values() if row["status"] == "error"), FAILED_FIELDS)
+        rankable_count = insufficient = 0
 
-            rows[cid] = row
-            append_checkpoint(checkpoint_path, [row])
-            newly_evaluated += 1
+        def eligible():
+            nonlocal rankable_count, insufficient
+            for row in rows.values():
+                if row["status"] == "ok" and int(row.get("trades") or 0) < min_trades:
+                    insufficient += 1
+                if rankable(row):
+                    rankable_count += 1
+                    yield row
 
-            if progress_every > 0 and (
-                newly_evaluated % progress_every == 0
-                or newly_evaluated == max_combinations
-            ):
-                ok_count = sum(1 for item in rows.values()
-                               if item.get("status") == "ok")
-                error_count = len(rows) - ok_count
-                log_message(
-                    log_path,
-                    f"[{timeframe}] evaluated {newly_evaluated}/{max_combinations} "
-                    f"this run; checkpoint={len(rows):,}, ok={ok_count:,}, "
-                    f"errors={error_count:,}",
-                    echo=echo, progress=progress,
-                )
-    except KeyboardInterrupt:
-        interrupted = True
-
-    # Rows are appended to the checkpoint immediately after each candidate.
-    all_rows = sorted(rows.values(), key=lambda row: str(row.get("config_id", "")))
-    ok_rows = [row for row in all_rows if row.get("status") == "ok"]
-    error_rows = [row for row in all_rows if row.get("status") != "ok"]
-    rankable_rows = ranked_rows(all_rows, rank_by, min_trades)
-    top_rows = rankable_rows[:top_n]
-
-    all_results_path = results_dir / "all_results.csv"
-    top_path = results_dir / "top_configs.csv"
-    failed_path = results_dir / "failed_combinations.csv"
-
-    write_csv(all_results_path, all_rows, RESULT_FIELDS)
-    write_csv(top_path, top_rows, RESULT_FIELDS)
-    write_csv(failed_path, error_rows, FAILED_FIELDS)
-
-    finished_at = utc_now()
-    if interrupted:
-        status = "interrupted"
-    elif cap_reached:
-        status = "paused_cap_reached"
-    else:
-        status = "complete"
-
-    insufficient = sum(
-        1 for row in ok_rows
-        if int(row.get("trades") or 0) < min_trades
-    )
-    metadata = {
-        "tester_version": TESTER_VERSION,
-        "status": status,
-        "interrupted": interrupted,
-        "cap_reached": cap_reached,
-        "search_id": sid,
-        "search_signature": _json_safe(signature),
-        "timeframe": timeframe,
-        "started_at_utc": started_at,
-        "finished_at_utc": finished_at,
-        "resumed": resume,
-        "resume_count": resume_count,
-        "max_combinations_this_invocation": max_combinations,
-        "newly_evaluated": newly_evaluated,
-        "skipped_completed": skipped_completed,
-        "duplicate_skipped": duplicate_skipped,
-        "checkpoint_total": len(rows),
-        "ok_count": len(ok_rows),
-        "error_count": len(error_rows),
-        "insufficient_trade_count": insufficient,
-        "rankable_count": len(rankable_rows),
-        "min_trades": min_trades,
-        "rank_by": rank_by,
-        "top_n": top_n,
-        "cartesian_upper_bound": upper_bound,
-        "candidate_generation": (
-            "deterministic Cartesian product; this prefix is biased toward the "
-            "lowest values of each axis. Use broader coverage or multiple "
-            "bounded runs before drawing conclusions."
-        ),
-        "accounting": {
-            "gross_only": True,
-            "cost_model": engine.COST_MODEL,
-            "funding_model": engine.FUNDING_MODEL,
-            "short_mode": "hypothetical/signal-only for Spot inputs",
-        },
-        "engine": {
-            "engine_version": engine.ENGINE_VERSION,
-            "data_processing_version": engine.DATA_PROCESSING_VERSION,
-            "source_path": str(engine.engine_source_path()),
-            "source_sha256": engine_hash,
-        },
-        "data": {
-            "base_path": str(base),
-            "htf_path": str(htf),
-            "base_source_sha256": base_hash,
-            "htf_source_sha256": htf_hash,
-            "data_cutoff": str(policy["value"]),
-            "data_cutoff_source": policy["source"],
-            "data_cutoff_verified": bool(policy["verified"]),
-            "cutoff_mode": policy["mode"],
-            "excluded_incomplete_candles": policy["excluded_incomplete_candles"],
-        },
-        "parameter_ranges": _json_safe(ranges),
-        "target_r_values": targets,
-        "outputs": {
-            "results_dir": str(results_dir),
-            "all_results_csv": str(all_results_path),
-            "top_configs_csv": str(top_path),
-            "failed_combinations_csv": str(failed_path),
-            "run_metadata_json": str(manifest_path),
-            "search_config_json": str(results_dir / "search_config.json"),
-            "config_snapshot_json": str(config_path),
-            "checkpoint_jsonl": str(checkpoint_path),
-            "log_file": str(log_path),
-        },
-        "best_rankable": [
-            {
-                "config_id": row.get("config_id"),
-                "trades": row.get("trades"),
-                "total_gross_R": row.get("total_gross_R"),
-                "compounded_equity_return_pct": row.get(
-                    "compounded_equity_return_pct"
-                ),
-                "max_drawdown_pct": row.get("max_drawdown_pct"),
-            }
-            for row in top_rows[:5]
-        ],
-    }
-    write_json(manifest_path, metadata)
-
-    log_message(
-        log_path,
-        f"[{timeframe}] search {sid} finished: status={status}, "
-        f"new={newly_evaluated}, total={len(rows)}, ok={len(ok_rows)}, "
-        f"errors={len(error_rows)}; results={results_dir}",
-        echo=echo, progress=progress,
-    )
-
-    return {
-        "metadata": metadata,
-        "rows": rows,
-        "interrupted": interrupted,
-        "search_id": sid,
-        "outputs": metadata["outputs"],
-    }
+        top_rows = heapq.nlargest(top_n, eligible(), key=lambda row: ranking_key(row, rank_by)) if top_n else []
+        if not top_n:
+            for _ in eligible():
+                pass
+        write_csv(top_path, top_rows, RESULT_FIELDS)
+        checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = checkpoint_path.with_suffix(".tmp")
+        with temporary.open("w", encoding="utf-8") as handle:
+            for row in rows.values():
+                handle.write(_canonical_json(_json_safe(row)) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, checkpoint_path)
+        status = ("interrupted" if interrupted else "worker_pool_failed" if broken else
+                  "paused_cap_reached" if cap_reached else "complete_with_errors" if rows.errors else "complete")
+        metadata.update(
+            status=status, interrupted=interrupted, cap_reached=cap_reached,
+            finished_at_utc=utc_now(), newly_evaluated=counters["new"],
+            skipped_completed=counters["skipped"], duplicate_skipped=counters["duplicates"],
+            checkpoint_total=len(rows), ok_count=rows.ok, error_count=rows.errors,
+            insufficient_trade_count=insufficient, rankable_count=rankable_count,
+            elapsed_seconds=time.perf_counter() - started_clock,
+            evaluation_seconds=timing["seconds"], worker_initialization=worker_info,
+            export_seconds=time.perf_counter() - export_start,
+            best_rankable=[{key: row[key] for key in ("config_id", "trades", "total_gross_R",
+                           "compounded_equity_return_pct", "max_drawdown_pct")} for row in top_rows[:5]],
+            outputs={"results_dir": str(results_dir), "all_results_csv": str(all_results_path),
+                     "top_configs_csv": str(top_path), "failed_combinations_csv": str(failed_path),
+                     "run_metadata_json": str(manifest_path), "search_config_json": str(results_dir / "search_config.json"),
+                     "config_snapshot_json": str(config_path), "checkpoint_jsonl": str(checkpoint_path),
+                     "checkpoint_json": str(state_path), "checkpoint_records": str(rows.directory),
+                     "log_file": str(log_path)},
+        )
+        write_json(manifest_path, metadata)
+        log(f"[{timeframe}] {status}: completed={rows.ok} failed={rows.errors}; results={results_dir}")
+        return {"metadata": metadata, "rows": rows, "interrupted": interrupted,
+                "search_id": sid, "outputs": metadata["outputs"]}
 
 
 # =============================================================================
@@ -1143,17 +1121,18 @@ def run_search(
 
 def _print_plan(timeframe: str, ranges: Mapping[str, Mapping[str, Any]],
                 targets: Iterable[float], data_cutoff: Any,
-                cutoff_mode: str) -> None:
+                cutoff_mode: str, base_path: Path | None = None,
+                htf_path: Path | None = None) -> None:
     _, axes = build_axes(timeframe, ranges)
     targets = list(targets)
     upper = cartesian_upper_bound(axes, targets)
     print(f"\n[{timeframe}] axis sizes:")
-    for name, axis in zip(ranges, axes):
+    for name, axis in zip(ANALYZER_PARAMETER_MAP, axes):
         print(f"  {name:<24} {len(axis):>4} values  {axis[:4]}"
               f"{' ...' if len(axis) > 4 else ''}")
     print(f"[{timeframe}] target_r values: {targets}")
     print(f"[{timeframe}] Cartesian upper bound: {upper:,}")
-    print(f"[{timeframe}] EMA ordering and stop constraints reduce this count.")
+    print(f"[{timeframe}] Exact valid combinations: {valid_combination_count(timeframe, ranges):,}")
 
     sample_count = 0
     for config in iter_candidates(timeframe, ranges, targets):
@@ -1165,8 +1144,8 @@ def _print_plan(timeframe: str, ranges: Mapping[str, Mapping[str, Any]],
     if sample_count == 0:
         print(f"[{timeframe}] no valid candidates under these ranges.")
 
-    base = engine.BASE_DATA_FILES[timeframe]
-    htf = engine.HTF_DATA_FILES[timeframe]
+    base = base_path or engine.BASE_DATA_FILES[timeframe]
+    htf = htf_path or engine.HTF_DATA_FILES[timeframe]
     if base.is_file() and htf.is_file():
         policy, _, _ = _preflight(
             timeframe, base.resolve(), htf.resolve(), data_cutoff, cutoff_mode
@@ -1180,7 +1159,7 @@ def _print_plan(timeframe: str, ranges: Mapping[str, Mapping[str, Any]],
         print(f"[{timeframe}] data files missing; cutoff not validated.")
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Bounded exhaustive parameter search driven by the authoritative "
@@ -1197,6 +1176,17 @@ def main(argv: Optional[list[str]] = None) -> int:
                         default=DEFAULT_MAX_COMBINATIONS,
                         help=("Maximum newly evaluated valid combinations in "
                               "this invocation (default 20)."))
+    parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
+    parser.add_argument("--base", type=Path, help="Override base OHLCV CSV")
+    parser.add_argument("--htf", type=Path, help="Override HTF OHLCV CSV")
+    parser.add_argument("--ranges", type=Path, help="JSON containing all 15 min/max/step ranges")
+    parser.add_argument("--full-search", action="store_true", help="Explicitly remove the invocation cap")
+    parser.add_argument("--resume-run", help="Original search ID; verify exact compatibility")
+    parser.add_argument("--checkpoint-every", type=int, default=10)
+    parser.add_argument("--max-drawdown", type=float, help="Maximum absolute drawdown percent for ranking")
+    parser.add_argument("--min-average-r", type=float, help="Minimum average gross R for ranking")
+    parser.add_argument("--audit-config", action="append", default=[], help="Config ID whose detailed audit is retained")
+    parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], default="INFO")
     parser.add_argument("--min-trades", type=int,
                         default=MIN_TRADES_FOR_RANKING)
     parser.add_argument("--rank-by", choices=sorted(RANK_METRICS),
@@ -1223,15 +1213,17 @@ def main(argv: Optional[list[str]] = None) -> int:
         )
 
     timeframes = ["2h", "4h", "1d"] if args.timeframe == "all" else [args.timeframe]
-    print(MAX_COMBINATIONS_SAFETY_NOTE)
+    if not args.quiet:
+        print(MAX_COMBINATIONS_SAFETY_NOTE)
+    ranges = read_json(args.ranges) if args.ranges else PARAMETER_RANGES
 
     exit_code = 0
     if args.plan:
         for timeframe in timeframes:
             try:
                 _print_plan(
-                    timeframe, PARAMETER_RANGES, TARGET_R_VALUES,
-                    args.data_cutoff, args.cutoff_mode,
+                    timeframe, ranges, TARGET_R_VALUES,
+                    args.data_cutoff, args.cutoff_mode, args.base, args.htf,
                 )
             except (TesterError, ValueError, FileNotFoundError) as exc:
                 print(f"[{timeframe}] ERROR: {exc}")
@@ -1245,7 +1237,12 @@ def main(argv: Optional[list[str]] = None) -> int:
                 output_root=args.output,
                 data_cutoff=args.data_cutoff,
                 cutoff_mode=args.cutoff_mode,
-                max_combinations=args.max_combinations,
+                max_combinations=None if args.full_search else args.max_combinations,
+                workers=args.workers, base_path=args.base, htf_path=args.htf,
+                parameter_ranges=ranges, resume_run=args.resume_run,
+                checkpoint_every=args.checkpoint_every, max_drawdown=args.max_drawdown,
+                min_average_r=args.min_average_r, audit_ids=args.audit_config,
+                log_level=args.log_level,
                 min_trades=args.min_trades,
                 resume=args.resume,
                 retry_failed=args.retry_failed,
@@ -1264,6 +1261,12 @@ def main(argv: Optional[list[str]] = None) -> int:
             continue
 
         metadata = result["metadata"]
+        if metadata["interrupted"]:
+            return 130
+        if metadata["error_count"] or metadata["status"] == "worker_pool_failed":
+            exit_code = 1
+        if args.quiet:
+            continue
         print(
             f"\n[{timeframe}] {metadata['status']}: "
             f"new={metadata['newly_evaluated']}, "

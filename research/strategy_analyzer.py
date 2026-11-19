@@ -23,13 +23,13 @@ import hashlib
 import json
 import math
 import sys
-from dataclasses import asdict, dataclass
+from collections import OrderedDict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, cast
 
 import numpy as np
 import pandas as pd
-
 
 # =============================================================================
 # USER CONFIGURATION — EDIT THESE VALUES
@@ -144,15 +144,15 @@ HTF_TIMEFRAMES = {"2h": "1d", "4h": "1d", "1d": "1w"}
 @dataclass
 class WarmupResult:
     passed: bool
-    convergence_index: Optional[int]
-    evaluation_start_index: Optional[int]
+    convergence_index: int | None
+    evaluation_start_index: int | None
     burn_in_bars: int
     attempts: int
     reason: str
     details: dict[str, Any]
 
 
-def read_ohlcv(path: Path) -> pd.DataFrame:
+def read_ohlcv(path: Path, *, reject_suspicious: bool = False) -> pd.DataFrame:
     if not path.is_file():
         raise FileNotFoundError(f"OHLCV CSV not found: {path}")
 
@@ -194,12 +194,21 @@ def read_ohlcv(path: Path) -> pd.DataFrame:
     else:
         df["volume"] = pd.to_numeric(df["volume"], errors="coerce")
 
+    if reject_suspicious:
+        numeric = df[["timestamp", "open", "high", "low", "close", "volume"]]
+        if not np.isfinite(numeric.to_numpy(dtype=float)).all():
+            raise ValueError(f"{path.name}: missing or non-finite OHLCV/timestamp values")
+        if (df["volume"] < 0).any():
+            raise ValueError(f"{path.name}: negative volume")
+        if not df["timestamp"].is_monotonic_increasing or df["timestamp"].duplicated().any():
+            raise ValueError(f"{path.name}: unordered or duplicate timestamps")
     df = df.dropna(subset=required).copy()
     rows_after_numeric = len(df)
     if df.empty:
         raise ValueError(f"{path.name}: no valid OHLCV rows")
 
     median_ts = float(df["timestamp"].median())
+    unit: Literal["ns", "us", "ms", "s"]
     if median_ts > 10**17:
         unit = "ns"
     elif median_ts > 10**14:
@@ -209,6 +218,8 @@ def read_ohlcv(path: Path) -> pd.DataFrame:
     else:
         unit = "s"
     df["datetime"] = pd.to_datetime(df["timestamp"], unit=unit, utc=True, errors="coerce")
+    if reject_suspicious and df["datetime"].isna().any():
+        raise ValueError(f"{path.name}: invalid UTC timestamps")
     df = df.dropna(subset=["datetime"]).sort_values("datetime")
     rows_after_timestamp = len(df)
     if df.empty:
@@ -269,9 +280,9 @@ def detect_missing_candles(df: pd.DataFrame, timeframe: str) -> dict[str, Any]:
     events: list[dict[str, Any]] = []
     missing_total = 0
     if len(times) > 1:
-        deltas = times.to_series().diff()
+        deltas = times.to_series().diff().tolist()
         for pos in range(1, len(times)):
-            delta = deltas.iloc[pos]
+            delta = deltas[pos]
             if pd.isna(delta) or delta <= expected:
                 continue
             missing = int(round(float(delta / expected))) - 1
@@ -544,11 +555,11 @@ def base_coverage_for_htf(htf_open: Any, htf_timeframe: str,
 
 def htf_completion_frame(htf: pd.DataFrame, htf_timeframe: str,
                          data_cutoff: pd.Timestamp,
-                         base: Optional[pd.DataFrame] = None,
-                         base_timeframe: Optional[str] = None,
-                         cutoff_source: Optional[str] = None,
-                         cutoff_verified: Optional[bool] = None,
-                         cutoff_mode: Optional[str] = None
+                         base: pd.DataFrame | None = None,
+                         base_timeframe: str | None = None,
+                         cutoff_source: str | None = None,
+                         cutoff_verified: bool | None = None,
+                         cutoff_mode: str | None = None
                          ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Classify every HTF candle as COMPLETE, INCOMPLETE or UNKNOWN.
 
@@ -566,7 +577,7 @@ def htf_completion_frame(htf: pd.DataFrame, htf_timeframe: str,
         raise ValueError(
             "base_timeframe must be supplied when base coverage is checked"
         )
-    base_opens: Optional[set[pd.Timestamp]] = None
+    base_opens: set[pd.Timestamp] | None = None
     if base is not None:
         if base_timeframe not in TIMEFRAME_INTERVALS:
             raise ValueError(
@@ -588,7 +599,7 @@ def htf_completion_frame(htf: pd.DataFrame, htf_timeframe: str,
         else:
             if base_opens is not None:
                 coverage = base_coverage_for_htf(
-                    open_time, htf_timeframe, base_timeframe, base_opens
+                    open_time, htf_timeframe, cast(str, base_timeframe), base_opens
                 )
             if base_opens is not None and not coverage["sufficient"]:
                 status = "INCOMPLETE"
@@ -731,11 +742,11 @@ V42_SPEC_PARITY_REPORT: dict[str, Any] = {
 
 def compute_run_id(timeframe: str, cfg: dict[str, Any], base_path: Path,
                    htf_path: Path, data_cutoff: Any = None,
-                   execution_constraints: Optional[dict[str, Any]] = None,
-                   engine_source_sha256: Optional[str] = None,
+                   execution_constraints: dict[str, Any] | None = None,
+                   engine_source_sha256: str | None = None,
                    cutoff_mode: str = DEFAULT_CUTOFF_MODE,
-                   data_cutoff_verified: Optional[bool] = None,
-                   cutoff_policy: Optional[dict[str, Any]] = None) -> str:
+                   data_cutoff_verified: bool | None = None,
+                   cutoff_policy: dict[str, Any] | None = None) -> str:
     """Deterministic identifier for an engine/data/configuration combination.
 
     The identity includes cutoff provenance and the candle-completion policy, so
@@ -892,11 +903,12 @@ def add_indicators(df: pd.DataFrame, cfg: dict[str, Any]) -> pd.DataFrame:
 
 def attach_htf_indicators(base: pd.DataFrame, htf: pd.DataFrame,
                           htf_ema_period: int,
-                          timeframe: Optional[str] = None,
-                          htf_timeframe: Optional[str] = None,
+                          timeframe: str | None = None,
+                          htf_timeframe: str | None = None,
                           data_cutoff: Any = None,
                           cutoff_mode: str = DEFAULT_CUTOFF_MODE,
-                          cutoff_policy: Optional[dict[str, Any]] = None
+                          cutoff_policy: dict[str, Any] | None = None,
+                          completion: pd.DataFrame | None = None
                           ) -> pd.DataFrame:
     """Attach only HTF candles that were verifiably complete at each decision.
 
@@ -917,13 +929,14 @@ def attach_htf_indicators(base: pd.DataFrame, htf: pd.DataFrame,
         policy = resolve_data_cutoff(base, base_tf, data_cutoff, cutoff_mode)
         cutoff = policy["value"]
 
-    completion, _ = htf_completion_frame(
-        htf, htf_tf, cutoff,
-        base=base, base_timeframe=base_tf,
-        cutoff_source=policy["source"],
-        cutoff_verified=policy["verified"],
-        cutoff_mode=policy["mode"],
-    )
+    if completion is None:
+        completion, _ = htf_completion_frame(
+            htf, htf_tf, cutoff,
+            base=base, base_timeframe=base_tf,
+            cutoff_source=policy["source"],
+            cutoff_verified=policy["verified"],
+            cutoff_mode=policy["mode"],
+        )
     complete_mask = completion["htf_completion_status"] == "COMPLETE"
 
     # Compute the HTF EMA only from complete HTF candles, so excluded/incomplete
@@ -974,7 +987,8 @@ def indicator_snapshot(df: pd.DataFrame, htf: pd.DataFrame,
                        timeframe: str,
                        data_cutoff: Any = None,
                        cutoff_mode: str = DEFAULT_CUTOFF_MODE,
-                       cutoff_policy: Optional[dict[str, Any]] = None
+                       cutoff_policy: dict[str, Any] | None = None,
+                       completion: pd.DataFrame | None = None
                        ) -> dict[str, float]:
     """Recompute indicators from a later initialisation point for convergence."""
     # The second initialisation point is fixed one burn-in block after the
@@ -998,13 +1012,14 @@ def indicator_snapshot(df: pd.DataFrame, htf: pd.DataFrame,
         cutoff = policy["value"]
     if base_close_time > cutoff:
         return {}
-    completion, _ = htf_completion_frame(
-        htf, htf_tf, cutoff,
-        base=df, base_timeframe=timeframe,
-        cutoff_source=policy["source"],
-        cutoff_verified=policy["verified"],
-        cutoff_mode=policy["mode"],
-    )
+    if completion is None:
+        completion, _ = htf_completion_frame(
+            htf, htf_tf, cutoff,
+            base=df, base_timeframe=timeframe,
+            cutoff_source=policy["source"],
+            cutoff_verified=policy["verified"],
+            cutoff_mode=policy["mode"],
+        )
     usable = completion[
         (completion["htf_completion_status"] == "COMPLETE")
         & (completion["htf_available_at"] <= base_close_time)
@@ -1037,14 +1052,16 @@ def check_convergence(df: pd.DataFrame, htf: pd.DataFrame, cfg: dict[str, Any],
                       timeframe: str,
                       data_cutoff: Any = None,
                       cutoff_mode: str = DEFAULT_CUTOFF_MODE,
-                      cutoff_policy: Optional[dict[str, Any]] = None
+                      cutoff_policy: dict[str, Any] | None = None,
+                      indicator_frame: pd.DataFrame | None = None,
+                      completion: pd.DataFrame | None = None
                       ) -> WarmupResult:
     burn = BURN_IN_BASE_BARS[timeframe]
-    full = add_indicators(df, cfg)
-    merged = attach_htf_indicators(
+    full = indicator_frame if indicator_frame is not None else add_indicators(df, cfg)
+    merged = indicator_frame if indicator_frame is not None else attach_htf_indicators(
         df, htf, cfg["htf_ema"], timeframe=timeframe,
         htf_timeframe=HTF_TIMEFRAMES[timeframe], data_cutoff=data_cutoff,
-        cutoff_mode=cutoff_mode, cutoff_policy=cutoff_policy,
+        cutoff_mode=cutoff_mode, cutoff_policy=cutoff_policy, completion=completion,
     )
     attempts = 0
     details: dict[str, Any] = {}
@@ -1057,7 +1074,7 @@ def check_convergence(df: pd.DataFrame, htf: pd.DataFrame, cfg: dict[str, Any],
         reference = full.iloc[candidate]
         alternate = indicator_snapshot(
             df, htf, cfg, candidate, timeframe, data_cutoff=data_cutoff,
-            cutoff_mode=cutoff_mode, cutoff_policy=cutoff_policy,
+            cutoff_mode=cutoff_mode, cutoff_policy=cutoff_policy, completion=completion,
         )
         if not alternate:
             candidate += burn
@@ -1124,9 +1141,10 @@ def build_signals(base: pd.DataFrame, htf: pd.DataFrame, cfg: dict[str, Any],
                   timeframe: str, warmup: WarmupResult,
                   data_cutoff: Any = None,
                   cutoff_mode: str = DEFAULT_CUTOFF_MODE,
-                  cutoff_policy: Optional[dict[str, Any]] = None
+                  cutoff_policy: dict[str, Any] | None = None,
+                  indicator_frame: pd.DataFrame | None = None
                   ) -> pd.DataFrame:
-    x = attach_htf_indicators(
+    x = indicator_frame.copy() if indicator_frame is not None else attach_htf_indicators(
         add_indicators(base, cfg), htf, cfg["htf_ema"], timeframe=timeframe,
         htf_timeframe=HTF_TIMEFRAMES[timeframe], data_cutoff=data_cutoff,
         cutoff_mode=cutoff_mode, cutoff_policy=cutoff_policy,
@@ -1138,7 +1156,7 @@ def build_signals(base: pd.DataFrame, htf: pd.DataFrame, cfg: dict[str, Any],
         return x
 
     start = warmup.evaluation_start_index
-    x.iloc[start:, x.columns.get_loc("evaluation_enabled")] = True
+    x.iloc[start:, cast(int, x.columns.get_loc("evaluation_enabled"))] = True
 
     n = int(cfg["pullback_n"])
     # Previous N bars only; trigger candle is excluded. Each historical candle
@@ -1248,7 +1266,7 @@ def build_signals(base: pd.DataFrame, htf: pd.DataFrame, cfg: dict[str, Any],
 # =============================================================================
 
 def classify_gap_intersection(entry_time: pd.Timestamp, exit_time: pd.Timestamp,
-                              gap_events: Optional[list[dict[str, Any]]],
+                              gap_events: list[dict[str, Any]] | None,
                               timeframe: str) -> tuple[int, list[dict[str, Any]]]:
     """Return missing-candle count and intervals intersected by a trade."""
     expected = timeframe_interval(timeframe)
@@ -1274,14 +1292,16 @@ def classify_gap_intersection(entry_time: pd.Timestamp, exit_time: pd.Timestamp,
 
 def simulate_trades(signals: pd.DataFrame, cfg: dict[str, Any], timeframe: str,
                     market_mode: str = "spot_signal_only",
-                    run_id: Optional[str] = None,
-                    execution_constraints: Optional[dict[str, Any]] = None,
-                    rejection_log: Optional[list[dict[str, Any]]] = None,
-                    gap_events: Optional[list[dict[str, Any]]] = None
+                    run_id: str | None = None,
+                    execution_constraints: dict[str, Any] | None = None,
+                    rejection_log: list[dict[str, Any]] | None = None,
+                    gap_events: list[dict[str, Any]] | None = None,
+                    collect_audit: bool = True
                     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     trades: list[dict[str, Any]] = []
     audit: list[dict[str, Any]] = []
     rows = signals.reset_index()
+    signal_values = rows["signal"].to_numpy(copy=False)
     if gap_events is None:
         gap_events = detect_missing_candles(signals, timeframe)["gap_events"]
 
@@ -1308,12 +1328,12 @@ def simulate_trades(signals: pd.DataFrame, cfg: dict[str, Any], timeframe: str,
     equity = STARTING_EQUITY_USDT
     i = 0
     while i < len(rows) - 1:
-        sig = rows.iloc[i]
-        side = sig["signal"]
+        side = signal_values[i]
         if side not in ("LONG", "SHORT"):
             i += 1
             continue
 
+        sig = rows.iloc[i]
         entry_i = i + 1
         entry_bar = rows.iloc[entry_i]
         entry = float(entry_bar["open"])
@@ -1496,29 +1516,30 @@ def simulate_trades(signals: pd.DataFrame, cfg: dict[str, Any], timeframe: str,
                     "INITIAL_STOP" if active_stop == stop else "TRAILING_STOP"
                 )
 
-            per_bar_state.append({
-                "trade_id": trade_id,
-                "bar_index": j,
-                "time": str(bar["datetime"]),
-                "open": op, "high": hi, "low": lo, "close": cl,
-                "direction": side,
-                "entry_price": entry,
-                "initial_stop": stop,
-                "active_stop": float(active_stop),
-                "trailing_stop": float(trailing_stop),
-                "target": target,
-                "atr": current_atr,
-                "adx": float(bar["adx"]),
-                "mae_R": float(mae_r),
-                "mfe_R": float(mfe_r),
-                "stop_update_event": stop_update_event,
-                "exit_event_order": event_order,
-                "is_exit_candle": exit_price is not None,
-                "exit_reason": exit_reason if exit_price is not None else None,
-                "exit_stop_type": bar_exit_stop_type,
-                "exit_fill": float(exit_price) if exit_price is not None else None,
-                "exit_time": str(bar["datetime"]) if exit_price is not None else None,
-            })
+            if collect_audit:
+                per_bar_state.append({
+                    "trade_id": trade_id,
+                    "bar_index": j,
+                    "time": str(bar["datetime"]),
+                    "open": op, "high": hi, "low": lo, "close": cl,
+                    "direction": side,
+                    "entry_price": entry,
+                    "initial_stop": stop,
+                    "active_stop": float(active_stop),
+                    "trailing_stop": float(trailing_stop),
+                    "target": target,
+                    "atr": current_atr,
+                    "adx": float(bar["adx"]),
+                    "mae_R": float(mae_r),
+                    "mfe_R": float(mfe_r),
+                    "stop_update_event": stop_update_event,
+                    "exit_event_order": event_order,
+                    "is_exit_candle": exit_price is not None,
+                    "exit_reason": exit_reason if exit_price is not None else None,
+                    "exit_stop_type": bar_exit_stop_type,
+                    "exit_fill": float(exit_price) if exit_price is not None else None,
+                    "exit_time": str(bar["datetime"]) if exit_price is not None else None,
+                })
 
             if exit_price is not None:
                 break
@@ -1529,6 +1550,7 @@ def simulate_trades(signals: pd.DataFrame, cfg: dict[str, Any], timeframe: str,
             exit_price = float(rows.iloc[exit_i]["close"])
             exit_reason = "DATA_END"
 
+        assert exit_i is not None  # Every exit path binds its candle index.
         entry_time = as_utc_timestamp(entry_bar["datetime"], "entry time")
         exit_time = as_utc_timestamp(rows.iloc[exit_i]["datetime"], "exit time")
         missing_crossed, affected_intervals = classify_gap_intersection(
@@ -1608,17 +1630,18 @@ def simulate_trades(signals: pd.DataFrame, cfg: dict[str, Any], timeframe: str,
             "short_executable": False if side == "SHORT" and market_mode == "spot_signal_only" else True,
         }
         trades.append(trade)
-        audit.append({
-            **trade,
-            "indicator_snapshot": {
-                key: (float(sig[key]) if pd.notna(sig[key]) else None)
-                for key in ("ema_fast", "ema_mid", "ema_slow", "atr", "adx", "plus_di", "minus_di", "htf_close", "htf_ema")
-            },
-            "per_bar_state": per_bar_state,
-            "stop_history": stop_history,
-            "funding_events": [],
-            "cost_breakdown": {"entry_fee": 0.0, "exit_fee": 0.0, "slippage": 0.0, "funding": 0.0},
-        })
+        if collect_audit:
+            audit.append({
+                **trade,
+                "indicator_snapshot": {
+                    key: (float(sig[key]) if pd.notna(sig[key]) else None)
+                    for key in ("ema_fast", "ema_mid", "ema_slow", "atr", "adx", "plus_di", "minus_di", "htf_close", "htf_ema")
+                },
+                "per_bar_state": per_bar_state,
+                "stop_history": stop_history,
+                "funding_events": [],
+                "cost_breakdown": {"entry_fee": 0.0, "exit_fee": 0.0, "slippage": 0.0, "funding": 0.0},
+            })
         equity = equity_after
         i = exit_i + 1
 
@@ -1630,7 +1653,8 @@ def simulate_trades(signals: pd.DataFrame, cfg: dict[str, Any], timeframe: str,
 # =============================================================================
 
 def summarize(timeframe: str, signals: pd.DataFrame, trades: list[dict[str, Any]],
-              warmup: WarmupResult, source: Path, htf_source: Path) -> dict[str, Any]:
+              warmup: WarmupResult, source: Path, htf_source: Path,
+              source_hashes: tuple[str, str] | None = None) -> dict[str, Any]:
     t = pd.DataFrame(trades)
 
     def subset_metrics(subset: pd.DataFrame) -> dict[str, Any]:
@@ -1647,7 +1671,7 @@ def summarize(timeframe: str, signals: pd.DataFrame, trades: list[dict[str, Any]
         gains = float(subset.loc[subset["gross_R"] > 0, "gross_R"].sum())
         losses = float(abs(subset.loc[subset["gross_R"] < 0, "gross_R"].sum()))
         compounded = float(
-            (1.0 + subset["gross_pnl"] / subset["equity_before"]).prod() - 1.0
+            cast(Any, (1.0 + subset["gross_pnl"] / subset["equity_before"]).prod()) - 1.0
         )
         return {
             "trades": int(len(subset)),
@@ -1683,8 +1707,8 @@ def summarize(timeframe: str, signals: pd.DataFrame, trades: list[dict[str, Any]
             ignore_index=True,
         )
         peak = eq.cummax()
-        affected = t[t["crosses_data_gap"] == True] if "crosses_data_gap" in t else t.iloc[0:0]
-        unaffected = t[t["crosses_data_gap"] == False] if "crosses_data_gap" in t else t
+        affected = t[t["crosses_data_gap"].eq(True)] if "crosses_data_gap" in t else t.iloc[0:0]
+        unaffected = t[t["crosses_data_gap"].eq(False)] if "crosses_data_gap" in t else t
         affected_metrics = subset_metrics(affected)
         unaffected_metrics = subset_metrics(unaffected)
         metrics = {
@@ -1731,9 +1755,9 @@ def summarize(timeframe: str, signals: pd.DataFrame, trades: list[dict[str, Any]
         "strategy": "EMA Pullback V4.2 OHLCV-only",
         "timeframe": timeframe,
         "base_source": str(source),
-        "base_source_sha256": sha256_file(source),
+        "base_source_sha256": source_hashes[0] if source_hashes else sha256_file(source),
         "htf_source": str(htf_source),
-        "htf_source_sha256": sha256_file(htf_source),
+        "htf_source_sha256": source_hashes[1] if source_hashes else sha256_file(htf_source),
         "first_candle": str(signals.index.min()),
         "last_candle": str(signals.index.max()),
         "bars": len(signals),
@@ -1744,14 +1768,113 @@ def summarize(timeframe: str, signals: pd.DataFrame, trades: list[dict[str, Any]
     }
 
 
+@dataclass(frozen=True)
+class PreparedAnalysisData:
+    """Worker-local validated snapshot; frames are read-only by contract.
+
+    The bounded indicator cache is scoped to these exact datasets and cutoff.
+    It never contains signals, trades or output-specific identities.
+    """
+    timeframe: str
+    base_path: Path
+    htf_path: Path
+    requested_cutoff: str
+    base_hash: str
+    htf_hash: str
+    source_stats: tuple[tuple[int, int], tuple[int, int]]
+    base: pd.DataFrame
+    htf: pd.DataFrame
+    policy: dict[str, Any]
+    completion: pd.DataFrame
+    htf_completion: dict[str, Any]
+    data_quality: dict[str, Any]
+    indicator_cache: Any = field(default_factory=OrderedDict, compare=False, repr=False)
+
+    def verify_sources(self) -> None:
+        if self.source_stats != (_source_stat(self.base_path), _source_stat(self.htf_path)):
+            raise ValueError("Dataset changed after preparation; start a new run")
+
+
+def _source_stat(path: Path) -> tuple[int, int]:
+    stat = path.stat()
+    return stat.st_size, stat.st_mtime_ns
+
+
+def prepare_analysis_data(timeframe: str, base_path: Path, htf_path: Path,
+                          data_cutoff: Any = None,
+                          cutoff_mode: str = DEFAULT_CUTOFF_MODE, *,
+                          reject_suspicious: bool = False) -> PreparedAnalysisData:
+    if timeframe not in BASELINE_CONFIGS:
+        raise ValueError("Timeframe must be 2h, 4h or 1d")
+    base_path, htf_path = Path(base_path).resolve(), Path(htf_path).resolve()
+    before = _source_stat(base_path), _source_stat(htf_path)
+    hashes = sha256_file(base_path), sha256_file(htf_path)
+    base_full = read_ohlcv(base_path, reject_suspicious=reject_suspicious)
+    htf = read_ohlcv(htf_path, reject_suspicious=reject_suspicious)
+
+    # Resolve cutoff provenance before any indicator or signal work. Strict mode
+    # raises here when no independently verified cutoff was supplied.
+    policy = resolve_data_cutoff(base_full, timeframe, data_cutoff, cutoff_mode)
+    cutoff = policy["value"]
+    htf_timeframe = HTF_TIMEFRAMES[timeframe]
+
+    # Exclude every base candle that cannot be certified complete at the cutoff.
+    # The excluded rows never reach indicators, signals or trade simulation.
+    base_index = ensure_utc_index(base_full.index, "base data")
+    included_mask = np.asarray(
+        base_index + timeframe_interval(timeframe) <= cutoff
+    )
+    base = base_full.loc[included_mask].copy()
+    if base.empty:
+        raise ValueError(
+            "No verified base candles remain at the resolved data cutoff."
+        )
+
+    completion_frame, htf_completion = htf_completion_frame(
+        htf, htf_timeframe, cutoff,
+        base=base, base_timeframe=timeframe,
+        cutoff_source=policy["source"],
+        cutoff_verified=policy["verified"],
+        cutoff_mode=policy["mode"],
+    )
+
+    if reject_suspicious:
+        for frame, tf, path in ((base_full, timeframe, base_path),
+                                (htf, htf_timeframe, htf_path)):
+            if any(not exchange_boundary_aligned(ts, tf) for ts in frame.index):
+                raise ValueError(f"{path.name}: timestamps not aligned to {tf} boundaries")
+    data_quality = {
+        "base": build_data_quality_report(base_full, timeframe),
+        "htf": build_data_quality_report(htf, htf_timeframe),
+    }
+    data_quality["base"]["cutoff_application"] = {
+        "cutoff": str(cutoff),
+        "cutoff_source": policy["source"],
+        "cutoff_verified": policy["verified"],
+        "included_candles": int(len(base)),
+        "excluded_incomplete_candles": policy["excluded_incomplete_candles"],
+        "last_included_base_candle": str(policy["last_included_base_candle"]),
+        "excluded_candle_reasons": policy["excluded_candle_reasons"],
+    }
+    data_quality["htf"]["completion"] = htf_completion
+    if before != (_source_stat(base_path), _source_stat(htf_path)):
+        raise ValueError("Dataset changed while loading")
+    return PreparedAnalysisData(
+        timeframe, base_path, htf_path, str(data_cutoff), *hashes, before,
+        base, htf, policy, completion_frame, htf_completion, data_quality,
+    )
+
+
 def run_analysis(timeframe: str, base_path: Path, htf_path: Path,
-                 config_override: Optional[dict[str, Any]] = None,
-                 output_dir: Optional[Path] = None,
-                 run_id: Optional[str] = None,
+                 config_override: dict[str, Any] | None = None,
+                 output_dir: Path | None = None,
+                 run_id: str | None = None,
                  force: bool = False,
                  data_cutoff: Any = None,
                  cutoff_mode: str = DEFAULT_CUTOFF_MODE,
-                 execution_constraints: Optional[dict[str, Any]] = None
+                 execution_constraints: dict[str, Any] | None = None,
+                 *, prepared_data: PreparedAnalysisData | None = None,
+                 write_outputs: bool = True, collect_audit: bool = True
                  ) -> dict[str, Any]:
     if timeframe not in BASELINE_CONFIGS:
         raise ValueError("Timeframe must be 2h, 4h or 1d")
@@ -1776,7 +1899,7 @@ def run_analysis(timeframe: str, base_path: Path, htf_path: Path,
         output_dir = Path(output_dir).expanduser().resolve()
     paths = result_paths(output_dir, timeframe)
     existing = [path for path in paths.values() if path.exists()]
-    if existing and not force:
+    if write_outputs and existing and not force:
         raise FileExistsError(
             "Refusing to overwrite existing results in "
             f"{output_dir}: {', '.join(path.name for path in existing)}. "
@@ -1784,34 +1907,17 @@ def run_analysis(timeframe: str, base_path: Path, htf_path: Path,
             "another experiment directory."
         )
 
-    base_full = read_ohlcv(base_path)
-    htf = read_ohlcv(htf_path)
-
-    # Resolve cutoff provenance before any indicator or signal work. Strict mode
-    # raises here when no independently verified cutoff was supplied.
-    policy = resolve_data_cutoff(base_full, timeframe, data_cutoff, cutoff_mode)
-    cutoff = policy["value"]
-    htf_timeframe = HTF_TIMEFRAMES[timeframe]
-
-    # Exclude every base candle that cannot be certified complete at the cutoff.
-    # The excluded rows never reach indicators, signals or trade simulation.
-    base_index = ensure_utc_index(base_full.index, "base data")
-    included_mask = np.asarray(
-        base_index + timeframe_interval(timeframe) <= cutoff
+    prepared = prepared_data or prepare_analysis_data(
+        timeframe, base_path, htf_path, data_cutoff, cutoff_mode,
     )
-    base = base_full.loc[included_mask].copy()
-    if base.empty:
-        raise ValueError(
-            "No verified base candles remain at the resolved data cutoff."
-        )
-
-    _, htf_completion = htf_completion_frame(
-        htf, htf_timeframe, cutoff,
-        base=base, base_timeframe=timeframe,
-        cutoff_source=policy["source"],
-        cutoff_verified=policy["verified"],
-        cutoff_mode=policy["mode"],
-    )
+    if (prepared.timeframe, prepared.base_path, prepared.htf_path,
+            prepared.requested_cutoff, prepared.policy["mode"]) != (
+            timeframe, base_path, htf_path, str(data_cutoff), cutoff_mode):
+        raise ValueError("Prepared data does not match timeframe, paths or cutoff policy")
+    prepared.verify_sources()
+    base, htf = prepared.base, prepared.htf
+    policy, cutoff = prepared.policy, prepared.policy["value"]
+    htf_completion, data_quality = prepared.htf_completion, prepared.data_quality
 
     constraints = dict(DEFAULT_EXECUTION_CONSTRAINTS)
     if execution_constraints:
@@ -1834,27 +1940,32 @@ def run_analysis(timeframe: str, base_path: Path, htf_path: Path,
             cutoff_policy=policy,
         )
 
-    data_quality = {
-        "base": build_data_quality_report(base_full, timeframe),
-        "htf": build_data_quality_report(htf, htf_timeframe),
-    }
-    data_quality["base"]["cutoff_application"] = {
-        "cutoff": str(cutoff),
-        "cutoff_source": policy["source"],
-        "cutoff_verified": policy["verified"],
-        "included_candles": int(len(base)),
-        "excluded_incomplete_candles": policy["excluded_incomplete_candles"],
-        "last_included_base_candle": str(policy["last_included_base_candle"]),
-        "excluded_candle_reasons": policy["excluded_candle_reasons"],
-    }
-    data_quality["htf"]["completion"] = htf_completion
-    warmup = check_convergence(
-        base, htf, cfg, timeframe, data_cutoff=cutoff,
-        cutoff_mode=cutoff_mode, cutoff_policy=policy,
-    )
+    # Every input affecting these indicators/warm-up is present in the key;
+    # data, cutoff, coverage and engine settings are fixed by this snapshot.
+    cache_key = tuple(cfg[key] for key in (
+        "fast_ema", "medium_ema", "slow_ema", "adx_period", "atr_period", "htf_ema",
+    ))
+    cached = prepared.indicator_cache.get(cache_key)
+    if cached is None:
+        indicators = attach_htf_indicators(
+            add_indicators(base, cfg), htf, cfg["htf_ema"], timeframe=timeframe,
+            htf_timeframe=HTF_TIMEFRAMES[timeframe], data_cutoff=cutoff,
+            cutoff_mode=cutoff_mode, cutoff_policy=policy, completion=prepared.completion,
+        )
+        warmup = check_convergence(
+            base, htf, cfg, timeframe, data_cutoff=cutoff,
+            cutoff_mode=cutoff_mode, cutoff_policy=policy,
+            indicator_frame=indicators, completion=prepared.completion,
+        )
+        if len(prepared.indicator_cache) >= 2:
+            prepared.indicator_cache.popitem(last=False)
+        prepared.indicator_cache[cache_key] = indicators, warmup
+    else:
+        indicators, warmup = cached
+        prepared.indicator_cache.move_to_end(cache_key)
     signals = build_signals(
         base, htf, cfg, timeframe, warmup, data_cutoff=cutoff,
-        cutoff_mode=cutoff_mode, cutoff_policy=policy,
+        cutoff_mode=cutoff_mode, cutoff_policy=policy, indicator_frame=indicators,
     )
     execution_rejections: list[dict[str, Any]] = []
     trades, audit = simulate_trades(
@@ -1862,9 +1973,11 @@ def run_analysis(timeframe: str, base_path: Path, htf_path: Path,
         execution_constraints=execution_constraints,
         rejection_log=execution_rejections,
         gap_events=data_quality["base"]["missing_candles"]["gap_events"],
+        collect_audit=collect_audit,
     )
 
-    report = summarize(timeframe, signals, trades, warmup, base_path, htf_path)
+    report = summarize(timeframe, signals, trades, warmup, base_path, htf_path,
+                       source_hashes=(prepared.base_hash, prepared.htf_hash))
     report["run_id"] = run_id
     report["engine_version"] = ENGINE_VERSION
     report["engine_source_path"] = str(engine_source_path())
@@ -1918,16 +2031,17 @@ def run_analysis(timeframe: str, base_path: Path, htf_path: Path,
     report["metrics"]["excluded_incomplete_candles"] = policy["excluded_incomplete_candles"]
 
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    signals.reset_index().to_csv(paths["signals"], index=False)
-    pd.DataFrame(trades).to_csv(paths["trades"], index=False)
-    with paths["audit"].open("w", encoding="utf-8") as f:
-        for item in audit:
-            f.write(json.dumps(json_safe(item), sort_keys=True, allow_nan=False) + "\n")
-    paths["summary"].write_text(
-        json.dumps(json_safe(report), indent=2, allow_nan=False), encoding="utf-8"
-    )
-    pd.DataFrame([report["metrics"]]).to_csv(paths["metrics"], index=False)
+    if write_outputs:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        signals.reset_index().to_csv(paths["signals"], index=False)
+        pd.DataFrame(trades).to_csv(paths["trades"], index=False)
+        with paths["audit"].open("w", encoding="utf-8") as f:
+            for item in audit:
+                f.write(json.dumps(json_safe(item), sort_keys=True, allow_nan=False) + "\n")
+        paths["summary"].write_text(
+            json.dumps(json_safe(report), indent=2, allow_nan=False), encoding="utf-8"
+        )
+        pd.DataFrame([report["metrics"]]).to_csv(paths["metrics"], index=False)
 
     return {
         "signals": signals,

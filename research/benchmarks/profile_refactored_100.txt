@@ -1,0 +1,53 @@
+         1003578 function calls (941404 primitive calls) in 0.521 seconds
+
+   Ordered by: cumulative time
+   List reduced from 1380 to 45 due to restriction <45>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.001    0.001    0.521    0.521 C:\tradely\Tradely.dev\research\strategy_analyzer.py:1868(run_analysis)
+        1    0.016    0.016    0.162    0.162 C:\tradely\Tradely.dev\research\strategy_analyzer.py:1293(simulate_trades)
+1580/1566    0.002    0.000    0.105    0.000 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\core\indexing.py:1177(__getitem__)
+        3    0.000    0.000    0.102    0.034 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\util\_decorators.py:325(wrapper)
+        3    0.000    0.000    0.102    0.034 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\core\generic.py:3819(to_csv)
+        3    0.000    0.000    0.102    0.034 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\io\formats\format.py:965(to_csv)
+        3    0.000    0.000    0.102    0.034 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\io\formats\csvs.py:246(save)
+        3    0.000    0.000    0.100    0.033 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\io\formats\csvs.py:272(_save)
+        3    0.001    0.000    0.100    0.033 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\io\formats\csvs.py:305(_save_body)
+        4    0.030    0.007    0.099    0.025 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\io\formats\csvs.py:315(_save_chunk)
+     1547    0.003    0.000    0.097    0.000 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\core\indexing.py:1720(_getitem_axis)
+     1598    0.004    0.000    0.088    0.000 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\core\frame.py:3994(_ixs)
+      130    0.001    0.000    0.073    0.001 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\core\internals\managers.py:317(apply)
+     1503    0.017    0.000    0.069    0.000 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\core\internals\managers.py:977(fast_xs)
+        4    0.000    0.000    0.068    0.017 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\core\frame.py:1404(_get_values_for_csv)
+        4    0.000    0.000    0.068    0.017 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\core\internals\managers.py:478(get_values_for_csv)
+       18    0.000    0.000    0.068    0.004 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\core\internals\blocks.py:801(get_values_for_csv)
+       25    0.001    0.000    0.068    0.003 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\core\indexes\base.py:7836(get_values_for_csv)
+        3    0.000    0.000    0.067    0.022 C:\tradely\Tradely.dev\research\strategy_analyzer.py:870(add_indicators)
+        1    0.001    0.001    0.063    0.063 C:\tradely\Tradely.dev\research\strategy_analyzer.py:1803(prepare_analysis_data)
+39882/147    0.036    0.000    0.053    0.000 C:\tradely\Tradely.dev\research\strategy_analyzer.py:823(json_safe)
+       12    0.048    0.004    0.050    0.004 C:\tradely\Tradely.dev\research\strategy_analyzer.py:846(wilder_rma)
+      202    0.044    0.000    0.044    0.000 {method 'astype' of 'numpy.ndarray' objects}
+    11401    0.010    0.000    0.039    0.000 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\core\series.py:1107(__getitem__)
+365020/364639    0.029    0.000    0.036    0.000 {built-in method builtins.isinstance}
+        1    0.003    0.003    0.032    0.032 C:\tradely\Tradely.dev\research\strategy_analyzer.py:556(htf_completion_frame)
+        1    0.000    0.000    0.028    0.028 C:\tradely\Tradely.dev\research\strategy_analyzer.py:1051(check_convergence)
+        2    0.000    0.000    0.027    0.014 C:\tradely\Tradely.dev\research\strategy_analyzer.py:985(indicator_snapshot)
+     1490    0.001    0.000    0.024    0.000 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\core\internals\base.py:378(interleaved_dtype)
+        1    0.000    0.000    0.023    0.023 C:\tradely\Tradely.dev\research\strategy_analyzer.py:1140(build_signals)
+     1500    0.006    0.000    0.023    0.000 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\core\dtypes\cast.py:1444(find_common_type)
+    37446    0.005    0.000    0.022    0.000 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\core\internals\blocks.py:1319(iget)
+        4    0.022    0.006    0.022    0.006 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\core\arrays\datetimes.py:746(_format_native_types)
+      499    0.003    0.000    0.021    0.000 C:\tradely\Tradely.dev\research\strategy_analyzer.py:543(base_coverage_for_htf)
+        2    0.000    0.000    0.021    0.010 C:\tradely\Tradely.dev\research\strategy_analyzer.py:155(read_ohlcv)
+      499    0.002    0.000    0.018    0.000 C:\tradely\Tradely.dev\research\strategy_analyzer.py:529(required_base_opens)
+  224/214    0.000    0.000    0.018    0.000 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\core\ops\common.py:62(new_method)
+     3041    0.002    0.000    0.017    0.000 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\core\arrays\datetimelike.py:390(__getitem__)
+    11401    0.006    0.000    0.017    0.000 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\core\series.py:1232(_get_value)
+     3041    0.003    0.000    0.015    0.000 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\core\arrays\_mixins.py:278(__getitem__)
+  320/318    0.002    0.000    0.014    0.000 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\core\series.py:392(__init__)
+      203    0.000    0.000    0.011    0.000 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\core\series.py:6222(_construct_result)
+      250    0.001    0.000    0.011    0.000 C:\Users\gunji\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pandas\core\frame.py:4073(__getitem__)
+        1    0.000    0.000    0.010    0.010 C:\tradely\Tradely.dev\research\strategy_analyzer.py:1655(summarize)
+40992/23265    0.006    0.000    0.010    0.000 {built-in method builtins.len}
+
+

@@ -18,7 +18,6 @@ sys.path.insert(0, str(RESEARCH))
 import strategy_analyzer as engine
 import v42_exhaustive_combination_tester as tester
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -272,6 +271,7 @@ class AnalyzerIntegrationTests(TempDataMixin, unittest.TestCase):
 
         with mock.patch.object(tester.engine, "run_analysis", side_effect=spy):
             result = tester.run_search(
+                workers=1,
                 timeframe="2h",
                 output_root=self.outputs,
                 base_path=self.base_path,
@@ -312,6 +312,7 @@ class AnalyzerIntegrationTests(TempDataMixin, unittest.TestCase):
 
         with mock.patch.object(tester.engine, "run_analysis", side_effect=spy):
             tester.run_search(
+                workers=1,
                 timeframe="2h", output_root=self.outputs,
                 base_path=self.base_path, htf_path=self.htf_path,
                 cutoff_mode="diagnostic", max_combinations=2, min_trades=0,
@@ -341,6 +342,7 @@ class AnalyzerIntegrationTests(TempDataMixin, unittest.TestCase):
         ):
             with self.assertRaises(ValueError) as ctx:
                 tester.run_search(
+                workers=1,
                     timeframe="2h", output_root=self.outputs,
                     base_path=self.base_path, htf_path=self.htf_path,
                     cutoff_mode="strict", max_combinations=1,
@@ -355,6 +357,7 @@ class AnalyzerIntegrationTests(TempDataMixin, unittest.TestCase):
         base = engine.read_ohlcv(self.base_path)
         cutoff = str(base.index[-1] + interval)
         result = tester.run_search(
+                workers=1,
             timeframe="2h", output_root=self.outputs,
             base_path=self.base_path, htf_path=self.htf_path,
             data_cutoff=cutoff, cutoff_mode="strict",
@@ -373,6 +376,7 @@ class AnalyzerIntegrationTests(TempDataMixin, unittest.TestCase):
         base = engine.read_ohlcv(self.base_path)
         cutoff = str(base.index[-1] + interval)
         result = tester.run_search(
+                workers=1,
             timeframe="2h", output_root=self.outputs,
             base_path=self.base_path, htf_path=self.htf_path,
             data_cutoff=cutoff, cutoff_mode="diagnostic",
@@ -387,6 +391,7 @@ class AnalyzerIntegrationTests(TempDataMixin, unittest.TestCase):
 
     def test_diagnostic_inferred_cutoff_is_unverified(self):
         result = tester.run_search(
+                workers=1,
             timeframe="2h", output_root=self.outputs,
             base_path=self.base_path, htf_path=self.htf_path,
             cutoff_mode="diagnostic", max_combinations=1, min_trades=0,
@@ -430,6 +435,7 @@ class CheckpointTests(TempDataMixin, unittest.TestCase):
             tester.engine, "run_analysis", side_effect=self.fake_engine(calls)
         ):
             result = tester.run_search(
+                workers=1,
                 timeframe="2h", output_root=self.outputs,
                 base_path=self.base_path, htf_path=self.htf_path,
                 cutoff_mode="diagnostic", max_combinations=2,
@@ -455,6 +461,7 @@ class CheckpointTests(TempDataMixin, unittest.TestCase):
         fake = self.fake_engine(calls)
         with mock.patch.object(tester.engine, "run_analysis", side_effect=fake):
             first = tester.run_search(
+                workers=1,
                 timeframe="2h", output_root=self.outputs,
                 base_path=self.base_path, htf_path=self.htf_path,
                 cutoff_mode="diagnostic", max_combinations=2,
@@ -462,6 +469,7 @@ class CheckpointTests(TempDataMixin, unittest.TestCase):
             )
             self.assertEqual(len(calls), 2)
             second = tester.run_search(
+                workers=1,
                 timeframe="2h", output_root=self.outputs,
                 base_path=self.base_path, htf_path=self.htf_path,
                 cutoff_mode="diagnostic", max_combinations=2,
@@ -484,6 +492,7 @@ class CheckpointTests(TempDataMixin, unittest.TestCase):
         fake = self.fake_engine(calls, interrupt_on=2)
         with mock.patch.object(tester.engine, "run_analysis", side_effect=fake):
             result = tester.run_search(
+                workers=1,
                 timeframe="2h", output_root=self.outputs,
                 base_path=self.base_path, htf_path=self.htf_path,
                 cutoff_mode="diagnostic", max_combinations=5,
@@ -505,6 +514,7 @@ class CheckpointTests(TempDataMixin, unittest.TestCase):
         fake = self.fake_engine(calls)
         with mock.patch.object(tester.engine, "run_analysis", side_effect=fake):
             resumed = tester.run_search(
+                workers=1,
                 timeframe="2h", output_root=self.outputs,
                 base_path=self.base_path, htf_path=self.htf_path,
                 cutoff_mode="diagnostic", max_combinations=5,
@@ -521,6 +531,7 @@ class CheckpointTests(TempDataMixin, unittest.TestCase):
         failing = self.fake_engine(calls, fail_first=True)
         with mock.patch.object(tester.engine, "run_analysis", side_effect=failing):
             first = tester.run_search(
+                workers=1,
                 timeframe="2h", output_root=self.outputs,
                 base_path=self.base_path, htf_path=self.htf_path,
                 cutoff_mode="diagnostic", max_combinations=1,
@@ -532,6 +543,7 @@ class CheckpointTests(TempDataMixin, unittest.TestCase):
         succeeding = self.fake_engine(calls)
         with mock.patch.object(tester.engine, "run_analysis", side_effect=succeeding):
             second = tester.run_search(
+                workers=1,
                 timeframe="2h", output_root=self.outputs,
                 base_path=self.base_path, htf_path=self.htf_path,
                 cutoff_mode="diagnostic", max_combinations=1,
@@ -565,6 +577,7 @@ class CheckpointTests(TempDataMixin, unittest.TestCase):
                 side_effect=self.fake_engine(calls),
             ):
                 result = tester.run_search(
+                workers=1,
                     timeframe="2h", output_root=self.outputs,
                     base_path=self.base_path, htf_path=self.htf_path,
                     cutoff_mode="diagnostic", max_combinations=10,
@@ -580,6 +593,7 @@ class CheckpointTests(TempDataMixin, unittest.TestCase):
         fake = self.fake_engine(calls, fail_first=True)
         with mock.patch.object(tester.engine, "run_analysis", side_effect=fake):
             result = tester.run_search(
+                workers=1,
                 timeframe="2h", output_root=self.outputs,
                 base_path=self.base_path, htf_path=self.htf_path,
                 cutoff_mode="diagnostic", max_combinations=2,
@@ -625,6 +639,7 @@ class ReportingTests(TempDataMixin, unittest.TestCase):
 
         with mock.patch.object(tester.engine, "run_analysis", side_effect=run):
             result = tester.run_search(
+                workers=1,
                 timeframe="2h", output_root=self.outputs,
                 base_path=self.base_path, htf_path=self.htf_path,
                 cutoff_mode="diagnostic", max_combinations=2,
@@ -646,6 +661,7 @@ class ReportingTests(TempDataMixin, unittest.TestCase):
             tester.engine, "run_analysis", side_effect=self.fake_engine(calls)
         ):
             result = tester.run_search(
+                workers=1,
                 timeframe="2h", output_root=self.outputs,
                 base_path=self.base_path, htf_path=self.htf_path,
                 cutoff_mode="diagnostic", max_combinations=8,
@@ -675,12 +691,14 @@ class ReportingTests(TempDataMixin, unittest.TestCase):
             tester.engine, "run_analysis", side_effect=self.fake_engine(calls)
         ):
             two_hour = tester.run_search(
+                workers=1,
                 timeframe="2h", output_root=self.outputs,
                 base_path=paths["2h"], htf_path=self.htf_path,
                 cutoff_mode="diagnostic", max_combinations=1,
                 min_trades=0, parameter_ranges=SMALL_RANGES, echo=False,
             )
             four_hour = tester.run_search(
+                workers=1,
                 timeframe="4h", output_root=self.outputs,
                 base_path=paths["4h"], htf_path=self.htf_path,
                 cutoff_mode="diagnostic", max_combinations=1,
@@ -707,6 +725,7 @@ class ReportingTests(TempDataMixin, unittest.TestCase):
             tester.engine, "run_analysis", side_effect=self.fake_engine(calls)
         ):
             result = tester.run_search(
+                workers=1,
                 timeframe="2h", output_root=self.outputs,
                 base_path=self.base_path, htf_path=self.htf_path,
                 cutoff_mode="diagnostic", max_combinations=1,

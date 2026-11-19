@@ -1,0 +1,256 @@
+{
+  "strategy": "EMA Pullback V4.2 OHLCV-only",
+  "timeframe": "1d",
+  "base_source": "C:\\Users\\Ral\\OneDrive - PESUNIVERSITY\\Documents\\PlayGround\\Tradely\\research\\data\\BTCUSDT\\BTCUSDT_1day.csv",
+  "base_source_sha256": "ba9178eeae660d030dbfa953e4a3a79151b632d51836df9560d282bd0104b71d",
+  "htf_source": "C:\\Users\\Ral\\OneDrive - PESUNIVERSITY\\Documents\\PlayGround\\Tradely\\research\\data\\BTCUSDT\\BTCUSDT_1week.csv",
+  "htf_source_sha256": "75ff1329ac0927f2649ce2cc45affbc5b432485aeea60fb320ac2214e50ec831",
+  "first_candle": "2017-08-17 00:00:00+00:00",
+  "last_candle": "2026-10-26 00:00:00+00:00",
+  "bars": 3358,
+  "warmup": {
+    "passed": true,
+    "convergence_index": 1400,
+    "evaluation_start_index": 1500,
+    "burn_in_bars": 350,
+    "attempts": 3,
+    "reason": "CONVERGENCE_PASSED",
+    "details": {
+      "checks": {
+        "ema_fast": true,
+        "ema_mid": true,
+        "ema_slow": true,
+        "htf_ema": true,
+        "atr": true,
+        "adx": true,
+        "plus_di": true,
+        "minus_di": true
+      },
+      "nonfinite": [],
+      "candidate_time": "2021-06-17 00:00:00+00:00",
+      "attempt": 3
+    }
+  },
+  "gross_only_warning": "Fees, slippage and historical funding are excluded by user request. These are NOT net results.",
+  "metrics": {
+    "trades": 25,
+    "wins": 5,
+    "losses": 20,
+    "win_rate_pct": 20.0,
+    "profit_factor_gross_R": 0.6180117617118549,
+    "average_gross_R": -0.247236872793528,
+    "total_gross_R": -6.1809218198382,
+    "compounded_equity_return_pct": -6.154491129753714,
+    "max_drawdown_pct": -8.486085711974745,
+    "long_trades": 12,
+    "short_trades": 13,
+    "long_expectancy_gross_R": -0.5079467554196627,
+    "short_expectancy_gross_R": -0.006581596523249787,
+    "mean_realised_loss_ratio_vs_actual": 0.80904609099191,
+    "p95_realised_loss_ratio_vs_actual": 1.0,
+    "mean_realised_loss_ratio_vs_budget": 0.80904609099191,
+    "p95_realised_loss_ratio_vs_budget": 1.0,
+    "gap_affected_trades": 0,
+    "gap_unaffected_trades": 25,
+    "gap_affected_total_gross_R": 0.0,
+    "gap_unaffected_total_gross_R": -6.1809218198382,
+    "gap_affected_compounded_return_pct": 0.0,
+    "gap_unaffected_compounded_return_pct": -6.154491129753703,
+    "gap_uncertain_trades": 0,
+    "wait_no_data": 1500,
+    "wait_chop": 458,
+    "wait_no_trend": 387,
+    "wait_htf_conflict": 227,
+    "wait_no_pullback": 493,
+    "wait_no_trigger": 228,
+    "wait_stop_invalid": 14,
+    "run_id": "7f338e8cb4d04b38",
+    "engine_version": "V4.2",
+    "engine_source_sha256": "d7e5a5ae03ed09a6972d4cfe8c7f0efacb14be4b3f549c25e02fa2326756c5c2",
+    "data_processing_version": "V4.2-bugfix1"
+  },
+  "gap_sensitivity": {
+    "description": "Sensitivity view only. Unaffected trades are summarised separately; affected trades remain in the baseline and are NOT removed.",
+    "affected": {
+      "trades": 0,
+      "win_rate_pct": null,
+      "profit_factor_gross_R": null,
+      "average_gross_R": null,
+      "total_gross_R": 0.0,
+      "compounded_return_pct": 0.0
+    },
+    "unaffected": {
+      "trades": 25,
+      "win_rate_pct": 20.0,
+      "profit_factor_gross_R": 0.6180117617118549,
+      "average_gross_R": -0.247236872793528,
+      "total_gross_R": -6.1809218198382,
+      "compounded_return_pct": -6.154491129753703
+    }
+  },
+  "run_id": "7f338e8cb4d04b38",
+  "engine_version": "V4.2",
+  "engine_source_path": "C:\\Users\\Ral\\OneDrive - PESUNIVERSITY\\Documents\\PlayGround\\Tradely\\research\\strategy_analyzer.py",
+  "engine_source_sha256": "d7e5a5ae03ed09a6972d4cfe8c7f0efacb14be4b3f549c25e02fa2326756c5c2",
+  "imported_execution_modules": {
+    "numpy": {
+      "version": "2.5.4",
+      "module_file": "C:\\Users\\Ral\\OneDrive - PESUNIVERSITY\\Documents\\PlayGround\\Tradely\\.venv\\Lib\\site-packages\\numpy\\__init__.py",
+      "sha256": "a6958cb364663b7acce81ccfd58eeb65a2b34d5376157f924777b97211a73be4"
+    },
+    "pandas": {
+      "version": "2.3.3",
+      "module_file": "C:\\Users\\Ral\\OneDrive - PESUNIVERSITY\\Documents\\PlayGround\\Tradely\\.venv\\Lib\\site-packages\\pandas\\__init__.py",
+      "sha256": "47d2b5e8681ab2db1d38ceb4e31799b193ab33c2b2536ac63927bf7952cffb25"
+    }
+  },
+  "data_processing_version": "V4.2-bugfix1",
+  "execution_model": {
+    "entry_model": "NEXT_CANDLE_OPEN",
+    "exit_priority": [
+      "GAP_STOP",
+      "GAP_TARGET_LIMIT",
+      "STOP_BOTH_TOUCHED_STOP_FIRST",
+      "INITIAL_STOP",
+      "TRAILING_STOP",
+      "TARGET",
+      "TIME_STOP",
+      "DATA_END"
+    ],
+    "gap_events_evaluated_at_open": true,
+    "same_candle_stop_first": true,
+    "trailing_stop_model": "CHANDELIER_AFTER_CLOSE_NEXT_CANDLE",
+    "exit_fill_model": "open_for_gap_stop_stop_price_for_intrabar_target_price_for_limit",
+    "mae_mfe_model": "completed_bars_plus_exit_fill_excludes_post_exit_extremes",
+    "leverage_cap": 1.0,
+    "starting_equity_usdt": 10000.0,
+    "market_mode": "spot_signal_only",
+    "cost_model": "EXCLUDED_BY_USER_REQUEST",
+    "funding_model": "EXCLUDED_BY_USER_REQUEST",
+    "data_processing_version": "V4.2-bugfix1"
+  },
+  "execution_constraints": {
+    "min_quantity": null,
+    "quantity_precision": null,
+    "min_notional": null
+  },
+  "execution_rejections": [],
+  "configuration": {
+    "fast_ema": 20,
+    "medium_ema": 50,
+    "slow_ema": 200,
+    "adx_period": 14,
+    "adx_min": 20,
+    "atr_period": 14,
+    "htf_ema": 50,
+    "pullback_n": 5,
+    "pullback_depth_atr": 0.25,
+    "trigger_close_long": 0.65,
+    "trigger_close_short": 0.35,
+    "stop_buffer_atr": 0.25,
+    "min_stop_atr": 0.5,
+    "max_stop_atr": 3.0,
+    "chandelier_atr": 3.0,
+    "target_r": 2.0,
+    "time_stop": 40,
+    "risk_pct": 0.01
+  },
+  "market_mode": "spot_signal_only",
+  "short_signal_warning": "SHORT PnL is hypothetical only when inputs are Spot OHLCV.",
+  "funding_model": "EXCLUDED_BY_USER_REQUEST",
+  "cost_model": "EXCLUDED_BY_USER_REQUEST",
+  "data_quality": {
+    "base": {
+      "source": "C:\\Users\\Ral\\OneDrive - PESUNIVERSITY\\Documents\\PlayGround\\Tradely\\research\\data\\BTCUSDT\\BTCUSDT_1day.csv",
+      "format": "header",
+      "rows_loaded": 3358,
+      "rows_after_numeric_validation": 3358,
+      "rows_dropped_invalid_numeric": 0,
+      "rows_dropped_invalid_timestamp": 0,
+      "rows_usable": 3358,
+      "timestamp_unit": "ms",
+      "timestamps_utc": true,
+      "sorted_chronologically": true,
+      "duplicate_timestamps_removed": 0,
+      "ohlc_valid": true,
+      "first_candle": "2017-08-17 00:00:00+00:00",
+      "last_candle": "2026-10-26 00:00:00+00:00",
+      "missing_candles": {
+        "expected_interval": "1 days 00:00:00",
+        "missing_candle_count": 0,
+        "gap_event_count": 0,
+        "gap_events": [],
+        "is_complete": true
+      }
+    },
+    "htf": {
+      "source": "C:\\Users\\Ral\\OneDrive - PESUNIVERSITY\\Documents\\PlayGround\\Tradely\\research\\data\\BTCUSDT\\BTCUSDT_1week.csv",
+      "format": "header",
+      "rows_loaded": 480,
+      "rows_after_numeric_validation": 480,
+      "rows_dropped_invalid_numeric": 0,
+      "rows_dropped_invalid_timestamp": 0,
+      "rows_usable": 480,
+      "timestamp_unit": "ms",
+      "timestamps_utc": true,
+      "sorted_chronologically": true,
+      "duplicate_timestamps_removed": 0,
+      "ohlc_valid": true,
+      "first_candle": "2017-08-14 00:00:00+00:00",
+      "last_candle": "2026-10-19 00:00:00+00:00",
+      "missing_candles": {
+        "expected_interval": "7 days 00:00:00",
+        "missing_candle_count": 0,
+        "gap_event_count": 0,
+        "gap_events": [],
+        "is_complete": true
+      },
+      "completion": {
+        "htf_timeframe": "1w",
+        "expected_interval": "7 days 00:00:00",
+        "data_cutoff": "2026-10-27 00:00:00+00:00",
+        "cutoff_source": "derived_from_last_base_candle_close",
+        "complete_count": 480,
+        "incomplete_count": 0,
+        "unknown_count": 0,
+        "excluded_candle_count": 0,
+        "excluded_candles": [],
+        "last_complete_candle_open": "2026-10-19 00:00:00+00:00",
+        "last_complete_available_at": "2026-10-26 00:00:00+00:00",
+        "rule": "Usable only when open + configured exchange timeframe duration <= explicit data cutoff. UNKNOWN completion is excluded."
+      }
+    }
+  },
+  "data_cutoff": {
+    "value": "2026-10-27 00:00:00+00:00",
+    "source": "derived_from_last_base_candle_close",
+    "note": "HTF candles completing after this cutoff are treated as incomplete and excluded from signal calculations."
+  },
+  "htf_completion": {
+    "htf_timeframe": "1w",
+    "expected_interval": "7 days 00:00:00",
+    "data_cutoff": "2026-10-27 00:00:00+00:00",
+    "cutoff_source": "derived_from_last_base_candle_close",
+    "complete_count": 480,
+    "incomplete_count": 0,
+    "unknown_count": 0,
+    "excluded_candle_count": 0,
+    "excluded_candles": [],
+    "last_complete_candle_open": "2026-10-19 00:00:00+00:00",
+    "last_complete_available_at": "2026-10-26 00:00:00+00:00",
+    "rule": "Usable only when open + configured exchange timeframe duration <= explicit data cutoff. UNKNOWN completion is excluded."
+  },
+  "spec_parity": {
+    "frozen_specification_file_found": false,
+    "parity_certified": false,
+    "confirmed_discrepancy": null,
+    "implemented_conditions_observed": {
+      "long_ema_hierarchy": "ema_fast > ema_mid and close > ema_slow and ema_mid > ema_slow",
+      "short_ema_hierarchy": "ema_fast < ema_mid and close < ema_slow and ema_mid < ema_slow",
+      "long_di_filter": "plus_di > minus_di",
+      "short_di_filter": "minus_di > plus_di"
+    },
+    "note": "No frozen V4.2 strategy specification document was found in the project. The implemented EMA hierarchy and directional DI filters were inspected and left unchanged because there is no authoritative frozen text to compare against. Parity therefore cannot be certified; no requirement was invented."
+  },
+  "output_directory": "C:\\Users\\Ral\\OneDrive - PESUNIVERSITY\\Documents\\PlayGround\\Tradely\\research\\results\\v42_bugfix_1\\1d"
+}

@@ -51,17 +51,6 @@ class IndicatorTests(unittest.TestCase):
     def test_ema_order_validation(self):
         cfg = dict(engine.BASELINE_CONFIGS["2h"])
         cfg.update({"fast_ema": 50, "medium_ema": 20})
-        idx = pd.date_range("2020-01-01", periods=10, freq="2h", tz="UTC")
-        df = pd.DataFrame({
-            "open": np.arange(100, 110), "high": np.arange(101, 111),
-            "low": np.arange(99, 109), "close": np.arange(100, 110),
-            "volume": 1.0,
-        }, index=idx)
-        hidx = pd.date_range("2019-01-01", periods=100, freq="1D", tz="UTC")
-        htf = pd.DataFrame({
-            "open": 100.0, "high": 101.0, "low": 99.0,
-            "close": np.linspace(100, 120, 100), "volume": 1.0,
-        }, index=hidx)
         with self.assertRaises(ValueError):
             engine.run_analysis("2h", Path("missing.csv"), Path("missing2.csv"), cfg)
 
