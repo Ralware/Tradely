@@ -7,15 +7,13 @@ import { portfolioService } from '../services/portfolioService';
 import type { Instrument, SignalState, WatchlistItem } from '../types/api';
 import { instrumentPath } from '../utils/navigation';
 import { quoteRefFromWatchlist } from '../utils/quotes';
+import { nextWatchlistSort, watchlistItemKey } from '../utils/watchlistSort';
+import type { WatchlistSort } from '../utils/watchlistSort';
 import { Button } from '../components/common/Button';
 import { Icon } from '../components/common/Icon';
 import { ErrorState, LoadingPanel, Notice } from '../components/common/States';
 import { WatchlistTable } from '../components/tables/WatchlistTable';
 import { InstrumentSearch } from '../components/instruments/InstrumentSearch';
-
-function itemKey(item: WatchlistItem): string {
-  return item.instrument_id ?? `${item.market}:${item.exchange}:${item.symbol}`;
-}
 
 export function WatchlistPage() {
   const navigate = useNavigate();
@@ -27,6 +25,7 @@ export function WatchlistPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [addingError, setAddingError] = useState<string | null>(null);
+  const [watchlistSort, setWatchlistSort] = useState<WatchlistSort | null>(null);
 
   const watchlistItems = useMemo(() => watchlist.data?.items ?? [], [watchlist.data]);
   const watchlistRefs = useMemo(
@@ -66,12 +65,12 @@ export function WatchlistPage() {
 
     async function loadSparklines() {
       const nextMap = new Map(sparklineCache.current);
-      const missing = watchlistItems.filter((item) => !nextMap.has(itemKey(item)));
+      const missing = watchlistItems.filter((item) => !nextMap.has(watchlistItemKey(item)));
 
       if (missing.length > 0) {
         await Promise.all(
           missing.map(async (item) => {
-            const key = itemKey(item);
+            const key = watchlistItemKey(item);
             try {
               const res = await marketService.getCandles({
                 instrumentId: item.instrument_id,
@@ -106,7 +105,7 @@ export function WatchlistPage() {
 
   async function handleRemove(item: WatchlistItem) {
     setActionError(null);
-    const key = itemKey(item);
+    const key = watchlistItemKey(item);
     setRemoving(key);
     try {
       await portfolioService.removeWatchlist({
@@ -211,6 +210,8 @@ export function WatchlistPage() {
             quotes={watchlistQuotes}
             signals={signalsMap}
             sparklines={sparklines}
+            sort={watchlistSort}
+            onSort={(column) => setWatchlistSort((current) => nextWatchlistSort(current, column))}
             removing={removing}
             onRemove={(item) => void handleRemove(item)}
             onRowClick={handleRowClick}

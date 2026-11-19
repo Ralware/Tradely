@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { Quote, SignalState, WatchlistItem } from '../../types/api';
-import { formatPercent, toneForNumber } from '../../utils/format';
+import { cn, formatPercent, toneForNumber } from '../../utils/format';
+import { buildWatchlistRows, sortWatchlistRows } from '../../utils/watchlistSort';
+import type { WatchlistSort, WatchlistSortColumn } from '../../utils/watchlistSort';
 import { EmptyState } from '../common/States';
 import { Sparkline } from '../charts/Sparkline';
 
@@ -11,16 +13,14 @@ export interface WatchlistTableProps {
   quotes?: Map<string, Quote>;
   signals?: Map<string, { state: SignalState; label?: string }>;
   sparklines?: Map<string, number[]>;
+  sort: WatchlistSort | null;
+  onSort: (column: WatchlistSortColumn) => void;
   removing?: string | null;
   onRemove: (item: WatchlistItem) => void;
   onRowClick?: (item: WatchlistItem) => void;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function itemKey(item: WatchlistItem): string {
-  return item.instrument_id ?? `${item.market}:${item.exchange}:${item.symbol}`;
-}
 
 function toneClass(value: number | null | undefined): string {
   const tone = toneForNumber(value);
@@ -102,11 +102,42 @@ export function WatchlistTable({
   quotes,
   signals,
   sparklines,
+  sort,
+  onSort,
   removing,
   onRemove,
   onRowClick,
 }: WatchlistTableProps) {
   const [actionMenuOpen, setActionMenuOpen] = useState<string | null>(null);
+
+  const rows = useMemo(() => {
+    const built = buildWatchlistRows(items, quotes);
+    return sort ? sortWatchlistRows(built, sort.column, sort.direction) : built;
+  }, [items, quotes, sort]);
+
+  function renderSortHeader(column: WatchlistSortColumn, label: string) {
+    const active = sort?.column === column;
+    const direction = active ? sort.direction : null;
+    const ariaSort = direction === 'asc' ? 'ascending' : direction === 'desc' ? 'descending' : 'none';
+
+    return (
+      <th className="py-2.5 pr-4 text-right" aria-sort={ariaSort}>
+        <button
+          type="button"
+          onClick={() => onSort(column)}
+          className={cn(
+            'inline-flex cursor-pointer items-center gap-1 transition-colors hover:text-white',
+            active ? 'text-white' : 'text-terminal-muted',
+          )}
+        >
+          {label}
+          <span aria-hidden="true" className="inline-block w-3 text-center">
+            {direction === 'asc' ? '↑' : direction === 'desc' ? '↓' : '⇅'}
+          </span>
+        </button>
+      </th>
+    );
+  }
 
   if (items.length === 0) {
     return (
@@ -125,18 +156,16 @@ export function WatchlistTable({
           <tr className="border-b border-terminal-border text-left text-2xs font-medium text-terminal-muted select-none">
             <th className="w-10 py-2.5 pl-3 pr-2 text-left">#</th>
             <th className="py-2.5 pr-4">Symbol ⇅</th>
-            <th className="py-2.5 pr-4 text-right">Last ⇅</th>
-            <th className="py-2.5 pr-4 text-right">Change ⇅</th>
-            <th className="py-2.5 pr-4 text-right">Chg% ⇅</th>
+            {renderSortHeader('price', 'Last')}
+            {renderSortHeader('change', 'Change')}
+            {renderSortHeader('changePct', 'Chg%')}
             <th className="py-2.5 pr-4 text-center">Signal</th>
             <th className="w-32 py-2.5 pr-4 text-center">Chart (7D)</th>
             <th className="w-10 py-2.5 pr-3 text-right">···</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-terminal-borderSoft">
-          {items.map((item, index) => {
-            const key = itemKey(item);
-            const quote = quotes?.get(key) ?? quotes?.get(item.symbol) ?? null;
+          {rows.map(({ item, key, quote }, index) => {
             const signal = signals?.get(key) ?? signals?.get(item.symbol) ?? null;
             const sparkData = sparklines?.get(key) ?? [];
             const isRemoving = removing === key;
@@ -166,6 +195,9 @@ export function WatchlistTable({
                 {/* Last */}
                 <td className="num py-3 pr-4 text-right font-mono font-medium text-white">
                   {formatPrice(quote?.price)}
+                  {quote?.currency ? (
+                    <span className="ml-1 text-2xs font-normal text-terminal-muted">{quote.currency}</span>
+                  ) : null}
                 </td>
 
                 {/* Change */}
