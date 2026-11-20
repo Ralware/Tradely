@@ -7,3 +7,4 @@ __pycache__/
 htmlcov/
 research/benchmarks/run_*/
 research/optimization/100k_2h/results/2h/a3dcf664ad210841/records/
+research/optimization/100k_2h/
