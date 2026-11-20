@@ -707,13 +707,13 @@ class PositionSizingTests(unittest.TestCase):
     def test_quantity_precision_is_applied_to_actual_risk(self):
         frame = make_signal_frame()
         cfg = dict(engine.BASELINE_CONFIGS["2h"])
-        cfg["risk_pct"] = 0.0123  # 24.6 units before precision
+        cfg["risk_pct"] = 0.0123  # 2.46 units before precision
         trades, _ = engine.simulate_trades(
             frame, cfg, "2h",
             execution_constraints={"quantity_precision": 0},
         )
         trade = trades[0]
-        self.assertEqual(trade["quantity"], 24.0)
+        self.assertEqual(trade["quantity"], 2.0)
         self.assertTrue(trade["quantity_precision_applied"])
         self.assertAlmostEqual(trade["actual_initial_risk"],
                                trade["quantity"] * 5.0)

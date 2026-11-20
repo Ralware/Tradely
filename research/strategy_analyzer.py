@@ -1,20 +1,5 @@
 #!/usr/bin/env python3
-"""
-EMA Pullback V4.2 research engine — OHLCV-only variant.
-
-Implements the frozen V4.2 EMA Pullback signal and execution rules using
-completed OHLCV candles. Historical funding and exchange fee/slippage
-assumptions are intentionally EXCLUDED at the user's request.
-
-Consequently:
-- All PnL/returns are GROSS, not net.
-- No funding is charged or credited.
-- No exchange commissions or slippage are modelled.
-- Spot SHORTs are hypothetical/signal-only, not executable Spot returns.
-- This is a research analyzer; it never submits orders.
-
-Dependencies: pandas, numpy
-"""
+"""EMA Pullback V4.2 research simulator for completed OHLCV bars."""
 
 from __future__ import annotations
 
@@ -30,16 +15,21 @@ from typing import Any, Literal, cast
 
 import numpy as np
 import pandas as pd
+from exit_paths import exit_paths, pullback_windows
+
+# Standalone research CLI also uses the backend fill model.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
+from app.core.fills import PERPETUAL_FEES  # noqa: E402
 
 # =============================================================================
 # USER CONFIGURATION — EDIT THESE VALUES
 # =============================================================================
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DATA_DIRECTORY = PROJECT_ROOT / "research" / "data" / "BTCUSDT"
+DATA_DIRECTORY = PROJECT_ROOT / "research" / "data" / "BTCUSDT_USDM"
 # Bug-fix revision outputs are deliberately written to a new root so the
 # original V4.2 baseline under research/results/v42/ is never overwritten.
-OUTPUT_DIRECTORY = PROJECT_ROOT / "research" / "results" / "v42_bugfix_2"
+OUTPUT_DIRECTORY = PROJECT_ROOT / "research" / "results" / "v42_net"
 
 # Choose one timeframe per run: "2h", "4h", or "1d".
 TIMEFRAME_TO_TEST = "2h"
@@ -92,14 +82,15 @@ POST_CONVERGENCE_BUFFER_BARS = 100
 EMA_TOLERANCE_PRICE_FRACTION = 0.0005       # 0.05% of price
 ATR_TOLERANCE_RELATIVE = 0.02               # 2.0%
 ADX_DI_TOLERANCE_POINTS = 1.0
-STARTING_EQUITY_USDT = 10_000.0
+STARTING_EQUITY_USDT = 1_000.0
 LEVERAGE_CAP = 1.0                          # no liquidation model at 1x
 
-# This engine deliberately excludes funding and fees/slippage.
-COST_MODEL = "EXCLUDED_BY_USER_REQUEST"
-FUNDING_MODEL = "EXCLUDED_BY_USER_REQUEST"
+MAKER_RATE = PERPETUAL_FEES.maker
+TAKER_RATE = PERPETUAL_FEES.taker
+COST_MODEL = "PER_FILL_MAKER_5BPS_TAKER_2BPS_V1"
+FUNDING_MODEL = "UNAVAILABLE_EXCLUDED_ZERO"
 
-ENGINE_VERSION = "V4.2"
+ENGINE_VERSION = "V4.2-net.1"
 DATA_PROCESSING_VERSION = "V4.2-bugfix2"
 # Production research must use an independently verified cutoff. Diagnostic
 # mode may infer one, but it never claims verified completeness.
@@ -245,6 +236,29 @@ def read_ohlcv(path: Path, *, reject_suspicious: bool = False) -> pd.DataFrame:
         raise ValueError(f"{path.name}: invalid OHLC relationship on {int(bad.sum())} rows")
 
     result = df[["open", "high", "low", "close", "volume"]].astype(float)
+    if "funding_rate" in df or "funding_mark_price" in df:
+        if not {"funding_rate", "funding_mark_price"}.issubset(df):
+            raise ValueError("Funding requires a rate and settlement mark price at each event")
+        rate = pd.to_numeric(df["funding_rate"], errors="raise")
+        mark = pd.to_numeric(df["funding_mark_price"], errors="raise")
+        events = rate.notna()
+        if (not np.isfinite(rate[events]).all() or not np.isfinite(mark[events]).all()
+                or (mark[events] <= 0).any() or mark[~events].notna().any()):
+            raise ValueError("Invalid funding settlement")
+        result["funding_rate"] = rate
+        result["funding_mark_price"] = mark
+    if "warmup_only" in df:
+        mask = pd.to_numeric(df["warmup_only"], errors="raise")
+        if not mask.isin([0, 1]).all() or not mask.is_monotonic_decreasing:
+            raise ValueError("warmup_only must be a leading prefix of 1 followed by 0")
+        result["warmup_only"] = mask.astype(bool)
+    unit_fields = ["funding_open_per_unit", "funding_inside_per_unit"]
+    if any(k in df for k in unit_fields):
+        if not all(k in df for k in unit_fields) or "funding_rate" in df:
+            raise ValueError("Supply one complete funding representation")
+        result[unit_fields] = df[unit_fields].astype(float)
+        if not np.isfinite(result[unit_fields].to_numpy()).all():
+            raise ValueError("Funding payments must be finite")
     result.attrs["data_quality"] = {
         "source": str(path),
         "format": format_used,
@@ -678,7 +692,7 @@ def engine_source_path() -> Path:
 
 
 def engine_source_hash() -> str:
-    return sha256_file(engine_source_path())
+    return hashlib.sha256((sha256_file(engine_source_path()) + sha256_file(Path(__file__).with_name("exit_paths.py")) + sha256_file(PROJECT_ROOT / "backend/app/core/fills.py")).encode()).hexdigest()
 
 
 def imported_execution_module_fingerprints() -> dict[str, Any]:
@@ -696,6 +710,7 @@ def imported_execution_module_fingerprints() -> dict[str, Any]:
 
 def execution_model_settings() -> dict[str, Any]:
     return {
+        "maker_rate": MAKER_RATE, "taker_rate": TAKER_RATE, "slippage_rate": 0.0,
         "entry_model": "NEXT_CANDLE_OPEN",
         "exit_priority": [
             "GAP_STOP",
@@ -711,10 +726,11 @@ def execution_model_settings() -> dict[str, Any]:
         "same_candle_stop_first": True,
         "trailing_stop_model": "CHANDELIER_AFTER_CLOSE_NEXT_CANDLE",
         "exit_fill_model": "open_for_gap_stop_stop_price_for_intrabar_target_price_for_limit",
+        "intrabar_settlement_rule": "Open settlements before entry; intrabar exits precede later settlements; time/data-end exits settle at close.",
         "mae_mfe_model": "completed_bars_plus_exit_fill_excludes_post_exit_extremes",
         "leverage_cap": LEVERAGE_CAP,
         "starting_equity_usdt": STARTING_EQUITY_USDT,
-        "market_mode": "spot_signal_only",
+        "market_mode": "binance_usdt_perpetual_simulation",
         "cost_model": COST_MODEL,
         "funding_model": FUNDING_MODEL,
         "data_processing_version": DATA_PROCESSING_VERSION,
@@ -1121,6 +1137,10 @@ def check_convergence(df: pd.DataFrame, htf: pd.DataFrame, cfg: dict[str, Any],
         }
         if passed:
             eval_start = candidate + POST_CONVERGENCE_BUFFER_BARS
+            if "warmup_only" in df:
+                eval_start = max(eval_start, int(df["warmup_only"].sum()))
+                if eval_start >= len(df) - 1:
+                    return WarmupResult(False, candidate, None, burn, attempts, "NO_DATA: warmup-only history", details)
             return WarmupResult(
                 True, candidate, eval_start, burn, attempts,
                 "CONVERGENCE_PASSED", details,
@@ -1142,7 +1162,7 @@ def build_signals(base: pd.DataFrame, htf: pd.DataFrame, cfg: dict[str, Any],
                   data_cutoff: Any = None,
                   cutoff_mode: str = DEFAULT_CUTOFF_MODE,
                   cutoff_policy: dict[str, Any] | None = None,
-                  indicator_frame: pd.DataFrame | None = None
+                  indicator_frame: pd.DataFrame | None = None, execution_mode: str = "cpu"
                   ) -> pd.DataFrame:
     x = indicator_frame.copy() if indicator_frame is not None else attach_htf_indicators(
         add_indicators(base, cfg), htf, cfg["htf_ema"], timeframe=timeframe,
@@ -1161,19 +1181,35 @@ def build_signals(base: pd.DataFrame, htf: pd.DataFrame, cfg: dict[str, Any],
     n = int(cfg["pullback_n"])
     # Previous N bars only; trigger candle is excluded. Each historical candle
     # is compared to its own contemporaneous EMA20/ATR/EMA50.
-    pb_touch_long = (x["low"] <= x["ema_fast"]).shift(1).rolling(n, min_periods=n).max().eq(1)
-    pb_touch_short = (x["high"] >= x["ema_fast"]).shift(1).rolling(n, min_periods=n).max().eq(1)
+    device_windows = None
+    if execution_mode == "gpu" or (execution_mode == "auto" and len(x) >= 100_000):
+        try:
+            device = cuda_device()
+            free, _ = device.cuda.runtime.memGetInfo()
+            device_windows = pullback_windows(x, cfg, device, max(1, free // (256 * (n + 1))))
+            x.attrs["signal_backend"] = "cuda"
+        except (ImportError, OSError, RuntimeError, MemoryError) as exc:
+            x.attrs["signal_fallback"] = str(exc)
+    if device_windows is None:
+        pb_touch_long = (x["low"] <= x["ema_fast"]).shift(1).rolling(n, min_periods=n).max().eq(1)
+        pb_touch_short = (x["high"] >= x["ema_fast"]).shift(1).rolling(n, min_periods=n).max().eq(1)
 
-    depth_floor_long = x["ema_mid"] - cfg["pullback_depth_atr"] * x["atr"]
-    depth_ceiling_short = x["ema_mid"] + cfg["pullback_depth_atr"] * x["atr"]
-    pb_window_close_below = (
-        (x["close"] < depth_floor_long).shift(1).rolling(n, min_periods=n).max().eq(1)
-    )
-    pb_window_close_above = (
-        (x["close"] > depth_ceiling_short).shift(1).rolling(n, min_periods=n).max().eq(1)
-    )
-    pullback_long = pb_touch_long & ~pb_window_close_below
-    pullback_short = pb_touch_short & ~pb_window_close_above
+        depth_floor_long = x["ema_mid"] - cfg["pullback_depth_atr"] * x["atr"]
+        depth_ceiling_short = x["ema_mid"] + cfg["pullback_depth_atr"] * x["atr"]
+        pb_window_close_below = (
+            (x["close"] < depth_floor_long).shift(1).rolling(n, min_periods=n).max().eq(1)
+        )
+        pb_window_close_above = (
+            (x["close"] > depth_ceiling_short).shift(1).rolling(n, min_periods=n).max().eq(1)
+        )
+        pullback_long = pb_touch_long & ~pb_window_close_below
+        pullback_short = pb_touch_short & ~pb_window_close_above
+
+        stop_window = n + 1
+        x["long_stop"] = x["low"].rolling(stop_window, min_periods=stop_window).min() - cfg["stop_buffer_atr"] * x["atr"]
+        x["short_stop"] = x["high"].rolling(stop_window, min_periods=stop_window).max() + cfg["stop_buffer_atr"] * x["atr"]
+    else:
+        pullback_long, pullback_short, x["long_stop"], x["short_stop"] = device_windows
 
     loc_range = (x["high"] - x["low"])
     x["close_location"] = np.where(
@@ -1213,9 +1249,6 @@ def build_signals(base: pd.DataFrame, htf: pd.DataFrame, cfg: dict[str, Any],
         & (x["close_location"] <= cfg["trigger_close_short"])
     )
 
-    stop_window = n + 1
-    x["long_stop"] = x["low"].rolling(stop_window, min_periods=stop_window).min() - cfg["stop_buffer_atr"] * x["atr"]
-    x["short_stop"] = x["high"].rolling(stop_window, min_periods=stop_window).max() + cfg["stop_buffer_atr"] * x["atr"]
     x["long_stop_distance_atr_signal"] = (x["close"] - x["long_stop"]) / x["atr"]
     x["short_stop_distance_atr_signal"] = (x["short_stop"] - x["close"]) / x["atr"]
 
@@ -1291,12 +1324,12 @@ def classify_gap_intersection(entry_time: pd.Timestamp, exit_time: pd.Timestamp,
 
 
 def simulate_trades(signals: pd.DataFrame, cfg: dict[str, Any], timeframe: str,
-                    market_mode: str = "spot_signal_only",
+                    market_mode: str = "binance_usdt_perpetual_simulation",
                     run_id: str | None = None,
                     execution_constraints: dict[str, Any] | None = None,
                     rejection_log: list[dict[str, Any]] | None = None,
                     gap_events: list[dict[str, Any]] | None = None,
-                    collect_audit: bool = True
+                    collect_audit: bool = True, planned_exits=None
                     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     trades: list[dict[str, Any]] = []
     audit: list[dict[str, Any]] = []
@@ -1312,6 +1345,7 @@ def simulate_trades(signals: pd.DataFrame, cfg: dict[str, Any], timeframe: str,
     quantity_precision = constraints.get("quantity_precision")
     min_notional = constraints.get("min_notional")
 
+    open_payment, inside_payment = funding_per_unit(signals)
     def log_rejection(sig: pd.Series, entry_bar: pd.Series, reason: str,
                       details: dict[str, Any]) -> None:
         if rejection_log is None:
@@ -1342,6 +1376,9 @@ def simulate_trades(signals: pd.DataFrame, cfg: dict[str, Any], timeframe: str,
         direction = 1 if side == "LONG" else -1
         stop_distance = (entry - stop) if direction == 1 else (stop - entry)
 
+        if not np.isfinite(atr_signal) or atr_signal <= 0:
+            i += 1
+            continue
         if not np.isfinite(stop_distance) or stop_distance <= 0 or not np.isfinite(entry):
             i += 1
             continue
@@ -1388,6 +1425,8 @@ def simulate_trades(signals: pd.DataFrame, cfg: dict[str, Any], timeframe: str,
             i += 1
             continue
 
+        funding = 0.0
+        settlements = []
         trade_id = len(trades) + 1
         actual_initial_risk = quantity * stop_distance
         target = entry + direction * cfg["target_r"] * stop_distance
@@ -1413,7 +1452,14 @@ def simulate_trades(signals: pd.DataFrame, cfg: dict[str, Any], timeframe: str,
             return direction * (price - entry) / stop_distance
 
         last_bar = min(len(rows) - 1, entry_i + int(cfg["time_stop"]) - 1)
-        for j in range(entry_i, last_bar + 1):
+        if planned_exits is not None:
+            exit_idx, exit_price, reason, active_stop, mae_r, mfe_r = planned_exits[i]
+            exit_i = int(exit_idx)
+            exit_reason = ("GAP_STOP", "GAP_TARGET_LIMIT", "STOP_BOTH_TOUCHED_STOP_FIRST", "INITIAL_STOP",
+                           "TRAILING_STOP", "TARGET", "TIME_STOP", "DATA_END")[int(reason)]
+            target_gap = exit_reason == "GAP_TARGET_LIMIT"
+            stop_first_ambiguity = exit_reason == "STOP_BOTH_TOUCHED_STOP_FIRST"
+        for j in range(entry_i, last_bar + 1) if planned_exits is None else ():
             bar = rows.iloc[j]
             op, hi, lo, cl = map(float, (bar["open"], bar["high"], bar["low"], bar["close"]))
             current_atr = float(bar["atr"])
@@ -1562,7 +1608,21 @@ def simulate_trades(signals: pd.DataFrame, cfg: dict[str, Any], timeframe: str,
         actual_initial_risk = quantity * stop_distance
         gross_r = gross_pnl / actual_initial_risk if actual_initial_risk else np.nan
         gross_r_budget = gross_pnl / risk_budget if risk_budget else np.nan
-        equity_after = equity + gross_pnl
+        maker_exit = exit_reason in ("TARGET", "GAP_TARGET_LIMIT")
+        entry_fee = PERPETUAL_FEES.charge(quantity, entry, "taker")
+        exit_fee = PERPETUAL_FEES.charge(quantity, exit_price, "maker" if maker_exit else "taker")
+        close_exit = exit_reason in ("DATA_END", "TIME_STOP")
+        if open_payment is not None:
+            for j in range(entry_i, exit_i + 1):
+                paid = (open_payment[j] if j > entry_i else 0.) + (
+                    inside_payment[j] if j < exit_i or close_exit else 0.)
+                if paid:
+                    payment = direction * quantity * paid
+                    funding += payment
+                    if collect_audit:
+                        settlements.append({"bar_open": str(signals.index[j]), "payment": payment})
+        net = gross_pnl - entry_fee - exit_fee - funding
+        equity_after = equity + net
         realised_loss = -gross_pnl if gross_pnl < 0 else 0.0
         exit_stop_type = None
         if exit_reason in (
@@ -1615,8 +1675,17 @@ def simulate_trades(signals: pd.DataFrame, cfg: dict[str, Any], timeframe: str,
                 if crosses_data_gap else None
             ),
             "gross_pnl": gross_pnl,
-            "fees": None,
-            "funding": None,
+            "entry_notional": quantity * entry, "exit_notional": quantity * exit_price,
+            "entry_liquidity": "taker", "exit_liquidity": "maker" if maker_exit else "taker",
+            "entry_fee": entry_fee, "exit_fee": exit_fee, "fees": entry_fee + exit_fee,
+            "maker_fees": exit_fee if maker_exit else 0.0,
+            "taker_fees": entry_fee if maker_exit else entry_fee + exit_fee,
+            "funding": funding, "slippage": 0.0, "net_pnl": net,
+            "net_return_pct": 100 * net / (quantity * entry),
+            "holding_hours": (exit_time - entry_time).total_seconds() / 3600
+                + (timeframe_interval(timeframe).total_seconds() / 3600 if exit_reason in ("DATA_END", "TIME_STOP") else 0),
+            "maker_rate": MAKER_RATE, "taker_rate": TAKER_RATE,
+            "starting_equity_usdt": STARTING_EQUITY_USDT,
             "gross_R": gross_r,
             "gross_R_budget": gross_r_budget,
             "equity_before": equity,
@@ -1625,9 +1694,10 @@ def simulate_trades(signals: pd.DataFrame, cfg: dict[str, Any], timeframe: str,
             "mfe_R": mfe_r,
             "realised_loss_ratio_vs_actual": realised_loss / actual_initial_risk if actual_initial_risk else 0.0,
             "realised_loss_ratio_vs_budget": realised_loss / risk_budget if risk_budget else 0.0,
+            "slippage_rate": 0.,
             "cost_model": COST_MODEL,
-            "funding_model": FUNDING_MODEL,
-            "short_executable": False if side == "SHORT" and market_mode == "spot_signal_only" else True,
+            "funding_model": funding_model(signals),
+            "short_executable": True,
         }
         trades.append(trade)
         if collect_audit:
@@ -1639,8 +1709,8 @@ def simulate_trades(signals: pd.DataFrame, cfg: dict[str, Any], timeframe: str,
                 },
                 "per_bar_state": per_bar_state,
                 "stop_history": stop_history,
-                "funding_events": [],
-                "cost_breakdown": {"entry_fee": 0.0, "exit_fee": 0.0, "slippage": 0.0, "funding": 0.0},
+                "funding_events": settlements,
+                "cost_breakdown": {"entry_fee": entry_fee, "exit_fee": exit_fee, "slippage": 0.0, "funding": funding},
             })
         equity = equity_after
         i = exit_i + 1
@@ -1652,9 +1722,83 @@ def simulate_trades(signals: pd.DataFrame, cfg: dict[str, Any], timeframe: str,
 # REPORTING
 # =============================================================================
 
+def funding_per_unit(frame):
+    if "funding_open_per_unit" in frame:
+        return frame["funding_open_per_unit"].to_numpy(), frame["funding_inside_per_unit"].to_numpy()
+    if "funding_rate" in frame:
+        return (frame["funding_rate"] * frame["funding_mark_price"]).fillna(0).to_numpy(), np.zeros(len(frame))
+    return None, None
+
+
+def funding_model(frame):
+    if "funding_open_per_unit" in frame:
+        return "HISTORICAL_SETTLEMENTS"
+    return "BAR_OPEN_SETTLEMENTS" if "funding_rate" in frame else FUNDING_MODEL
+
+
+def cuda_device():
+    """Initialize the runtime lazily so CPU installations need only NumPy."""
+    import cupy as cp
+    if not cp.cuda.runtime.getDeviceCount():
+        raise RuntimeError("No CUDA device")
+    cp.zeros(1).sum().item()
+    return cp
+
+
+def marked_curve(signals, trades, mode):
+    """Price independent end-of-bar positions concurrently after serial fills."""
+    if mode not in ("auto", "cpu", "gpu"):
+        raise ValueError("execution_mode must be auto, cpu or gpu")
+    xp: Any = np
+    fallback = None
+    if mode == "gpu" or (mode == "auto" and len(signals) >= 100_000):
+        try:
+            xp = cuda_device()
+        except (ImportError, OSError, RuntimeError, MemoryError) as exc:
+            fallback = str(exc)
+    if not trades:
+        return np.full(len(signals), STARTING_EQUITY_USDT), "cpu", fallback
+    entries = signals.index.get_indexer(pd.to_datetime([t["entry_time"] for t in trades], format="ISO8601", utc=True))
+    exits = signals.index.get_indexer(pd.to_datetime([t["exit_time"] for t in trades], format="ISO8601", utc=True))
+    settlements = np.zeros(len(signals))
+    opened, inside = funding_per_unit(signals)
+    if opened is not None:
+        settlements = np.cumsum(opened + inside)
+    closes = signals["close"].to_numpy()
+
+    def calculate(lib, size):
+        result = np.empty(len(closes))
+        end = lib.asarray(exits)
+        qty, price, balance, entry_fee, realized, sign = [
+            lib.asarray(values) for values in (
+                [t["quantity"] for t in trades], [t["entry_fill"] for t in trades],
+                [t["equity_before"] for t in trades], [t["entry_fee"] for t in trades],
+                [t["equity_after"] for t in trades], [1 if t["side"] == "LONG" else -1 for t in trades])]
+        entry_settlement = lib.asarray(settlements[entries] - (inside[entries] if inside is not None else 0))
+        for start in range(0, len(result), size):
+            stop = min(len(result), start + size)
+            bars = lib.arange(start, stop)
+            idx = lib.asarray(np.searchsorted(entries, np.arange(start, stop), side="right") - 1)
+            prices = lib.asarray(closes[start:stop])
+            funding = lib.asarray(settlements[start:stop]) - entry_settlement[idx]
+            marks = (balance[idx] - entry_fee[idx] + sign[idx] * qty[idx]
+                     * (prices - price[idx] - funding) - qty[idx] * prices * TAKER_RATE)
+            values = lib.where(idx < 0, STARTING_EQUITY_USDT, lib.where(bars >= end[idx], realized[idx], marks))
+            result[start:stop] = values if lib is np else lib.asnumpy(values)
+        return result
+
+    if xp is not np:
+        try:
+            free, _ = xp.cuda.runtime.memGetInfo()
+            return calculate(xp, max(1, min(len(closes), free // 512))), "cuda", None
+        except (MemoryError, RuntimeError) as exc:
+            fallback = str(exc)
+    return calculate(np, max(1, len(closes))), "cpu", fallback
+
+
 def summarize(timeframe: str, signals: pd.DataFrame, trades: list[dict[str, Any]],
               warmup: WarmupResult, source: Path, htf_source: Path,
-              source_hashes: tuple[str, str] | None = None) -> dict[str, Any]:
+              source_hashes: tuple[str, str] | None = None, execution_mode: str = "auto") -> dict[str, Any]:
     t = pd.DataFrame(trades)
 
     def subset_metrics(subset: pd.DataFrame) -> dict[str, Any]:
@@ -1667,11 +1811,11 @@ def summarize(timeframe: str, signals: pd.DataFrame, trades: list[dict[str, Any]
                 "total_gross_R": 0.0,
                 "compounded_return_pct": 0.0,
             }
-        wins = int((subset["gross_R"] > 0).sum())
+        wins = int((subset["net_pnl"] > 0).sum())
         gains = float(subset.loc[subset["gross_R"] > 0, "gross_R"].sum())
         losses = float(abs(subset.loc[subset["gross_R"] < 0, "gross_R"].sum()))
         compounded = float(
-            cast(Any, (1.0 + subset["gross_pnl"] / subset["equity_before"]).prod()) - 1.0
+            cast(Any, (1.0 + subset["net_pnl"] / subset["equity_before"]).prod()) - 1.0
         )
         return {
             "trades": int(len(subset)),
@@ -1682,6 +1826,7 @@ def summarize(timeframe: str, signals: pd.DataFrame, trades: list[dict[str, Any]
             "compounded_return_pct": compounded * 100.0,
         }
 
+    metrics: dict[str, Any]
     if t.empty:
         metrics = {
             "trades": 0, "wins": 0, "losses": 0, "win_rate_pct": np.nan,
@@ -1738,6 +1883,35 @@ def summarize(timeframe: str, signals: pd.DataFrame, trades: list[dict[str, Any]
             "gap_uncertain_trades": int(t["outcome_uncertain"].sum()) if "outcome_uncertain" in t else 0,
         }
 
+    # Mark open positions to an immediate taker close. An exit bar uses its
+    # actual fill. Flat bars carry the last settled balance.
+    curve, active_backend, fallback = marked_curve(signals, trades, execution_mode)
+    net_equity = np.r_[STARTING_EQUITY_USDT, curve]
+    risk_equity = net_equity[warmup.evaluation_start_index or 0:]
+    returns = np.diff(risk_equity) / risk_equity[:-1]
+    periods = (365 * 86400) / timeframe_interval(timeframe).total_seconds()
+    downside = np.sqrt(np.square(np.minimum(returns, 0)).mean()) if returns.size else 0.
+    volatility = returns.std(ddof=1) if returns.size > 1 else 0.
+    drawdown = float(np.min(net_equity / np.maximum.accumulate(net_equity) - 1) * 100)
+    metrics.update(max_drawdown_pct=drawdown,
+                   sharpe=float(np.sqrt(periods) * returns.mean() / volatility) if volatility > 0 else None,
+                   sortino=float(np.sqrt(periods) * returns.mean() / downside) if downside > 0 else None)
+    for key in ("maker_fees", "taker_fees", "fees", "slippage", "funding"):
+        metrics["total_" + key] = sum(tr[key] for tr in trades)
+    for basis in ("gross", "net"):
+        values = [tr[basis + "_pnl"] for tr in trades]
+        positive_values = [v for v in values if v > 0]
+        negative_values = [v for v in values if v < 0]
+        metrics[basis + "_pnl"] = math.fsum(values)
+        metrics[basis + "_return_pct"] = 100 * math.fsum(values) / STARTING_EQUITY_USDT
+        metrics[basis + "_win_rate_pct"] = 100 * len(positive_values) / len(values) if values else None
+        metrics[basis + "_profit_factor"] = sum(positive_values) / -sum(negative_values) if negative_values else ("infinite" if positive_values else None)
+    metrics.update(wins=len(positive_values), losses=len(negative_values), win_rate_pct=metrics["net_win_rate_pct"])
+    metrics.update(net_expectancy=np.mean(values) if values else None,
+                   average_net_win=np.mean(positive_values) if positive_values else None,
+                   average_net_loss=np.mean(negative_values) if negative_values else None,
+                   average_duration_hours=t["holding_hours"].mean() if trades else None,
+                   drawdown_adjusted_return=metrics["net_return_pct"] / abs(drawdown) if drawdown else None)
     wait_counts = signals.loc[signals["signal"] == "WAIT", "wait_reason"].value_counts()
     for reason in ("NO_DATA", "CHOP", "NO_TREND", "HTF_CONFLICT", "NO_PULLBACK", "NO_TRIGGER", "STOP_INVALID"):
         metrics[f"wait_{reason.lower()}"] = int(wait_counts.get(reason, 0))
@@ -1762,7 +1936,10 @@ def summarize(timeframe: str, signals: pd.DataFrame, trades: list[dict[str, Any]
         "last_candle": str(signals.index.max()),
         "bars": len(signals),
         "warmup": asdict(warmup),
-        "gross_only_warning": "Fees, slippage and historical funding are excluded by user request. These are NOT net results.",
+        "active_backend": active_backend, "backend_fallback": fallback,
+        "execution_mode": execution_mode,
+        "equity_curve": curve.tolist(),
+        "duration_basis": "Open timestamp for intrabar fills, close boundary for time and data-end exits",
         "metrics": metrics,
         "gap_sensitivity": gap_sensitivity,
     }
@@ -1773,7 +1950,7 @@ class PreparedAnalysisData:
     """Worker-local validated snapshot; frames are read-only by contract.
 
     The bounded indicator cache is scoped to these exact datasets and cutoff.
-    It never contains signals, trades or output-specific identities.
+    The last signal frame is retained for adjacent exit-only variations.
     """
     timeframe: str
     base_path: Path
@@ -1788,6 +1965,7 @@ class PreparedAnalysisData:
     completion: pd.DataFrame
     htf_completion: dict[str, Any]
     data_quality: dict[str, Any]
+    signal_cache: Any = field(default_factory=dict, compare=False, repr=False)
     indicator_cache: Any = field(default_factory=OrderedDict, compare=False, repr=False)
 
     def verify_sources(self) -> None:
@@ -1873,7 +2051,7 @@ def run_analysis(timeframe: str, base_path: Path, htf_path: Path,
                  data_cutoff: Any = None,
                  cutoff_mode: str = DEFAULT_CUTOFF_MODE,
                  execution_constraints: dict[str, Any] | None = None,
-                 *, prepared_data: PreparedAnalysisData | None = None,
+                 *, prepared_data: PreparedAnalysisData | None = None, execution_mode: str = "auto",
                  write_outputs: bool = True, collect_audit: bool = True
                  ) -> dict[str, Any]:
     if timeframe not in BASELINE_CONFIGS:
@@ -1887,6 +2065,8 @@ def run_analysis(timeframe: str, base_path: Path, htf_path: Path,
         raise ValueError("EMA periods must satisfy fast < medium < slow")
     if cfg["trigger_close_long"] <= 0.5 or cfg["trigger_close_short"] >= 0.5:
         raise ValueError("Trigger close-location thresholds are invalid")
+    if not math.isfinite(cfg["target_r"]) or cfg["target_r"] <= 0:
+        raise ValueError("Target R must be finite and positive")
     if cfg["min_stop_atr"] >= cfg["max_stop_atr"]:
         raise ValueError("Minimum stop distance must be below maximum stop distance")
 
@@ -1924,10 +2104,10 @@ def run_analysis(timeframe: str, base_path: Path, htf_path: Path,
         constraints.update(execution_constraints)
     for key in ("min_quantity", "min_notional"):
         value = constraints.get(key)
-        if value is not None and float(value) < 0:
+        if value is not None and (not math.isfinite(float(value)) or float(value) < 0):
             raise ValueError(f"{key} must be non-negative or None")
     precision_value = constraints.get("quantity_precision")
-    if precision_value is not None and int(precision_value) < 0:
+    if precision_value is not None and (not math.isfinite(float(precision_value)) or not float(precision_value).is_integer() or not 0 <= precision_value <= 15):
         raise ValueError("quantity_precision must be non-negative or None")
 
     if run_id is None:
@@ -1963,13 +2143,37 @@ def run_analysis(timeframe: str, base_path: Path, htf_path: Path,
     else:
         indicators, warmup = cached
         prepared.indicator_cache.move_to_end(cache_key)
-    signals = build_signals(
-        base, htf, cfg, timeframe, warmup, data_cutoff=cutoff,
-        cutoff_mode=cutoff_mode, cutoff_policy=policy, indicator_frame=indicators,
-    )
+    signal_key = (execution_mode,) + tuple(sorted((k, v) for k, v in cfg.items()
+                              if k not in ("chandelier_atr", "time_stop", "target_r", "risk_pct")))
+    signals = prepared.signal_cache.get(signal_key)
+    if signals is None:
+        signals = build_signals(
+            base, htf, cfg, timeframe, warmup, data_cutoff=cutoff,
+            cutoff_mode=cutoff_mode, cutoff_policy=policy, indicator_frame=indicators, execution_mode=execution_mode,
+        )
+        prepared.signal_cache.clear()
+        prepared.signal_cache[signal_key] = signals
     execution_rejections: list[dict[str, Any]] = []
+    planned = None
+    path_backend = "cpu"
+    path_fallback = None
+    if not collect_audit:
+        lib = np
+        if execution_mode == "gpu" or (execution_mode == "auto" and len(signals) >= 100_000):
+            try:
+                lib = cuda_device()
+            except (ImportError, RuntimeError, OSError, MemoryError) as exc:
+                path_fallback = str(exc)
+        try:
+            planned = exit_paths(signals, cfg, lib)
+            path_backend = "cuda" if lib is not np else "cpu"
+        except (RuntimeError, MemoryError) as exc:
+            if lib is np:
+                raise
+            path_fallback = str(exc)
+            planned = exit_paths(signals, cfg)
     trades, audit = simulate_trades(
-        signals, cfg, timeframe, run_id=run_id,
+        signals, cfg, timeframe, run_id=run_id, planned_exits=planned,
         execution_constraints=execution_constraints,
         rejection_log=execution_rejections,
         gap_events=data_quality["base"]["missing_candles"]["gap_events"],
@@ -1977,7 +2181,10 @@ def run_analysis(timeframe: str, base_path: Path, htf_path: Path,
     )
 
     report = summarize(timeframe, signals, trades, warmup, base_path, htf_path,
-                       source_hashes=(prepared.base_hash, prepared.htf_hash))
+                       source_hashes=(prepared.base_hash, prepared.htf_hash), execution_mode=execution_mode)
+    if path_backend == "cuda" or signals.attrs.get("signal_backend") == "cuda":
+        report["active_backend"] = "cuda"
+    report["backend_fallback"] = path_fallback or signals.attrs.get("signal_fallback") or report["backend_fallback"]
     report["run_id"] = run_id
     report["engine_version"] = ENGINE_VERSION
     report["engine_source_path"] = str(engine_source_path())
@@ -1988,9 +2195,10 @@ def run_analysis(timeframe: str, base_path: Path, htf_path: Path,
     report["execution_constraints"] = constraints
     report["execution_rejections"] = execution_rejections
     report["configuration"] = cfg
-    report["market_mode"] = "spot_signal_only"
-    report["short_signal_warning"] = "SHORT PnL is hypothetical only when inputs are Spot OHLCV."
-    report["funding_model"] = FUNDING_MODEL
+    report["market_mode"] = "binance_usdt_perpetual_simulation"
+    report["dataset_venue_warning"] = None if base_path == BASE_DATA_FILES[timeframe] else "OHLCV columns alone do not establish perpetual contract provenance."
+    report["funding_model"] = funding_model(base)
+    report["execution_model"]["funding_model"] = report["funding_model"]
     report["cost_model"] = COST_MODEL
     report["data_quality"] = data_quality
     if htf_completion["complete_count"] == 0:
@@ -2021,6 +2229,7 @@ def run_analysis(timeframe: str, base_path: Path, htf_path: Path,
     report["htf_completion"] = htf_completion
     report["spec_parity"] = dict(V42_SPEC_PARITY_REPORT)
     report["output_directory"] = str(output_dir)
+    report["metrics"].update({k: report["execution_model"][k] for k in ("maker_rate", "taker_rate", "starting_equity_usdt", "market_mode", "slippage_rate", "funding_model")})
     report["metrics"]["run_id"] = run_id
     report["metrics"]["engine_version"] = ENGINE_VERSION
     report["metrics"]["engine_source_sha256"] = report["engine_source_sha256"]
@@ -2033,8 +2242,11 @@ def run_analysis(timeframe: str, base_path: Path, htf_path: Path,
 
     if write_outputs:
         output_dir.mkdir(parents=True, exist_ok=True)
-        signals.reset_index().to_csv(paths["signals"], index=False)
-        pd.DataFrame(trades).to_csv(paths["trades"], index=False)
+        provenance = {key: report["execution_model"][key] for key in (
+            "cost_model", "funding_model", "maker_rate", "taker_rate", "slippage_rate",
+            "starting_equity_usdt", "market_mode")}
+        signals.reset_index().assign(run_id=run_id, **provenance).to_csv(paths["signals"], index=False)
+        pd.DataFrame(trades).assign(**provenance).to_csv(paths["trades"], index=False)
         with paths["audit"].open("w", encoding="utf-8") as f:
             for item in audit:
                 f.write(json.dumps(json_safe(item), sort_keys=True, allow_nan=False) + "\n")
@@ -2044,7 +2256,7 @@ def run_analysis(timeframe: str, base_path: Path, htf_path: Path,
         pd.DataFrame([report["metrics"]]).to_csv(paths["metrics"], index=False)
 
     return {
-        "signals": signals,
+        "signals": signals.copy() if prepared_data is not None else signals,
         "trades": trades,
         "audit": audit,
         "report": report,
@@ -2092,9 +2304,9 @@ def main() -> int:
     print(f"CUTOFF MODE : {args.cutoff_mode.upper()}")
     print(f"BASE DATA   : {base_path}")
     print(f"HTF DATA    : {htf_path}")
-    print("COSTS       : EXCLUDED")
-    print("FUNDING     : EXCLUDED")
-    print("RETURNS     : GROSS ONLY - NOT NET")
+    print("Maker 5 bps / taker 2 bps per fill")
+
+    print("Starting capital 1,000 USDT")
     print("=" * 72)
 
     result = run_analysis(

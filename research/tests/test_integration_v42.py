@@ -212,7 +212,7 @@ class ExecutionIntegrationTests(unittest.TestCase):
             for item in audit[0]["stop_history"]
         ))
 
-    def test_no_funding_commission_or_slippage_is_included(self):
+    def test_short_limit_exit_includes_fees_and_explicit_zero_funding(self):
         frame = make_signal_frame(side="SHORT", entry=100.0, stop=105.0,
                                   target_high=101.0, target_low=89.0)
         frame.iloc[1, frame.columns.get_loc("open")] = 100.0
@@ -224,18 +224,18 @@ class ExecutionIntegrationTests(unittest.TestCase):
             frame, engine.BASELINE_CONFIGS["2h"], "2h", run_id="test-run"
         )
         trade = trades[0]
-        self.assertIsNone(trade["fees"])
-        self.assertIsNone(trade["funding"])
+        self.assertAlmostEqual(trade["fees"], trade["quantity"] * (100 * .0002 + 90 * .0005))
+        self.assertEqual(trade["funding"], 0.0)
         self.assertEqual(trade["cost_model"], engine.COST_MODEL)
         self.assertEqual(trade["funding_model"], engine.FUNDING_MODEL)
         self.assertEqual(trade["run_id"], "test-run")
         self.assertIn("gross_R", trade)
         self.assertIn("gross_R_budget", trade)
         self.assertNotIn("net_R", trade)
-        self.assertFalse(trade["short_executable"])
+        self.assertTrue(trade["short_executable"])
         self.assertEqual(
             audit[0]["cost_breakdown"],
-            {"entry_fee": 0.0, "exit_fee": 0.0, "slippage": 0.0, "funding": 0.0},
+            {"entry_fee": trade["entry_fee"], "exit_fee": trade["exit_fee"], "slippage": 0.0, "funding": 0.0},
         )
         self.assertEqual(audit[0]["funding_events"], [])
 

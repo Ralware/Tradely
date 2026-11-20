@@ -11,6 +11,7 @@ import { EmptyState, ErrorState, Notice } from '../components/common/States';
 import { Stat } from '../components/common/Stat';
 import { TimeSeriesChart } from '../components/charts/TimeSeriesChart';
 import type { TimeSeriesPoint } from '../components/charts/TimeSeriesChart';
+import { ResearchSearch } from '../components/analysis/ResearchSearch';
 import { TradesTable } from '../components/tables/TradesTable';
 
 const marketOptions = [
@@ -59,9 +60,9 @@ export function BacktestingPage() {
   const [exchange, setExchange] = useState('NSE');
   const [days, setDays] = useState('3650');
   const [directionMode, setDirectionMode] = useState<DirectionMode>('long_only');
-  const [capital, setCapital] = useState('100000');
+  const [capital, setCapital] = useState('1000');
   const [riskPercent, setRiskPercent] = useState('0.5');
-  const [costBps, setCostBps] = useState('15');
+  const [costBps, setCostBps] = useState('2');
   const [slippageBps, setSlippageBps] = useState('0');
   const [maxPositionPercent, setMaxPositionPercent] = useState('95');
   const [strategyConfig, setStrategyConfig] = useState<StrategyConfig>(DEFAULT_STRATEGY);
@@ -84,7 +85,7 @@ export function BacktestingPage() {
     return errors;
   }, [strategyConfig]);
 
-  const [result, setResult] = useState<BacktestResult | null>(null);
+  const [result, setResult] = useState<BacktestResult | null>(() => comparisons[comparisons.length - 1] ?? null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -205,7 +206,8 @@ export function BacktestingPage() {
     <div className="w-full px-4 py-4 lg:px-6">
       <PageHeader title="Backtesting" subtitle="Trend Breakout · Daily Bars · Costs Included" />
 
-      <Card className="mb-3" title="Configuration">
+      <ResearchSearch />
+      <Card className="mb-3" title="Daily trend breakout configuration">
         <form onSubmit={runBacktest} className="space-y-2">
           <div className="border-b border-terminal-border pb-1 text-2xs font-semibold uppercase tracking-wide text-terminal-muted">Instrument, Test Range & Execution Assumptions</div>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
@@ -268,7 +270,7 @@ export function BacktestingPage() {
               hint="Maximum 2%"
             />
             <Input
-              label="Commission per Side (bps)"
+              label="Taker Commission per Fill (bps)"
               type="number"
               min={0}
               step="any"
@@ -341,10 +343,14 @@ export function BacktestingPage() {
               hint={`Final Equity ${formatNumber(result.final_equity, 2)}`}
             />
             <Stat label="Trades" value={String(result.trade_count)} hint={`Win Rate ${formatPercent(result.win_rate_pct)}`} />
+            <Stat label="Gross P/L" value={formatNumber(result.gross_pnl, 2)} />
+            <Stat label="Maker Fees" value={formatNumber(result.total_maker_fees, 2)} hint="No passive orders in this strategy" />
+            <Stat label="Taker Fees" value={formatNumber(result.total_taker_fees, 2)} />
+            <Stat label="Total Fees" value={formatNumber(result.total_fees, 2)} />
             <Stat label="Net P/L" value={formatNumber(result.net_profit_loss, 2)} tone={result.net_profit_loss >= 0 ? 'positive' : 'negative'} hint="After modeled execution costs" />
             <Stat label="Average Winner" value={formatNumber(result.average_winning_trade, 2)} hint="Net of costs" />
             <Stat label="Average Loser" value={formatNumber(result.average_losing_trade, 2)} hint="Net of costs" />
-            <Stat label="Profit Factor" value={profitFactor} hint="Gross Wins ÷ Gross Losses" />
+            <Stat label="Net Profit Factor" value={profitFactor} hint="Net gains divided by net losses" />
             <Stat
               label="Max Drawdown"
               value={formatPercent(result.max_drawdown_pct)}

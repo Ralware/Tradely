@@ -77,7 +77,7 @@ class ExecutionTests(unittest.TestCase):
         }, index=idx)
         return frame
 
-    def test_gap_stop_fills_at_open_without_costs(self):
+    def test_gap_stop_fills_at_open_with_taker_costs(self):
         frame = self.make_signal_frame(target_high=106.0, target_low=90.0)
         # Entry at next bar open=100, active stop=95; next bar open=90 is gap-through.
         frame.iloc[2, frame.columns.get_loc("open")] = 90.0
@@ -86,8 +86,8 @@ class ExecutionTests(unittest.TestCase):
         )
         self.assertEqual(trades[0]["exit_reason"], "GAP_STOP")
         self.assertEqual(trades[0]["exit_fill"], 90.0)
-        self.assertIsNone(trades[0]["fees"])
-        self.assertIsNone(trades[0]["funding"])
+        self.assertAlmostEqual(trades[0]["fees"], trades[0]["quantity"] * 190 * .0002)
+        self.assertEqual(trades[0]["funding"], 0.0)
 
     def test_target_is_two_r_from_actual_entry(self):
         frame = self.make_signal_frame(target_high=111.0, target_low=99.0)

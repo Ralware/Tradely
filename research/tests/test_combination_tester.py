@@ -103,6 +103,7 @@ def fake_report(config: dict, *, trades: int = 12,
             "losses": trades - wins,
             "win_rate_pct": wins / trades * 100.0,
             "total_gross_R": total_gross_R,
+            "net_pnl": -total_gross_R,
             "average_gross_R": total_gross_R / trades,
             "profit_factor_gross_R": 1.75,
             "compounded_equity_return_pct": 12.5,
@@ -125,7 +126,7 @@ def fake_report(config: dict, *, trades: int = 12,
         "data_processing_version": engine.DATA_PROCESSING_VERSION,
         "cost_model": engine.COST_MODEL,
         "funding_model": engine.FUNDING_MODEL,
-        "market_mode": "spot_signal_only",
+        "market_mode": "binance_usdt_perpetual_simulation",
     }
 
 
@@ -213,12 +214,11 @@ class CandidateValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             tester.validate_candidate("2h", config)
 
-    def test_target_is_fixed_at_2r(self):
-        config = self.config(target_r=3.0)
+    def test_explicit_target_sweep_preserves_default(self):
+        tester.validate_candidate("2h", self.config(target_r=3.0))
+        self.assertEqual({c["target_r"] for c in tester.iter_candidates("2h", SMALL_RANGES)}, {2.0})
         with self.assertRaises(ValueError):
-            tester.validate_candidate("2h", config)
-        with self.assertRaises(ValueError):
-            list(tester.iter_candidates("2h", SMALL_RANGES, [1.5]))
+            list(tester.iter_candidates("2h", SMALL_RANGES, [-1.5]))
 
     def test_trigger_mapping_is_explicit(self):
         raw = {
@@ -655,7 +655,7 @@ class ReportingTests(TempDataMixin, unittest.TestCase):
         self.assertEqual(result["metadata"]["rankable_count"], 0)
         self.assertEqual(result["metadata"]["insufficient_trade_count"], 2)
 
-    def test_top_configs_are_ranked_by_total_gross_R(self):
+    def test_top_configs_are_ranked_by_net_pnl(self):
         calls: list[dict] = []
         with mock.patch.object(
             tester.engine, "run_analysis", side_effect=self.fake_engine(calls)
@@ -671,9 +671,9 @@ class ReportingTests(TempDataMixin, unittest.TestCase):
         all_rows = read_csv_rows(Path(result["outputs"]["all_results_csv"]))
         top_rows = read_csv_rows(Path(result["outputs"]["top_configs_csv"]))
         self.assertEqual(len(top_rows), len(all_rows))
-        totals = [float(row["total_gross_R"]) for row in top_rows]
+        totals = [float(row["net_pnl"]) for row in top_rows]
         self.assertEqual(totals, sorted(totals, reverse=True))
-        self.assertEqual(totals[0], max(float(r["total_gross_R"]) for r in all_rows))
+        self.assertEqual(totals[0], max(float(r["net_pnl"]) for r in all_rows))
         self.assertEqual(result["metadata"]["rankable_count"], 8)
 
     def test_results_are_stored_per_timeframe(self):
@@ -735,7 +735,7 @@ class ReportingTests(TempDataMixin, unittest.TestCase):
         row = read_csv_rows(Path(result["outputs"]["all_results_csv"]))[0]
         self.assertEqual(row["cost_model"], engine.COST_MODEL)
         self.assertEqual(row["funding_model"], engine.FUNDING_MODEL)
-        self.assertEqual(row["market_mode"], "spot_signal_only")
+        self.assertEqual(row["market_mode"], "binance_usdt_perpetual_simulation")
         self.assertEqual(row["data_cutoff_verified"], "false")
         self.assertEqual(row["cutoff_mode"], "diagnostic")
         self.assertTrue(row["base_source_sha256"])
@@ -750,7 +750,7 @@ class ReportingTests(TempDataMixin, unittest.TestCase):
         metadata = json.loads(
             Path(result["outputs"]["run_metadata_json"]).read_text()
         )
-        self.assertTrue(metadata["accounting"]["gross_only"])
+        self.assertFalse(metadata["accounting"]["gross_only"])
         self.assertEqual(metadata["accounting"]["cost_model"], engine.COST_MODEL)
         self.assertEqual(metadata["accounting"]["funding_model"], engine.FUNDING_MODEL)
         self.assertEqual(

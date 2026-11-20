@@ -203,14 +203,22 @@ class TradingViewBridge:
 
 
 def _drop_incomplete_final_bar(
-    frame: pd.DataFrame, interval: str, market: str
+    frame: pd.DataFrame, interval: str, market: str, *, now: pd.Timestamp | None = None
 ) -> pd.DataFrame:
     """Never expose a still-forming bar to signals, quotes or backtests."""
     if frame.empty:
         return frame
-    now = pd.Timestamp.now(tz="UTC")
+    now = pd.Timestamp.now(tz="UTC") if now is None else now
     last = frame.index[-1]
     seconds = INTERVAL_SECONDS.get(interval)
+
+    if market == "crypto" and interval in ("1wk", "1mo"):
+        end = last + (pd.DateOffset(weeks=1) if interval == "1wk" else pd.offsets.MonthBegin(1))
+        return frame.iloc[:-1] if now < end else frame
+
+    if market == "crypto" and interval in ("1wk", "1mo"):
+        end = last + (pd.DateOffset(weeks=1) if interval == "1wk" else pd.offsets.MonthBegin(1))
+        return frame.iloc[:-1] if now < end else frame
 
     if interval == "1d":
         if market in {"india", "global"}:
@@ -225,24 +233,26 @@ def _drop_incomplete_final_bar(
         elif last + pd.Timedelta(days=1) > now:
             frame = frame.iloc[:-1]
     elif interval == "1wk":
-        zone = ZoneInfo("America/New_York") if market != "crypto" else timezone.utc
+        zone = ZoneInfo("Asia/Kolkata" if market == "india" else "America/New_York")
         last_local = last.tz_convert(zone)
         now_local = now.tz_convert(zone)
         last_week = last_local.date() - timedelta(days=last_local.weekday())
         current_week = now_local.date() - timedelta(days=now_local.weekday())
+        close_time = (15, 45) if market == "india" else (16, 5)
         week_complete = now_local.weekday() > 4 or (
-            now_local.weekday() == 4 and (now_local.hour, now_local.minute) >= (16, 5)
+            now_local.weekday() == 4 and (now_local.hour, now_local.minute) >= close_time
         )
         if last_week == current_week and not week_complete:
             frame = frame.iloc[:-1]
     elif interval == "1mo":
-        zone = ZoneInfo("America/New_York") if market != "crypto" else timezone.utc
+        zone = ZoneInfo("Asia/Kolkata" if market == "india" else "America/New_York")
         last_local = last.tz_convert(zone)
         now_local = now.tz_convert(zone)
         month_end = calendar.monthrange(now_local.year, now_local.month)[1]
+        close_time = (15, 45) if market == "india" else (16, 5)
         month_complete = now_local.day == month_end and (
             now_local.hour, now_local.minute
-        ) >= (16, 5)
+        ) >= close_time
         if (last_local.year, last_local.month) == (now_local.year, now_local.month) and not month_complete:
             frame = frame.iloc[:-1]
     elif seconds is not None:

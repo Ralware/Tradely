@@ -10,6 +10,8 @@ import json
 import os
 import platform
 import pstats
+import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -31,10 +33,31 @@ class ProcessMonitor:
         self.cpu: dict[int, float] = {}
         self.peak_rss = 0
         self.peak_children = 0
+        self.gpu = shutil.which("nvidia-smi")
+        self.peak_gpu_memory = self.peak_gpu_utilization = None
+        self.last_gpu_sample = 0.0
         self.stop = threading.Event()
         self.thread = threading.Thread(target=self.sample_loop, daemon=True)
 
     def sample(self):
+        if self.gpu and time.monotonic() - self.last_gpu_sample >= 1:
+            self.last_gpu_sample = time.monotonic()
+            try:
+                usage = subprocess.check_output(
+                    [
+                        self.gpu,
+                        "--query-gpu=utilization.gpu,memory.used",
+                        "--format=csv,noheader,nounits",
+                    ],
+                    text=True,
+                    timeout=2,
+                )
+                for line in usage.splitlines():
+                    util, memory = map(float, line.split(","))
+                    self.peak_gpu_utilization = max(self.peak_gpu_utilization or 0.0, util)
+                    self.peak_gpu_memory = max(self.peak_gpu_memory or 0.0, memory)
+            except (ValueError, OSError, subprocess.SubprocessError):
+                self.gpu = None
         rss = 0
         children = self.process.children(recursive=True)
         self.peak_children = max(self.peak_children, len(children))
@@ -66,6 +89,9 @@ class ProcessMonitor:
         cpu_seconds = sum(self.cpu.values()) - self.initial_cpu
         return {
             "total_seconds": self.elapsed,
+            "peak_device_memory_mib": self.peak_gpu_memory,
+            "peak_device_utilization_pct": self.peak_gpu_utilization,
+            "configs_per_second": count / self.elapsed,
             "seconds_per_configuration": self.elapsed / count,
             "configurations_per_minute": count * 60 / self.elapsed,
             "sampled_peak_aggregate_rss_mb": self.peak_rss / 1024**2,
@@ -124,6 +150,7 @@ def main():
         "--baseline-source", type=Path, help="Optional pre-change analyzer snapshot"
     )
     parser.add_argument("--output", type=Path, default=Path(__file__).parent / "benchmarks")
+    parser.add_argument("--mode", choices=["cpu", "gpu", "auto"], default="auto")
     args = parser.parse_args()
     if args.count < 1 or args.fixture_bars < 1:
         parser.error("count and fixture-bars must be positive")
@@ -192,6 +219,7 @@ def main():
     report["refactored_profile"] = profile_one(
         engine, args.timeframe, base, htf, configs[0], profile_dir
     )
+    candle_count = len(engine.read_ohlcv(base))
     for workers in (1, 2, 4):
         with ProcessMonitor() as monitor:
             result = tester.run_search(
@@ -201,6 +229,7 @@ def main():
                 output_root=directory / f"workers_{workers}",
                 cutoff_mode="diagnostic",
                 workers=workers,
+                execution_mode=args.mode,
                 max_combinations=args.count,
                 echo=False,
             )
@@ -208,6 +237,9 @@ def main():
             raise RuntimeError(f"Benchmark had failed or missing evaluations: {result['metadata']}")
         measurement = {
             "workers": workers,
+            "requested_mode": args.mode,
+            "active_backends": sorted({row["active_backend"] for row in result["rows"].values()}),
+            "candles_per_second": candle_count * args.count / monitor.elapsed,
             **monitor.report(args.count),
             "preflight_seconds": result["metadata"]["preflight_seconds"],
             "worker_initialization": result["metadata"]["worker_initialization"],

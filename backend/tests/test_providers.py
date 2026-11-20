@@ -249,3 +249,14 @@ def test_market_service_quotes_and_health_pass_through(monkeypatch):
     assert quotes["NSE:RELIANCE"]["lp"] == 2500
     assert errors["NSE:BAD"] == "missing"
     assert service.bridge_health()["status"] == "ok"
+
+@pytest.mark.parametrize("interval,start,before,after", [
+    ("1wk", "2024-01-01", "2024-01-07T23:59Z", "2024-01-08T00:00Z"),
+    ("1mo", "2024-01-01", "2024-01-31T23:59Z", "2024-02-01T00:00Z"),
+])
+def test_crypto_finality_uses_continuous_utc_sessions(interval, start, before, after):
+    from app.providers.tradingview import _drop_incomplete_final_bar
+
+    frame = pd.DataFrame({"close": [100.]}, index=[pd.Timestamp(start, tz="UTC")])
+    assert _drop_incomplete_final_bar(frame, interval, "crypto", now=pd.Timestamp(before)).empty
+    assert len(_drop_incomplete_final_bar(frame, interval, "crypto", now=pd.Timestamp(after))) == 1

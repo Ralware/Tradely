@@ -9,8 +9,7 @@ targets, exits, candle-completion rules and PnL accounting stay in one place.
 Key guarantees
 --------------
 * No duplicated backtesting logic.
-* Gross-only accounting: the analyzer's no-fee / no-funding / no-slippage
-  model is preserved and explicitly checked.
+* Per-fill net accounting and funding provenance are recorded with every result.
 * Strict data-cutoff mode remains the default. A strict run requires an
   explicit ``--data-cutoff``; diagnostic runs are always recorded as
   unverified, exactly as the analyzer reports them.
@@ -150,14 +149,18 @@ APPROVED_BOUNDS: dict[str, tuple[float, float]] = {
 SLOW_EMA_1D_CAP = 250
 FIXED_TARGET_R = 2.0
 
-# Analyzer keys that would alter the gross-only accounting contract. The tester
+# Analyzer keys that would alter the fixed execution contract. The tester
 # refuses to pass them even if a future caller tries to inject them.
 FORBIDDEN_ANALYZER_KEYS = {
     "fee", "fees", "fee_pct", "commission", "funding", "funding_rate",
     "slippage", "slippage_pct", "spread", "borrow_rate",
 }
 
-RESULT_FIELDS = [
+FINANCIAL_FIELDS = """gross_pnl net_pnl total_maker_fees total_taker_fees total_fees
+total_funding total_slippage gross_return_pct net_return_pct gross_profit_factor net_profit_factor
+gross_win_rate_pct net_win_rate_pct net_expectancy average_net_win average_net_loss average_duration_hours
+sharpe sortino drawdown_adjusted_return maker_rate taker_rate starting_equity_usdt slippage_rate""".split()
+RESULT_FIELDS = FINANCIAL_FIELDS + ["execution_mode", "active_backend", "backend_fallback",
     "config_id", "search_id", "timeframe", "status",
     "trades", "wins", "losses", "win_rate_pct", "total_gross_R",
     "average_gross_R", "profit_factor_gross_R",
@@ -179,10 +182,13 @@ RESULT_FIELDS = [
     "worker_pid", "elapsed_seconds", "started_monotonic", "finished_monotonic",
 ]
 FAILED_FIELDS = [
-    "config_id", "timeframe", "status", "configuration_json",
+    "config_id", "timeframe", "status", "configuration_json", "search_id", "cost_model",
+    "funding_model", "market_mode", "maker_rate", "taker_rate", "slippage_rate", "starting_equity_usdt",
+    "base_source_sha256", "htf_source_sha256",
     "error_type", "error", "traceback", "timestamp",
 ]
 RANK_METRICS = {
+    "net_pnl", "net_return_pct", "net_profit_factor", "sharpe", "net_expectancy", "drawdown_adjusted_return",
     "total_gross_R",
     "compounded_equity_return_pct",
     "average_gross_R",
@@ -191,9 +197,9 @@ RANK_METRICS = {
     "win_rate_pct",
 }
 
-TESTER_VERSION = "2.0.0"
+TESTER_VERSION = "3.0.0"
 DEFAULT_WORKERS = 4
-DEFAULT_RANK_BY = "total_gross_R"
+DEFAULT_RANK_BY = "net_pnl"
 
 
 # =============================================================================
@@ -416,7 +422,7 @@ def validate_candidate(timeframe: str, config: Mapping[str, Any]) -> None:
     forbidden = set(config) & FORBIDDEN_ANALYZER_KEYS
     if forbidden:
         raise ValueError(
-            "Gross-only accounting violated by forbidden keys: "
+            "Fixed accounting violated by forbidden keys: "
             f"{sorted(forbidden)}"
         )
 
@@ -463,10 +469,8 @@ def validate_candidate(timeframe: str, config: Mapping[str, Any]) -> None:
             "Trigger close-location thresholds are invalid: "
             f"long={trigger_long}, short={trigger_short}"
         )
-    if not math.isclose(target_r, FIXED_TARGET_R):
-        raise ValueError(
-            f"V4.2 target is fixed at {FIXED_TARGET_R}R (got {target_r})"
-        )
+    if not math.isfinite(target_r) or target_r <= 0:
+        raise ValueError("Target R must be finite and positive")
     if not math.isclose(trigger_short, 1.0 - trigger_long, abs_tol=1e-10):
         raise ValueError("Short trigger must complement long trigger")
     for name in INTEGER_PARAMETERS:
@@ -508,14 +512,15 @@ def iter_candidates(
     targets = list(dict.fromkeys(float(value) for value in (
         target_r_values if target_r_values is not None else TARGET_R_VALUES
     )))
-    if targets != [FIXED_TARGET_R]:
-        raise ValueError("V4.2 requires the single fixed target 2R")
+    if not targets or any(not math.isfinite(r) or r <= 0 for r in targets):
+        raise ValueError("Target values must be finite and positive")
 
     def walk(index: int, raw: dict[str, Any]):
         if index == len(names):
-            config = to_analyzer_config(raw)
-            validate_candidate(timeframe, config)
-            yield config
+            for target in targets:
+                config = to_analyzer_config({**raw, "target_r": target})
+                validate_candidate(timeframe, config)
+                yield config
             return
         name = names[index]
         for value in axes[index]:
@@ -756,11 +761,16 @@ def make_row(
     else:
         row["data_cutoff"] = fallback_cutoff
 
+    row.update({key: metrics.get(key) for key in FINANCIAL_FIELDS})
+    for key in ("active_backend", "execution_mode", "backend_fallback"):
+        row[key] = (report or {}).get(key)
     row["traceback"] = tb
     return row
 
 
 def _rank_value(row: Mapping[str, Any], rank_by: str) -> float:
+    if row.get(rank_by) == "infinite":
+        return math.inf
     value = _as_float(row.get(rank_by))
     return value if value is not None else float("-inf")
 
@@ -777,7 +787,7 @@ def ranked_rows(rows: Iterable[Mapping[str, Any]], rank_by: str,
 
 
 def ranking_key(row: Mapping[str, Any], rank_by: str) -> tuple[Any, ...]:
-    total, drawdown = _as_float(row.get("total_gross_R")), _as_float(row.get("max_drawdown_pct"))
+    total, drawdown = _as_float(row.get("net_pnl")), _as_float(row.get("max_drawdown_pct"))
     return (_rank_value(row, rank_by), total if total is not None else -math.inf,
             drawdown if drawdown is not None else -math.inf, str(row.get("config_id", "")))
 
@@ -804,7 +814,7 @@ def _preflight(timeframe: str, base_path: Path, htf_path: Path,
     prepared = engine.prepare_analysis_data(
         timeframe, base_path, htf_path, data_cutoff, cutoff_mode, reject_suspicious=True,
     )
-    return prepared.policy, prepared.base_hash, prepared.htf_hash
+    return {**prepared.policy, "funding_model": engine.funding_model(prepared.base)}, prepared.base_hash, prepared.htf_hash
 
 
 def _existing_search_error(results_dir: Path, checkpoint_path: Path) -> None:
@@ -831,13 +841,15 @@ def run_search(
     workers: int = DEFAULT_WORKERS, resume_run: str | None = None,
     checkpoint_every: int = 10, max_drawdown: float | None = None,
     min_average_r: float | None = None, audit_ids: Iterable[str] = (),
-    log_level: str = "INFO",
+    log_level: str = "INFO", execution_mode: str = "auto", batch_size: int = 2, cancel_file: Path | None = None,
 ) -> dict[str, Any]:
     """Evaluate a bounded deterministic prefix; None explicitly requests all.
 
     Workers own immutable snapshots; the parent exclusively commits results.
     Returned rows are a disk-backed Mapping, not an in-memory result archive.
     """
+    if execution_mode not in ("auto", "gpu", "cpu") or batch_size < 1:
+        raise ValueError("Invalid execution mode or batch size")
     if workers < 1 or workers > 61:
         raise ValueError("workers must be between 1 and 61 (Windows-compatible limit)")
     if max_combinations is not None and max_combinations < 1:
@@ -862,10 +874,10 @@ def run_search(
     targets = list(dict.fromkeys(float(value) for value in (
         target_r_values if target_r_values is not None else TARGET_R_VALUES
     )))
-    if targets != [FIXED_TARGET_R]:
-        raise ValueError("V4.2 requires the single fixed target 2R")
+    if not targets or any(not math.isfinite(r) or r <= 0 for r in targets):
+        raise ValueError("Target values must be finite and positive")
     upper_bound = cartesian_upper_bound(axes, targets)
-    valid_count = valid_combination_count(timeframe, ranges)
+    valid_count = valid_combination_count(timeframe, ranges) * len(targets)
     base = Path(base_path or engine.BASE_DATA_FILES[timeframe]).expanduser().resolve()
     htf = Path(htf_path or engine.HTF_DATA_FILES[timeframe]).expanduser().resolve()
     started_clock = time.perf_counter()
@@ -934,7 +946,8 @@ def run_search(
             "checkpoint_total": len(rows), "cartesian_upper_bound": upper_bound,
             "valid_combinations": valid_count, "workers": workers,
             "start_method": "spawn" if workers > 1 else "in_process",
-            "max_in_flight": 2 * workers if workers > 1 else 1,
+            "execution_mode": execution_mode, "batch_size": batch_size,
+            "max_in_flight": batch_size * 2 * workers if workers > 1 else 1,
             "numerical_threads_per_child": 1, "preflight_seconds": preflight_seconds,
             "min_trades": min_trades, "rank_by": rank_by, "top_n": top_n,
             "engine": {"source_sha256": engine_hash, "engine_version": engine.ENGINE_VERSION,
@@ -944,9 +957,9 @@ def run_search(
                      "data_cutoff": str(policy["value"]), "data_cutoff_source": policy["source"],
                      "data_cutoff_verified": policy["verified"], "cutoff_mode": policy["mode"],
                      "excluded_incomplete_candles": policy["excluded_incomplete_candles"]},
-            "accounting": {"gross_only": True, "cost_model": engine.COST_MODEL,
-                           "funding_model": engine.FUNDING_MODEL,
-                           "short_mode": "hypothetical/signal-only for Spot inputs"},
+            "accounting": {**engine.execution_model_settings(), "gross_only": False, "cost_model": engine.COST_MODEL,
+                           "funding_model": policy["funding_model"],
+                           "data_venue": "Binance USD-M" if base == engine.BASE_DATA_FILES[timeframe] and htf == engine.HTF_DATA_FILES[timeframe] else "user supplied"},
             "candidate_generation": "Deterministic exhaustive prefix, biased toward low axis values; not a random sample.",
             "parameter_ranges": ranges, "target_r_values": targets,
         }
@@ -963,13 +976,15 @@ def run_search(
                             level=logging.getLevelNamesMapping()[level])
 
         def checkpoint() -> None:
-            write_json(state_path, {"search_id": sid, "ok_count": rows.ok,
+            write_json(state_path, {"active_backend": metadata.get("active_backend"), "backend_fallback": metadata.get("backend_fallback"), "search_id": sid, "ok_count": rows.ok,
                        "error_count": rows.errors, "checkpoint_total": len(rows),
                        "updated_at_utc": utc_now(), "records_directory": str(rows.directory)})
 
         def candidates():
             nonlocal cap_reached
             for config in iter_candidates(timeframe, ranges, targets):
+                if cancel_file is not None and cancel_file.exists():
+                    return
                 cid = config_id(timeframe, config)
                 if cid in pending_ids:
                     counters["duplicates"] += 1
@@ -1018,9 +1033,19 @@ def run_search(
             row.update(worker_pid=result.worker_pid, elapsed_seconds=result.elapsed_seconds,
                        started_monotonic=result.started_monotonic, finished_monotonic=result.finished_monotonic,
                        invocation_started=metadata["invocation_started"])
+            if result.error_type:
+                row.update(base_source_sha256=base_hash, htf_source_sha256=htf_hash,
+                           cost_model=engine.COST_MODEL, funding_model=policy["funding_model"],
+                           market_mode=metadata["accounting"]["market_mode"],
+                           maker_rate=engine.MAKER_RATE, taker_rate=engine.TAKER_RATE,
+                           slippage_rate=0., starting_equity_usdt=engine.STARTING_EQUITY_USDT)
             row["rankable"] = rankable(row)
             if result.audit is not None:
                 write_json(results_dir / "audits" / f"{cid}.json", result.audit)
+            metadata["active_backend"] = row.get("active_backend")
+            metadata["backend_fallback"] = row.get("backend_fallback")
+            if row.get("funding_model"):
+                metadata["accounting"]["funding_model"] = row["funding_model"]
             rows.put(row)
             pending_ids.discard(cid)
             counters["new"] += 1
@@ -1054,7 +1079,7 @@ def run_search(
         if policy["mode"] == "diagnostic":
             log(engine.DIAGNOSTIC_WARNING, "WARNING")
         settings = runtime.WorkerSettings(timeframe, base, htf, data_cutoff, cutoff_mode,
-                                          base_hash, htf_hash, engine_hash, sid, tuple(audit_ids))
+                                          base_hash, htf_hash, engine_hash, sid, tuple(audit_ids), execution_mode, batch_size)
         interrupted, broken = runtime.execute_candidates(
             iter(candidates()), settings, workers, collect, show_progress,
         )
@@ -1089,6 +1114,7 @@ def run_search(
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, checkpoint_path)
+        interrupted = interrupted or (cancel_file is not None and cancel_file.exists())
         status = ("interrupted" if interrupted else "worker_pool_failed" if broken else
                   "paused_cap_reached" if cap_reached else "complete_with_errors" if rows.errors else "complete")
         metadata.update(
@@ -1100,7 +1126,7 @@ def run_search(
             elapsed_seconds=time.perf_counter() - started_clock,
             evaluation_seconds=timing["seconds"], worker_initialization=worker_info,
             export_seconds=time.perf_counter() - export_start,
-            best_rankable=[{key: row[key] for key in ("config_id", "trades", "total_gross_R",
+            best_rankable=[{key: row[key] for key in ("config_id", "trades", "net_pnl", "total_gross_R",
                            "compounded_equity_return_pct", "max_drawdown_pct")} for row in top_rows[:5]],
             outputs={"results_dir": str(results_dir), "all_results_csv": str(all_results_path),
                      "top_configs_csv": str(top_path), "failed_combinations_csv": str(failed_path),
@@ -1132,7 +1158,7 @@ def _print_plan(timeframe: str, ranges: Mapping[str, Mapping[str, Any]],
               f"{' ...' if len(axis) > 4 else ''}")
     print(f"[{timeframe}] target_r values: {targets}")
     print(f"[{timeframe}] Cartesian upper bound: {upper:,}")
-    print(f"[{timeframe}] Exact valid combinations: {valid_combination_count(timeframe, ranges):,}")
+    print(f"[{timeframe}] Exact valid combinations: {valid_combination_count(timeframe, ranges) * len(targets):,}")
 
     sample_count = 0
     for config in iter_candidates(timeframe, ranges, targets):
@@ -1189,6 +1215,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], default="INFO")
     parser.add_argument("--min-trades", type=int,
                         default=MIN_TRADES_FOR_RANKING)
+    parser.add_argument("--execution-mode", choices=["auto", "cpu", "gpu"], default="auto")
+    parser.add_argument("--cancel-file", type=Path)
+    parser.add_argument("--batch-size", type=int, default=2)
+    parser.add_argument("--target-r", type=float, nargs="+", default=TARGET_R_VALUES)
     parser.add_argument("--rank-by", choices=sorted(RANK_METRICS),
                         default=DEFAULT_RANK_BY)
     parser.add_argument("--top-n", type=int, default=TOP_N_CONFIGS)
@@ -1222,7 +1252,7 @@ def main(argv: list[str] | None = None) -> int:
         for timeframe in timeframes:
             try:
                 _print_plan(
-                    timeframe, ranges, TARGET_R_VALUES,
+                    timeframe, ranges, args.target_r,
                     args.data_cutoff, args.cutoff_mode, args.base, args.htf,
                 )
             except (TesterError, ValueError, FileNotFoundError) as exc:
@@ -1238,8 +1268,8 @@ def main(argv: list[str] | None = None) -> int:
                 data_cutoff=args.data_cutoff,
                 cutoff_mode=args.cutoff_mode,
                 max_combinations=None if args.full_search else args.max_combinations,
-                workers=args.workers, base_path=args.base, htf_path=args.htf,
-                parameter_ranges=ranges, resume_run=args.resume_run,
+                workers=args.workers, execution_mode=args.execution_mode, batch_size=args.batch_size, cancel_file=args.cancel_file, base_path=args.base, htf_path=args.htf,
+                parameter_ranges=ranges, target_r_values=args.target_r, resume_run=args.resume_run,
                 checkpoint_every=args.checkpoint_every, max_drawdown=args.max_drawdown,
                 min_average_r=args.min_average_r, audit_ids=args.audit_config,
                 log_level=args.log_level,

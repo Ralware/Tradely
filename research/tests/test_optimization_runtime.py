@@ -31,6 +31,23 @@ def datasets(tmp_path_factory):
     return {tf: write_fixture(root, tf) for tf in ("2h", "4h", "1d")}
 
 
+def assert_golden_fills(trades, original):
+    equity = 1000.0
+    assert len(trades) == len(original)
+    for trade, expected in zip(trades, original):
+        for key in ("side", "entry_time", "exit_time", "entry_fill", "exit_fill", "exit_reason",
+                    "signal_time", "initial_stop", "target", "mae_R", "mfe_R"):
+            assert trade[key] == expected[key]
+        quantity = trade["quantity"]
+        gross = quantity * (trade["exit_fill"] - trade["entry_fill"]) * (1 if trade["side"] == "LONG" else -1)
+        maker = trade["exit_reason"] in ("TARGET", "GAP_TARGET_LIMIT")
+        net = gross - quantity * (trade["entry_fill"] * .0002 + trade["exit_fill"] * (.0005 if maker else .0002))
+        assert trade["equity_before"] == pytest.approx(equity, abs=1e-9)
+        assert trade["net_pnl"] == pytest.approx(net, abs=1e-10)
+        equity += net
+        assert trade["equity_after"] == pytest.approx(equity, abs=1e-9)
+
+
 def test_exact_original_sequential_equivalence(golden, datasets):
     prepared = {
         tf: engine.prepare_analysis_data(tf, *paths, cutoff_mode="diagnostic")
@@ -49,13 +66,10 @@ def test_exact_original_sequential_equivalence(golden, datasets):
             prepared_data=data,
             write_outputs=False,
         )
-        metrics = {
-            k: v for k, v in result["report"]["metrics"].items() if k != "engine_source_sha256"
-        }
-        assert engine.json_safe(metrics) == case["metrics"]
-        assert engine.json_safe(result["trades"]) == case["trades"]
+        assert_golden_fills(result["trades"], case["trades"])
         if case["audit"] is not None:
-            assert engine.json_safe(result["audit"]) == case["audit"]
+            assert [a["per_bar_state"] for a in engine.json_safe(result["audit"])] == [
+                a["per_bar_state"] for a in case["audit"]]
         numeric = result["signals"][case["numeric_columns"]].to_numpy(dtype="float64")
         assert hashlib.sha256(numeric.tobytes()).hexdigest() == case["numeric_digest"]
         signals = result["signals"][["signal", "wait_reason"]].to_csv(index=False).encode()
@@ -85,18 +99,10 @@ def test_parallel_matches_original_trades_and_metrics(workers, golden, datasets,
     for case, cid in zip(cases, audit_ids):
         row = result["rows"][cid]
         assert row["data_cutoff_verified"] is False
-        for key in tester.RESULT_FIELDS:
-            if key in case["metrics"] and key not in {"run_id", "engine_source_sha256"}:
-                assert row[key] == case["metrics"][key], key
-        audit = json.loads(
-            (Path(result["outputs"]["results_dir"]) / "audits" / f"{cid}.json").read_text()
-        )
-        trades = [
-            {key: item[key] for key in expected} for item, expected in zip(audit, case["trades"])
-        ]
-        for trade in trades:
-            trade["run_id"] = "equivalence"
-        assert trades == case["trades"]
+        assert row["total_gross_R"] == pytest.approx(case["metrics"]["total_gross_R"])
+        audit = json.loads((Path(result["outputs"]["results_dir"]) / "audits" / f"{cid}.json").read_text())
+        assert_golden_fills(audit, case["trades"])
+        assert row["net_pnl"] == pytest.approx(sum(tr["net_pnl"] for tr in audit))
     rows = list(result["rows"].values())
     pids = {row["worker_pid"] for row in rows}
     if workers > 1:

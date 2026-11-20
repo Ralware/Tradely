@@ -10,6 +10,7 @@ import multiprocessing
 import os
 import signal
 import sys
+import threading
 import time
 import traceback
 from collections.abc import Callable, Iterator, Mapping
@@ -17,6 +18,7 @@ from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wai
 from concurrent.futures.process import BrokenProcessPool
 from contextlib import contextmanager
 from dataclasses import dataclass
+from itertools import islice
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -146,6 +148,8 @@ class WorkerSettings:
     engine_hash: str
     search_id: str
     audit_ids: tuple[str, ...] = ()
+    execution_mode: str = "auto"
+    batch_size: int = 2
 
 
 @dataclass
@@ -164,14 +168,11 @@ class Evaluation:
     audit: list[dict[str, Any]] | None = None
 
 
-_inputs: Any = None
-_settings: WorkerSettings | None = None
-_initialization_seconds = 0.0
+_worker = threading.local()
 
 
 def initialize_worker(settings: WorkerSettings, ignore_interrupt: bool = True) -> None:
-    global _inputs, _settings, _initialization_seconds
-    _inputs, _settings, _initialization_seconds = None, None, 0.0
+    _worker.__dict__.clear()
     start = time.perf_counter()
     if ignore_interrupt:
         signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -188,8 +189,9 @@ def initialize_worker(settings: WorkerSettings, ignore_interrupt: bool = True) -
     )
     if (_inputs.base_hash, _inputs.htf_hash) != (settings.base_hash, settings.htf_hash):
         raise ValueError("Dataset changed between preflight and worker initialization")
-    _settings = settings
-    _initialization_seconds = time.perf_counter() - start
+    _worker.settings = settings
+    _worker.inputs = _inputs
+    _worker.seconds = time.perf_counter() - start
 
 
 def evaluate_candidate(config: dict[str, Any], cid: str) -> Evaluation:
@@ -198,6 +200,8 @@ def evaluate_candidate(config: dict[str, Any], cid: str) -> Evaluation:
     report = None
     audit = None
     error_type = error = tb = ""
+    _settings = getattr(_worker, "settings", None)
+    _inputs = getattr(_worker, "inputs", None)
     try:
         if _settings is None or _inputs is None:
             raise RuntimeError("Worker not initialized")
@@ -213,19 +217,24 @@ def evaluate_candidate(config: dict[str, Any], cid: str) -> Evaluation:
             cutoff_mode=_settings.cutoff_mode,
             run_id=f"opt_{_settings.timeframe}_{_settings.search_id}_{cid}",
             prepared_data=_inputs,
+            execution_mode=_settings.execution_mode,
             write_outputs=False,
             collect_audit=detailed,
         )
         source = result["report"]
-        if (
-            source.get("cost_model") != engine.COST_MODEL
-            or source.get("funding_model") != engine.FUNDING_MODEL
+        if source.get("cost_model") != engine.COST_MODEL or source.get("funding_model") not in (
+            engine.FUNDING_MODEL,
+            "BAR_OPEN_SETTLEMENTS",
+            "HISTORICAL_SETTLEMENTS",
         ):
-            raise ValueError("Analyzer violated gross-only accounting")
+            raise ValueError("Analyzer returned unknown accounting assumptions")
         report = {
             key: source[key]
             for key in (
                 "metrics",
+                "active_backend",
+                "backend_fallback",
+                "execution_mode",
                 "data_cutoff",
                 "data_cutoff_source",
                 "data_cutoff_verified",
@@ -252,7 +261,7 @@ def evaluate_candidate(config: dict[str, Any], cid: str) -> Evaluation:
         report,
         end - start,
         os.getpid(),
-        _initialization_seconds,
+        getattr(_worker, "seconds", 0.0),
         start,
         end,
         error_type,
@@ -287,6 +296,10 @@ def single_threaded_children():
                 os.environ[name] = value
 
 
+def evaluate_batch(batch):
+    return [evaluate_candidate(config, cid) for config, cid in batch]
+
+
 def execute_candidates(
     candidates: Iterator[tuple[dict[str, Any], str]],
     settings: WorkerSettings,
@@ -302,7 +315,6 @@ def execute_candidates(
     OS. The queue never exceeds twice the worker count. Hard termination leaves
     atomic result records intact; uncommitted tasks are retried on resume.
     """
-    global _inputs, _settings
     if multiprocessing.current_process().name != "MainProcess":
         raise RuntimeError("Nested optimization executors are not supported")
     if workers == 1:
@@ -314,11 +326,11 @@ def execute_candidates(
         except KeyboardInterrupt:
             return True, False
         finally:
-            _inputs, _settings = None, None
+            _worker.__dict__.clear()
         return False, False
 
     interrupted = broken = exhausted = False
-    pending: dict[Future, tuple[dict[str, Any], str]] = {}
+    pending: dict[Future, list] = {}
     with single_threaded_children():
         pool = ProcessPoolExecutor(
             max_workers=workers,
@@ -332,16 +344,47 @@ def execute_candidates(
                     while not (exhausted or interrupted or broken) and len(pending) < (
                         in_flight or workers * 2
                     ):
-                        try:
-                            config, cid = next(candidates)
-                        except StopIteration:
+                        batch = list(islice(candidates, settings.batch_size))
+                        if not batch:
                             exhausted = True
                             break
                         try:
-                            pending[pool.submit(evaluate_candidate, config, cid)] = config, cid
+                            pending[pool.submit(evaluate_batch, batch)] = batch
                         except BrokenProcessPool as exc:
                             now = time.perf_counter()
-                            on_result(
+                            for config, cid in batch:
+                                on_result(
+                                    Evaluation(
+                                        config,
+                                        cid,
+                                        None,
+                                        0,
+                                        0,
+                                        0,
+                                        now,
+                                        now,
+                                        type(exc).__name__,
+                                        str(exc),
+                                        traceback.format_exc(),
+                                    )
+                                )
+                            broken = exhausted = True
+                            break
+                    if not pending:
+                        break
+                    done, _ = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
+                    for future in done:
+                        batch = pending[future]
+                        if future.cancelled():
+                            del pending[future]
+                            continue
+                        try:
+                            results = future.result()
+                        except (
+                            Exception
+                        ) as exc:  # Infrastructure failure still belongs to its candidate.
+                            now = time.perf_counter()
+                            results = [
                                 Evaluation(
                                     config,
                                     cid,
@@ -355,40 +398,14 @@ def execute_candidates(
                                     str(exc),
                                     traceback.format_exc(),
                                 )
-                            )
-                            broken = exhausted = True
-                            break
-                    if not pending:
-                        break
-                    done, _ = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
-                    for future in done:
-                        config, cid = pending[future]
-                        if future.cancelled():
-                            del pending[future]
-                            continue
-                        try:
-                            result = future.result()
-                        except (
-                            Exception
-                        ) as exc:  # Infrastructure failure still belongs to its candidate.
-                            now = time.perf_counter()
-                            result = Evaluation(
-                                config,
-                                cid,
-                                None,
-                                0,
-                                0,
-                                0,
-                                now,
-                                now,
-                                type(exc).__name__,
-                                str(exc),
-                                traceback.format_exc(),
-                            )
+                                for config, cid in batch
+                            ]
                             if isinstance(exc, BrokenProcessPool):
                                 broken = exhausted = True
                         # Keep the future until its result is durably committed.
-                        on_result(result)
+                        while results:
+                            on_result(results[0])
+                            del results[0]
                         del pending[future]
                     on_progress(len(pending))
                 except KeyboardInterrupt:

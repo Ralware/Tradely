@@ -230,9 +230,9 @@ class BacktestRequest(BaseModel):
     interval: str = "1d"
     days: int = Field(default=1825, ge=240, le=3650)
     provider: str = "auto"
-    initial_capital: float = Field(default=100000, gt=0)
+    initial_capital: float = Field(default=1000, gt=0)
     risk_fraction: float = Field(default=0.005, gt=0, le=0.02)
-    cost_bps_per_side: float = Field(default=15, ge=0, le=500)
+    cost_bps_per_side: float = Field(default=2, ge=0, le=500)
     commission_bps_per_side: float | None = Field(default=None, ge=0, le=500)
     slippage_bps_per_side: float = Field(default=0, ge=0, le=500)
     max_position_fraction: float = Field(default=0.95, gt=0, le=1)

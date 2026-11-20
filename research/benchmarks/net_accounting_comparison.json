@@ -1,0 +1,377 @@
+{
+  "original": {
+    "count": 20,
+    "label": "SYNTHETIC TEST DATA - NOT MARKET PERFORMANCE",
+    "python": "3.14.6",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "numpy": "2.5.3",
+    "pandas": "2.3.3",
+    "logical_cpus": 16,
+    "base_sha256": "c901abab1402dd6f7b14357e83748389100a47b96408bacb5c7fe171b4869f12",
+    "htf_sha256": "54e0f29f371763ebfdc8dd87c38f787ddff732b0a9e47b3a48f918bd5691fc1b",
+    "engine_sha256": "d30ecac0b1a7391a8255acf261a2503c28749067ab73e4096e6855b44fd18091",
+    "configuration_ids": [
+      "b728488041a6742e",
+      "49eea08fb2fc547f",
+      "959ac3fbfa575d78",
+      "03629106bbc34e71",
+      "0b2f6db327a37a4d",
+      "eaf0c47c9e389884",
+      "0c389253df710ea5",
+      "d6fabd79a493511e",
+      "b18c74584bc09cc1",
+      "1c4cf8c551b64c83",
+      "de1b06c009094f7b",
+      "0778217fcccbb9c2",
+      "ccc778590ba0d784",
+      "cfaaef40dfaad274",
+      "60106cc44bb8537a",
+      "ace2e0aaa33b76d7",
+      "9a7b23f0a2ddf441",
+      "02ff0f791ae7b2c1",
+      "eae7d3352374751b",
+      "cc73751ee36b63fb"
+    ],
+    "measurement_notes": "CPU/RSS sampled every 50ms; aggregate RSS may double-count shared pages. Process startup and all parent output are included. Single repetition; no affinity changes.",
+    "measurements": [
+      {
+        "average_cpu_core_equivalents": 0.8569081004037948,
+        "configurations_per_minute": 108.2410232089004,
+        "export_seconds": 0.1808271000008972,
+        "machine_cpu_percent": 5.355675627523717,
+        "peak_child_processes": 0,
+        "preflight_seconds": 0.531138700000156,
+        "sampled_cpu_seconds": 9.5,
+        "sampled_peak_aggregate_rss_mb": 91.99609375,
+        "search_id": "e2db0e8c2c25a0ba",
+        "seconds_per_configuration": 0.5543184849999306,
+        "speedup_vs_one_worker": 1.0,
+        "total_seconds": 11.086369699998613,
+        "worker_initialization": {
+          "19032": {
+            "initialization_seconds": 0.39483190000100876
+          }
+        },
+        "workers": 1
+      },
+      {
+        "average_cpu_core_equivalents": 1.9520443742984634,
+        "configurations_per_minute": 212.9502953780142,
+        "export_seconds": 0.2467544999999518,
+        "machine_cpu_percent": 12.200277339365396,
+        "peak_child_processes": 2,
+        "preflight_seconds": 0.511868500001583,
+        "sampled_cpu_seconds": 11.0,
+        "sampled_peak_aggregate_rss_mb": 250.92578125,
+        "search_id": "e2db0e8c2c25a0ba",
+        "seconds_per_configuration": 0.2817558900000222,
+        "speedup_vs_one_worker": 1.967371418570476,
+        "total_seconds": 5.635117800000444,
+        "worker_initialization": {
+          "28368": {
+            "initialization_seconds": 0.2769341000021086
+          },
+          "32736": {
+            "initialization_seconds": 0.27831829999922775
+          }
+        },
+        "workers": 2
+      },
+      {
+        "average_cpu_core_equivalents": 3.2333115443132376,
+        "configurations_per_minute": 312.3500963562977,
+        "export_seconds": 0.2586064000024635,
+        "machine_cpu_percent": 20.208197151957734,
+        "peak_child_processes": 4,
+        "preflight_seconds": 0.42298010000013164,
+        "sampled_cpu_seconds": 12.421875,
+        "sampled_peak_aggregate_rss_mb": 410.375,
+        "search_id": "e2db0e8c2c25a0ba",
+        "seconds_per_configuration": 0.19209214499987864,
+        "speedup_vs_one_worker": 2.885690536696755,
+        "total_seconds": 3.841842899997573,
+        "worker_initialization": {
+          "27060": {
+            "initialization_seconds": 0.2737939999969967
+          },
+          "31472": {
+            "initialization_seconds": 0.2777386999987357
+          },
+          "32676": {
+            "initialization_seconds": 0.28129619999890565
+          },
+          "836": {
+            "initialization_seconds": 0.27008890000070096
+          }
+        },
+        "workers": 4
+      }
+    ]
+  },
+  "net_cpu": {
+    "count": 20,
+    "label": "SYNTHETIC TEST DATA - NOT MARKET PERFORMANCE",
+    "python": "3.14.6",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "numpy": "2.5.3",
+    "pandas": "2.3.3",
+    "logical_cpus": 16,
+    "base_sha256": "c901abab1402dd6f7b14357e83748389100a47b96408bacb5c7fe171b4869f12",
+    "htf_sha256": "54e0f29f371763ebfdc8dd87c38f787ddff732b0a9e47b3a48f918bd5691fc1b",
+    "engine_sha256": "fb22ee4c8404ddb056ef96d5bbfda9fc4e02c43a9b44ef4eb35478dd14247401",
+    "configuration_ids": [
+      "b728488041a6742e",
+      "49eea08fb2fc547f",
+      "959ac3fbfa575d78",
+      "03629106bbc34e71",
+      "0b2f6db327a37a4d",
+      "eaf0c47c9e389884",
+      "0c389253df710ea5",
+      "d6fabd79a493511e",
+      "b18c74584bc09cc1",
+      "1c4cf8c551b64c83",
+      "de1b06c009094f7b",
+      "0778217fcccbb9c2",
+      "ccc778590ba0d784",
+      "cfaaef40dfaad274",
+      "60106cc44bb8537a",
+      "ace2e0aaa33b76d7",
+      "9a7b23f0a2ddf441",
+      "02ff0f791ae7b2c1",
+      "eae7d3352374751b",
+      "cc73751ee36b63fb"
+    ],
+    "measurement_notes": "CPU/RSS sampled every 50ms; aggregate RSS may double-count shared pages. Process startup and all parent output are included. Single repetition; no affinity changes.",
+    "measurements": [
+      {
+        "active_backends": [
+          "cpu"
+        ],
+        "average_cpu_core_equivalents": 0.8112311717767116,
+        "candles_per_second": 26739.293558992038,
+        "configs_per_second": 4.456548926498673,
+        "configurations_per_minute": 267.3929355899204,
+        "export_seconds": 0.1335137999994913,
+        "machine_cpu_percent": 5.070194823604448,
+        "peak_child_processes": 0,
+        "peak_device_memory_mib": null,
+        "peak_device_utilization_pct": null,
+        "preflight_seconds": 0.2798261000025377,
+        "requested_mode": "cpu",
+        "sampled_cpu_seconds": 3.640625,
+        "sampled_peak_aggregate_rss_mb": 93.453125,
+        "search_id": "a6df62ad9451d48f",
+        "seconds_per_configuration": 0.22438887500011334,
+        "speedup_vs_one_worker": 1.0,
+        "total_seconds": 4.487777500002267,
+        "worker_initialization": {
+          "9540": {
+            "initialization_seconds": 0.2877494000022125
+          }
+        },
+        "workers": 1
+      },
+      {
+        "active_backends": [
+          "cpu"
+        ],
+        "average_cpu_core_equivalents": 1.95904878767015,
+        "candles_per_second": 34989.52253327151,
+        "configs_per_second": 5.831587088878586,
+        "configurations_per_minute": 349.89522533271514,
+        "export_seconds": 0.146803199997521,
+        "machine_cpu_percent": 12.244054922938437,
+        "peak_child_processes": 2,
+        "peak_device_memory_mib": null,
+        "peak_device_utilization_pct": null,
+        "preflight_seconds": 0.30284670000037295,
+        "requested_mode": "cpu",
+        "sampled_cpu_seconds": 6.71875,
+        "sampled_peak_aggregate_rss_mb": 251.71875,
+        "search_id": "a6df62ad9451d48f",
+        "seconds_per_configuration": 0.1714799049999783,
+        "speedup_vs_one_worker": 1.3085432663386518,
+        "total_seconds": 3.4295980999995663,
+        "worker_initialization": {
+          "25104": {
+            "initialization_seconds": 0.24575130000084755
+          },
+          "32676": {
+            "initialization_seconds": 0.2471560000012687
+          }
+        },
+        "workers": 2
+      },
+      {
+        "active_backends": [
+          "cpu"
+        ],
+        "average_cpu_core_equivalents": 3.223151896116792,
+        "candles_per_second": 37965.96098493399,
+        "configs_per_second": 6.327660164155666,
+        "configurations_per_minute": 379.6596098493399,
+        "export_seconds": 0.2122386999981245,
+        "machine_cpu_percent": 20.14469935072995,
+        "peak_child_processes": 4,
+        "peak_device_memory_mib": null,
+        "peak_device_utilization_pct": null,
+        "preflight_seconds": 0.29713510000146925,
+        "requested_mode": "cpu",
+        "sampled_cpu_seconds": 10.1875,
+        "sampled_peak_aggregate_rss_mb": 412.921875,
+        "search_id": "a6df62ad9451d48f",
+        "seconds_per_configuration": 0.15803629999991245,
+        "speedup_vs_one_worker": 1.4198565456179222,
+        "total_seconds": 3.160725999998249,
+        "worker_initialization": {
+          "11452": {
+            "initialization_seconds": 0.3122628999990411
+          },
+          "35740": {
+            "initialization_seconds": 0.29634620000069845
+          },
+          "37116": {
+            "initialization_seconds": 0.30532169999787584
+          },
+          "7280": {
+            "initialization_seconds": 0.29292390000046
+          }
+        },
+        "workers": 4
+      }
+    ]
+  },
+  "gpu_requested_cpu_fallback": {
+    "count": 20,
+    "label": "SYNTHETIC TEST DATA - NOT MARKET PERFORMANCE",
+    "python": "3.14.6",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "numpy": "2.5.3",
+    "pandas": "2.3.3",
+    "logical_cpus": 16,
+    "base_sha256": "c901abab1402dd6f7b14357e83748389100a47b96408bacb5c7fe171b4869f12",
+    "htf_sha256": "54e0f29f371763ebfdc8dd87c38f787ddff732b0a9e47b3a48f918bd5691fc1b",
+    "engine_sha256": "fb22ee4c8404ddb056ef96d5bbfda9fc4e02c43a9b44ef4eb35478dd14247401",
+    "configuration_ids": [
+      "b728488041a6742e",
+      "49eea08fb2fc547f",
+      "959ac3fbfa575d78",
+      "03629106bbc34e71",
+      "0b2f6db327a37a4d",
+      "eaf0c47c9e389884",
+      "0c389253df710ea5",
+      "d6fabd79a493511e",
+      "b18c74584bc09cc1",
+      "1c4cf8c551b64c83",
+      "de1b06c009094f7b",
+      "0778217fcccbb9c2",
+      "ccc778590ba0d784",
+      "cfaaef40dfaad274",
+      "60106cc44bb8537a",
+      "ace2e0aaa33b76d7",
+      "9a7b23f0a2ddf441",
+      "02ff0f791ae7b2c1",
+      "eae7d3352374751b",
+      "cc73751ee36b63fb"
+    ],
+    "measurement_notes": "CPU/RSS sampled every 50ms; aggregate RSS may double-count shared pages. Process startup and all parent output are included. Single repetition; no affinity changes.",
+    "measurements": [
+      {
+        "active_backends": [
+          "cpu"
+        ],
+        "average_cpu_core_equivalents": 0.9137608168051428,
+        "candles_per_second": 21011.027164860767,
+        "configs_per_second": 3.501837860810128,
+        "configurations_per_minute": 210.1102716486077,
+        "export_seconds": 0.14462469999853056,
+        "machine_cpu_percent": 5.711005105032142,
+        "peak_child_processes": 0,
+        "peak_device_memory_mib": null,
+        "peak_device_utilization_pct": null,
+        "preflight_seconds": 0.440551299998333,
+        "requested_mode": "gpu",
+        "sampled_cpu_seconds": 5.21875,
+        "sampled_peak_aggregate_rss_mb": 92.984375,
+        "search_id": "a6df62ad9451d48f",
+        "seconds_per_configuration": 0.2855643349999809,
+        "speedup_vs_one_worker": 1.0,
+        "total_seconds": 5.711286699999619,
+        "worker_initialization": {
+          "8452": {
+            "initialization_seconds": 0.4513796999999613
+          }
+        },
+        "workers": 1
+      },
+      {
+        "active_backends": [
+          "cpu"
+        ],
+        "average_cpu_core_equivalents": 1.9631336795120218,
+        "candles_per_second": 34981.129138404474,
+        "configs_per_second": 5.830188189734079,
+        "configurations_per_minute": 349.81129138404475,
+        "export_seconds": 0.1432332000003953,
+        "machine_cpu_percent": 12.269585496950137,
+        "peak_child_processes": 2,
+        "peak_device_memory_mib": null,
+        "peak_device_utilization_pct": null,
+        "preflight_seconds": 0.36419110000133514,
+        "requested_mode": "gpu",
+        "sampled_cpu_seconds": 6.734375,
+        "sampled_peak_aggregate_rss_mb": 250.57421875,
+        "search_id": "a6df62ad9451d48f",
+        "seconds_per_configuration": 0.17152104999986478,
+        "speedup_vs_one_worker": 1.6648938133261548,
+        "total_seconds": 3.4304209999972954,
+        "worker_initialization": {
+          "11456": {
+            "initialization_seconds": 0.2631457000024966
+          },
+          "23072": {
+            "initialization_seconds": 0.2593663999978162
+          }
+        },
+        "workers": 2
+      },
+      {
+        "active_backends": [
+          "cpu"
+        ],
+        "average_cpu_core_equivalents": 3.1939098256916294,
+        "candles_per_second": 36072.393325458404,
+        "configs_per_second": 6.012065554243067,
+        "configurations_per_minute": 360.72393325458404,
+        "export_seconds": 0.15313289999903645,
+        "machine_cpu_percent": 19.961936410572683,
+        "peak_child_processes": 4,
+        "peak_device_memory_mib": null,
+        "peak_device_utilization_pct": null,
+        "preflight_seconds": 0.3805248999997275,
+        "requested_mode": "gpu",
+        "sampled_cpu_seconds": 10.625,
+        "sampled_peak_aggregate_rss_mb": 414.8203125,
+        "search_id": "a6df62ad9451d48f",
+        "seconds_per_configuration": 0.16633218499991925,
+        "speedup_vs_one_worker": 1.7168315019737133,
+        "total_seconds": 3.3266436999983853,
+        "worker_initialization": {
+          "13336": {
+            "initialization_seconds": 0.3015433000000485
+          },
+          "16932": {
+            "initialization_seconds": 0.28343929999755346
+          },
+          "35252": {
+            "initialization_seconds": 0.3043829000016558
+          },
+          "3800": {
+            "initialization_seconds": 0.3064379999996163
+          }
+        },
+        "workers": 4
+      }
+    ]
+  }
+}

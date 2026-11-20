@@ -360,6 +360,10 @@ export interface EquityPoint {
 }
 
 export interface BacktestResult {
+  gross_pnl: number;
+  total_maker_fees: number;
+  total_taker_fees: number;
+  total_fees: number;
   strategy_config: StrategyConfig;
   strategy_indicators: Record<string, number | null>;
   date_range?: { start: string; end: string };

@@ -1,16 +1,18 @@
 # EMA Pullback V4.2 research engine
 
-The analyzer remains the only trading engine. The optimizer searches its 15
-approved parameters, using worker-local validated data and bounded CPU processes.
-Trading rules, defaults, signal ordering, sizing, 2R target and exit ordering are
-unchanged. All returns remain **gross only**: no fees, funding, slippage or
-commissions. Spot SHORT trades remain hypothetical/signal-only.
+The default BTCUSDT input is the Binance USD-M perpetual snapshot covering January 2024 through December 2025. The 2020?2023 prefix initializes indicators and is excluded from trading. The checked archive hashes and historical funding records are in `data/BTCUSDT_USDM/sources.json`. Rebuild it with `python research/build_perpetual_snapshot.py`. The previous OHLCV files and historical gross reports are preserved.
 
-See [OVERHAUL_REPORT.md](OVERHAUL_REPORT.md) for the engineering audit, verification,
-performance measurements and readiness verdict. Historical research under
-`results/v42`, `results/v42_bugfix_1`, `results/v42_bugfix_2` and the original
-optimization run is preserved. `FILE_HASHES.json` remains the original historical
-snapshot; `FILE_HASHES_OVERHAUL.json` describes this revision.
+Research starts with 1,000 USDT. Market entries, stops and close exits cost 2 bps per fill. Resting target limits cost 5 bps. Funding uses signed settlement payments and slippage is zero. With custom OHLCV alone, funding is reported as unavailable and zero. Supply bar-open `funding_rate` and `funding_mark_price` or quote-currency payments per long unit in both `funding_open_per_unit` and `funding_inside_per_unit`. Open settlements precede entries. Intrabar price exits precede within-bar funding when timing is ambiguous.
+
+Run the search in the Backtesting page or from the project root. The explicit cutoff below applies to the bundled snapshot.
+
+```powershell
+python research/v42_exhaustive_combination_tester.py --timeframe 2h --data-cutoff 2026-01-01T00:00:00Z --execution-mode auto --batch-size 4 --max-combinations 20
+```
+
+CPU, GPU-first with fallback, and automatic modes share chronological trade settlement. GPU-first requires a compatible NVIDIA runtime and the matching CuPy distribution (for CUDA 12, install the project's `cuda12` extra). Automatic mode uses a provisional 100,000-candle threshold. A result records the backend actually used and its fallback reason. Select optional targets with `--target-r 1.5 2 3`. The default remains 2R.
+
+See [the current audit](NET_ACCOUNTING_AUDIT.md) for validation, benchmarks and limitations. The older overhaul report describes historical gross accounting.
 
 ## Installation and tests
 
@@ -94,7 +96,7 @@ At most `2 * workers` tasks are submitted. Only configuration dictionaries and
 small execution metadata cross the queue. Workers never write result files.
 Each worker caches at most two indicator/convergence frames, keyed by all six
 relevant periods (fast/medium/slow EMA, ADX, ATR, HTF EMA), scoped to its exact data,
-cutoff and engine. Signals, trades and ranking are recalculated for every candidate.
+cutoff and engine. A single signal frame is reused for adjacent exit-only variations. Positions are sized independently for every candidate.
 Cached frames are copied before adding signals; no mutable DataFrame is shared
 between workers. BLAS/OpenMP child thread limits are set to one before spawn and
 the parent's environment is restored afterward. No affinity/system settings change.
@@ -108,16 +110,13 @@ and resume scanning time will eventually become limiting at millions of results.
 
 ## Data and cutoff integrity
 
-| Base timeframe | Default base CSV in `research/data/BTCUSDT/` | HTF CSV |
+| Base timeframe | Default base CSV in `research/data/BTCUSDT_USDM/` | HTF CSV |
 |---|---|---|
 | 2h | BTCUSDT_2hours.csv | BTCUSDT_1day.csv |
 | 4h | BTCUSDT_4hours.csv | BTCUSDT_1day.csv |
 | 1d | BTCUSDT_1day.csv | BTCUSDT_1week.csv |
 
-`research/data/` is not present in this checkout. Supply the original datasets
-there, or pass `--base` and `--htf`. No downloaded or synthetic data is silently
-substituted for market data. Paths default relative to the module, not the current
-working directory; explicit relative CLI paths resolve against the caller's directory.
+Custom datasets can be supplied with `--base` and `--htf`. The bundled source manifest records the verified cutoff.
 
 Strict mode is the default and requires an explicit, timezone-qualified,
 **independently verified** `--data-cutoff`. Supplying a timestamp asserts the
@@ -166,8 +165,7 @@ integer bounds and steps. Unknown keys and invalid values fail before execution.
 | chandelier_atr | 1.5–5 | 0.5 | chandelier_atr |
 | time_stop | 10–60 candles | 10 | time_stop |
 
-Fast < medium < slow and minimum stop < maximum stop are enforced. Target stays
-fixed at 2R. Risk percentage, leverage cap, all other baseline values and exposure
+Fast < medium < slow and minimum stop < maximum stop are enforced. Target defaults to 2R. Explicit target lists expand the grid. Risk percentage, leverage cap, all other baseline values and exposure
 constraints are not optimized. All 15 names are explicitly mapped.
 
 Default valid counts are **9,827,470,540,800** for 2H/4H and
@@ -185,7 +183,7 @@ PowerShell, after independently verifying a real cutoff and restoring datasets:
 
 ```powershell
 # Replace this example with the independently verified cutoff for your files.
-$cutoff = '2026-10-25T00:00:00Z'
+$cutoff = '2026-01-01T00:00:00Z'
 python research/v42_exhaustive_combination_tester.py --timeframe 2h --data-cutoff $cutoff --plan
 # 20-configuration smoke test; separate output roots avoid overwriting runs.
 python research/v42_exhaustive_combination_tester.py --timeframe 2h --data-cutoff $cutoff --max-combinations 20 --workers 4 --output research/optimization/smoke
@@ -259,14 +257,7 @@ Worker count and invocation cap can change on resume. Source changes intentional
 prevent resuming old-engine runs, including the preserved original 517-result run.
 New runs never overwrite an existing identical signature without explicit resume.
 
-Ranking defaults remain `total_gross_R` with at least 10 trades, then total R and
-less severe drawdown tie-breaks. Zero is handled as a valid value. Use `--rank-by`
-(total R, compounded gross return, average R, profit factor, win rate or drawdown),
-`--min-trades`, `--max-drawdown` (absolute percentage), `--min-average-r` and `--top-n`.
-Low-sample candidates remain in complete results but are excluded from rankings.
-Missing/non-finite metrics remain missing, as in the analyzer's JSON convention.
-No costs or made-up metrics are added. Results include long/short trade counts and
-expectancies, cutoff provenance, candidate configuration, source identity and timings.
+Ranking defaults to net PnL with at least ten trades. Net return, net profit factor, Sharpe, net expectancy and drawdown-adjusted return are also available. Positive gains with zero losses produce `infinite` profit factor. The optimizer preserves gross-R diagnostics as explicitly named optional rankings. Each row records the fee rates, funding model, dataset and source identity.
 
 Use `--audit-config <config-id>` for candidates evaluated in that invocation.
 Existing successful candidates are not rerun merely to add an audit; reproduce a
@@ -280,7 +271,7 @@ not increment completion. Refreshes are limited to once per second; the legacy
 `--progress-every 0` disables updates, positive values enable them. `--quiet`
 suppresses normal console output; `--log-level` controls console/file severity.
 
-## Measured performance
+## Historical gross-engine measurements
 
 On the deterministic 6,000-candle synthetic fixture (Windows, 16 logical CPUs):
 
@@ -307,16 +298,6 @@ hashed input snapshots support future experiment orchestration without another
 simulator. Random/coarse-to-fine/staged methods would require an explicit method
 identity and distinct result labels.
 
-Numba, memory maps and read-only array simulators are deferred: the measured safe
-changes already remove repeated work without new runtime dependencies or numerical
-reassociation. The Wilder indicator definitions remain unchanged. No GPU, database,
-distributed service or external infrastructure is introduced. Millions of atomic
-record files and O(previous-attempts) resume scans need measurement before claiming
-unlimited-scale support.
+The net-engine benchmark and current limitations are in [the net accounting audit](NET_ACCOUNTING_AUDIT.md). SIMD-style array operations use NumPy on CPU and optional CuPy on CUDA. Recursive Wilder and EMA calculations use their original CPU definitions. Large searches still create one durable record per configuration.
 
-Windows spawn was exercised. Linux/macOS use the same spawn executor and POSIX
-writer-lock branch, but those operating systems were not available for execution.
-The frozen V4.2 specification and original BTCUSDT source files remain unavailable.
-The current verdict is **ready for controlled testing**, pending real-data and
-specification checks. Benchmark results and detailed evidence are in the audit
-report and `benchmarks/benchmark_20.json` / `benchmark_100.json`.
+For browser integration, build the frontend, install Playwright in the test environment and run `python -m pytest frontend/tests/test_research_browser.py`. Set `PLAYWRIGHT_CHANNEL=msedge` to use an installed Microsoft Edge, or install Playwright Chromium.

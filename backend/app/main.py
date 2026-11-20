@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router
+from app.api.research import router as research_router
 from app.core.config import get_settings
 from app.core.database import Database
 from app.instruments.resolver import InstrumentResolver
@@ -43,6 +44,7 @@ app.state.instrument_resolver.ensure_catalogue()
 app.state.market_service = MarketService(settings)
 app.state.quote_service = QuoteService(settings, app.state.market_service, app.state.db)
 app.include_router(router)
+app.include_router(research_router)
 
 FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets", check_dir=False), name="assets")

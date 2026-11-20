@@ -469,6 +469,7 @@ def backtest_trend_breakout(request: Request, payload: BacktestRequest) -> dict[
         result = run_trend_breakout_backtest(
             frame, initial_capital=payload.initial_capital, risk_fraction=payload.risk_fraction,
             cost_bps_per_side=(payload.commission_bps_per_side if payload.commission_bps_per_side is not None else payload.cost_bps_per_side) + payload.slippage_bps_per_side,
+            slippage_bps_per_side=payload.slippage_bps_per_side,
             max_position_fraction=payload.max_position_fraction,
             market=market,
             direction_mode=payload.direction_mode,

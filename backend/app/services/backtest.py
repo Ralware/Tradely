@@ -6,6 +6,7 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
+from app.core.fills import FeeSchedule
 from app.services.indicators import compute_indicators
 from app.services.strategy_config import DEFAULT_STRATEGY_CONFIG, StrategyConfig
 
@@ -13,9 +14,10 @@ from app.services.strategy_config import DEFAULT_STRATEGY_CONFIG, StrategyConfig
 def run_trend_breakout_backtest(
     frame: pd.DataFrame,
     *,
-    initial_capital: float = 100_000.0,
+    initial_capital: float = 1_000.0,
     risk_fraction: float = 0.005,
-    cost_bps_per_side: float = 10.0,
+    cost_bps_per_side: float = 2.0,
+    slippage_bps_per_side: float = 0.0,
     max_position_fraction: float = 0.95,
     market: str = "global",
     direction_mode: Literal["long_only", "short_only", "long_short"] = "long_only",
@@ -39,9 +41,9 @@ def run_trend_breakout_backtest(
                  strategy_config.donchian_exit_period + 1, strategy_config.rvol_period + 1, 220)
     if len(frame) < max(indicator_warmup, 240):
         raise ValueError("At least 240 daily bars are required for this strategy backtest")
-    if initial_capital <= 0 or not 0 < risk_fraction <= 0.02:
+    if not math.isfinite(initial_capital) or initial_capital <= 0 or not 0 < risk_fraction <= 0.02:
         raise ValueError("Invalid initial capital or risk fraction")
-    if cost_bps_per_side < 0 or not 0 < max_position_fraction <= 1:
+    if not (math.isfinite(cost_bps_per_side) and 0 <= slippage_bps_per_side <= cost_bps_per_side) or not 0 < max_position_fraction <= 1:
         raise ValueError("Invalid cost or max position setting")
     if direction_mode not in ("long_only", "short_only", "long_short"):
         raise ValueError("Invalid direction_mode")
@@ -61,7 +63,30 @@ def run_trend_breakout_backtest(
     pending_exit = False
     entry_cost_fraction = cost_bps_per_side / 10_000
 
+    schedule = FeeSchedule(taker=(cost_bps_per_side - slippage_bps_per_side) / 10_000)
+
+    def settle(open_position: dict, timestamp, price: float, reason: str) -> float:
+        quantity = open_position["quantity"]
+        entry_price = open_position["entry"]
+        entry = quantity * entry_price
+        exit_value = quantity * price
+        entry_fee = schedule.charge(quantity, entry_price, "taker")
+        exit_fee = schedule.charge(quantity, price, "taker")
+        slippage = (entry + exit_value) * slippage_bps_per_side / 10_000
+        costs = entry_fee + exit_fee + slippage
+        gross = _gross_pnl(open_position, price)
+        net = gross - costs
+        trade = _trade_record(open_position, timestamp, price, gross, costs, net, reason)
+        trade.update(entry_notional=entry, exit_notional=exit_value, entry_fee=entry_fee,
+                     exit_fee=exit_fee, maker_fees=0.0, taker_fees=entry_fee + exit_fee,
+                     funding=0.0, entry_liquidity="taker", exit_liquidity="taker",
+                     slippage=slippage, net_return_pct=100 * net / entry,
+                     holding_hours=(timestamp - pd.Timestamp(open_position["entry_time"])).total_seconds() / 3600)
+        trades.append(trade)
+        return net
+
     first_bar = max(220, indicator_warmup - 1)
+    equity_curve.append({"timestamp": data.index[first_bar - 1].isoformat(), "equity": equity})
     for i in range(first_bar, len(data)):
         exited_this_bar = False
         row = data.iloc[i]
@@ -80,14 +105,10 @@ def run_trend_breakout_backtest(
             )
         )
         # Check protective stop known before this candle. Gap-through stops fill at open.
-        if stop_hit and position is not None:
+        if stop_hit and position is not None and not pending_exit:
             stop = float(position["stop"])
             exit_price = _stop_fill(position, open_price, stop)
-            gross = _gross_pnl(position, exit_price)
-            fees = (position["entry"] + exit_price) * position["quantity"] * entry_cost_fraction
-            net = gross - fees
-            equity += net
-            trades.append(_trade_record(position, ts, exit_price, gross, fees, net, "protective_stop"))
+            equity += settle(position, ts, exit_price, "protective_stop")
             position = None
             pending_exit = False
             exited_this_bar = True
@@ -95,11 +116,7 @@ def run_trend_breakout_backtest(
         # A close-based exit signal from the previous bar executes at this bar's open.
         elif position is not None and pending_exit:
             exit_price = open_price
-            gross = _gross_pnl(position, exit_price)
-            fees = (position["entry"] + exit_price) * position["quantity"] * entry_cost_fraction
-            net = gross - fees
-            equity += net
-            trades.append(_trade_record(position, ts, exit_price, gross, fees, net, "donchian_10_exit"))
+            equity += settle(position, ts, exit_price, "donchian_10_exit")
             position = None
             pending_exit = False
             exited_this_bar = True
@@ -179,11 +196,7 @@ def run_trend_breakout_backtest(
         if entry_stop_hit and position is not None:
             # Protective stop is active immediately after an entry at today's open.
             exit_price = _stop_fill(position, open_price, float(position["stop"]))
-            gross = _gross_pnl(position, exit_price)
-            fees = (position["entry"] + exit_price) * position["quantity"] * entry_cost_fraction
-            net = gross - fees
-            equity += net
-            trades.append(_trade_record(position, ts, exit_price, gross, fees, net, "same_bar_protective_stop"))
+            equity += settle(position, ts, exit_price, "same_bar_protective_stop")
             position = None
             pending_exit = False
             exited_this_bar = True
@@ -206,7 +219,7 @@ def run_trend_breakout_backtest(
             else:
                 pending_exit = bool(not prior_highs.empty and close > prior_highs.max())
             # Entry and exit fees are recognised exactly once when a trade closes.
-            unrealized = _gross_pnl(position, close)
+            unrealized = _gross_pnl(position, close) - (position["entry"] + close) * position["quantity"] * entry_cost_fraction
         else:
             unrealized = 0.0
         marked_equity = equity + unrealized
@@ -216,14 +229,13 @@ def run_trend_breakout_backtest(
     if position is not None:
         last = data.iloc[-1]
         exit_price = float(last["close"])
-        gross = _gross_pnl(position, exit_price)
-        fees = (position["entry"] + exit_price) * position["quantity"] * entry_cost_fraction
-        net = gross - fees
-        equity += net
-        trades.append(_trade_record(position, data.index[-1], exit_price, gross, fees, net, "end_of_test"))
+        equity += settle(position, data.index[-1], exit_price, "end_of_test")
         if equity_curve:
             equity_curve[-1]["equity"] = equity
 
+    gross_values = [trade["gross_pnl"] for trade in trades]
+    gross_gains = sum(max(0, v) for v in gross_values)
+    gross_losses = sum(max(0, -v) for v in gross_values)
     pnls = [trade["net_pnl"] for trade in trades]
     winners = [value for value in pnls if value > 0]
     losers = [value for value in pnls if value < 0]
@@ -269,6 +281,15 @@ def run_trend_breakout_backtest(
     }
     strategy_indicators = {key: (None if pd.isna(value) else float(value)) for key, value in strategy_indicators.items()}
     return {
+        "gross_pnl": sum(gross_values), "net_pnl": sum(pnls),
+        "total_maker_fees": 0.0, "total_taker_fees": sum(t["taker_fees"] for t in trades),
+        "total_fees": sum(t["taker_fees"] for t in trades),
+        "total_slippage": sum(t["slippage"] for t in trades), "total_funding": 0.0,
+        "funding_model": "UNAVAILABLE_EXCLUDED_ZERO" if market == "crypto" else "NOT_APPLICABLE",
+        "gross_return_pct": 100 * sum(gross_values) / initial_capital,
+        "gross_profit_factor": gross_gains / gross_losses if gross_losses else ("infinite" if gross_gains else None),
+        "gross_win_rate_pct": 100 * sum(v > 0 for v in gross_values) / len(trades) if trades else None,
+        "average_duration_hours": np.mean([t["holding_hours"] for t in trades]) if trades else None,
         "direction_mode": direction_mode,
         "strategy_config": strategy_config.model_dump(mode="json"),
         "strategy_indicators": strategy_indicators,
