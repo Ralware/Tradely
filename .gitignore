@@ -1,4 +1,3 @@
-research/data/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -7,3 +6,4 @@ __pycache__/
 .coverage*
 htmlcov/
 research/benchmarks/run_*/
+research/optimization/100k_2h/results/2h/a3dcf664ad210841/records/
