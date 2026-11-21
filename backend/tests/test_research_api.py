@@ -52,3 +52,26 @@ def test_cancel_then_resume_same_run(tmp_path, monkeypatch):
     state = await_status()
     assert state["status"] == "completed" and state["completed"] == 2
     assert client.post(url + "/resume").status_code == 409
+
+
+def test_progress_rate_uses_current_invocation(tmp_path, monkeypatch):
+    import json
+    import os
+    from uuid import uuid4
+
+    monkeypatch.setattr(research, "jobs", tmp_path)
+    job = uuid4()
+    job_dir = tmp_path / str(job)
+    run_dir = job_dir / "results" / "2h" / "run"
+    run_dir.mkdir(parents=True)
+    request = job_dir / "request.json"
+    request.write_text(research.Search(combinations=100).model_dump_json())
+    manifest = run_dir / "run_metadata.json"
+    manifest.write_text(json.dumps({"status": "running", "checkpoint_total": 60}))
+    (run_dir / "checkpoint.json").write_text(json.dumps({"checkpoint_total": 65}))
+    now = time.time()
+    os.utime(request, (now - 3600, now - 3600))
+    os.utime(manifest, (now - 5, now - 5))
+    state = research.status(job)
+    assert state["completed"] == 65
+    assert 0.9 < state["rate"] < 1.1

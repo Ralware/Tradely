@@ -1,4 +1,4 @@
-﻿# Tradely net accounting and exhaustive search audit
+# Tradely net accounting and exhaustive search audit
 
 ## Outcome
 
@@ -73,7 +73,7 @@ The original golden data remains intact. Its signal/indicator digests and fill c
 - New tests cover net accounting, research API jobs and browser integration. Existing sizing, analyzer, exhaustive-search, optimization, provider and reference tests were updated. Backend tests gained database isolation.
 - pyproject.toml adds optional CUDA 12 CuPy and benchmark psutil extras. CPU execution uses the existing NumPy/pandas stack. The browser integration uses Playwright in a separate test environment. No runtime dependency was removed.
 
-## Open validation and scope
+## Scope at the initial checkpoint
 
 Physical GPU benchmarking and parity verification remain the release gate for CUDA claims. Run the physical parity test and benchmark on a supported NVIDIA host before setting a measured automatic crossover. The 45,000-combination grid was enumerated and a search of that size was cancelled in a browser smoke test. A complete timed 45,000-configuration sweep was not executed.
 
@@ -81,6 +81,51 @@ This review covered the application research and backtesting paths, provider can
 
 The ledger models a capped, single-position strategy. Partial-fill fee arithmetic is covered, while exchange matching, partial-fill generation, maintenance-margin liquidation and queue position are outside the simulator. The Windows host exercised process spawning and cancellation. Walk-forward selection, Monte Carlo paths, concurrent multi-symbol portfolio accounting and portfolio-level CUDA benchmarks were not implemented. These require explicit fold selection, sampling and portfolio capital-allocation semantics before their financial results can be compared. GPU benchmarking, these workloads and the full-repository review remain outstanding against the original brief.
 
-## Continuation handoff
+## Continuation on November 21, 2026
 
-The working tree contains the implementation and rebuilt frontend described above. No commit has been created. On the next session, start with `git status --short` and preserve the existing changes. Prioritize a physical NVIDIA run of `research/tests/test_net_accounting.py`, then measure CUDA and CPU on identical inputs and investigate any parity differences. Next, run and time a complete 45,000-configuration search, review recovery and output completeness, and finish the remaining repository audit. Walk-forward, Monte Carlo, multi-symbol portfolio simulation and their validation remain open. The account usage percentage is not visible to the agent, so the requested 4% stopping point could not be measured.
+The 45,000-configuration BTCUSDT perpetual sweep finished with zero failed
+configurations. It covered the complete explicit 20 ? 15 ? 15 ? 10 grid and
+settled 3,462,434 simulated trades across configurations. With 10 CPU workers
+and batches of 12, it took 856.27 seconds including setup and export, or 52.55
+configurations per second. The verifier reconciled every result's net PnL and
+fees, checked CSV values against atomic records, matched the JSONL checkpoint IDs
+to the grid, and independently checked net-PnL leaderboard order. The maximum
+net PnL reconciliation residual was 8.53e-14 USDT. A second invocation resumed
+all 45,000 checkpoints, evaluated zero new configurations, and reproduced the
+original CSV SHA-256 digest.
+[Run evidence and exact configuration ranges](benchmarks/net_accounting_45000.json)
+
+Expanding-window walk-forward evaluation uses each preceding window to select
+its configuration by training net PnL. A two-fold run on the bundled 2-hour data
+evaluated 35 holdout trades. The Monte Carlo workload resampled 10,000 paths of
+settled BTCUSDT net trade returns with a fixed seed and five-trade circular
+blocks. A GPU request fell back to CPU, and the separate physical CUDA parity
+test was skipped. Both results are research diagnostics for the supplied inputs.
+
+The multi-symbol workflow generates separate strategy ledgers with input hashes
+and allocates shared cash across their time-ordered entries. A 2-hour BTCUSDT
+and ETHUSDT historical smoke test settled 132 trades. Binance's funding endpoint
+timed out, so ETHUSDT used checksum-verified candles and explicitly excluded
+funding. BTCUSDT used its bundled funding records. The portfolio reports
+realized drawdown. Positions competing for cash retain the signal chronology
+of each standalone ledger, and portfolio-level mark-to-market and liquidation
+remain open.
+
+Resuming a search now calculates the displayed evaluation rate using newly
+processed configurations and elapsed time for the current invocation. A
+regression test models an older paused run and confirms that idle time and
+previously evaluated configurations do not distort the rate.
+
+The full Python regression run passed 359 tests, with two physical CUDA tests
+skipped. One later snapshot funding-exclusion test passed in the targeted rerun.
+All 35 frontend unit tests and the browser integration test passed. The research
+lint, configured type check, vendored TradingView SDK type check, and bridge
+syntax check also passed. The broader backend lint reported 84 findings outside
+the changed code, primarily timezone style and import ordering. The unused
+locals are in the resolver and strategy service, and the module-order findings
+are in the technicals service. These remain maintenance findings.
+
+Physical NVIDIA parity and speed, a full line-by-line repository and vendor
+audit, multi-market or cross-platform live integration, and a joint portfolio
+engine with mark-to-market remain unverified. Recursive EMA and Wilder
+calculations still run on the CPU, as does shared cash allocation.

@@ -14,6 +14,54 @@ CPU, GPU-first with fallback, and automatic modes share chronological trade sett
 
 See [the current audit](NET_ACCOUNTING_AUDIT.md) for validation, benchmarks and limitations. The older overhaul report describes historical gross accounting.
 
+## Research validation commands
+
+Use the same completed candles and net accounting as the strategy analyzer. Each
+command prints JSON. A walk-forward configuration file contains an array of
+overrides such as `[{}, {"target_r": 1.6}]`. Supply UTC boundaries aligned with the
+base candles. The first boundary ends the initial training set and starts the
+first holdout.
+
+```powershell
+python research/validation_workloads.py walk-forward 2h 2025-01-01T00:00:00Z 2025-07-01T00:00:00Z 2026-01-01T00:00:00Z --configs configs.json
+python research/validation_workloads.py monte-carlo path/to/2h_trades.csv --paths 10000 --block-size 5 --seed 42 --mode auto
+python research/validation_workloads.py portfolio-backtest 2h 2026-01-01T00:00:00Z datasets.json --capital 1000
+```
+
+Walk-forward uses expanding training windows. The highest training net PnL wins,
+subject to the minimum trade count. Holdouts start flat and close at each fold
+boundary. The combined return compounds the evaluated folds and the report lists
+folds that lacked sufficient training trades.
+
+Monte Carlo samples circular blocks from settled trade returns. It measures
+terminal return and drawdown at settlement points, with the starting balance as
+the first peak. CUDA execution and CPU fallback use the same seed and sampling
+rule. These distributions describe resampling of the supplied ledger.
+
+The portfolio dataset file maps symbols to objects with `base`, `htf`, and an
+optional `config`. Use inputs in the same quote currency and timeframe. Paths
+are relative to that file. Use the `portfolio` command with a JSON map from
+symbols to existing trade CSV paths to replay those ledgers directly.
+
+Generate a second symbol's Binance USD-M input with:
+
+```powershell
+python research/build_perpetual_snapshot.py --symbol ETHUSDT --history-start 2023-01-01 --output path/to/ETHUSDT_USDM
+```
+
+The builder verifies candle archives and expects complete eight-hour funding
+settlements by default. When settlement history is unavailable, pass
+`--exclude-funding` with a separate output directory. Both the snapshot manifest
+and analyzer report record the exclusion.
+
+The replay orders trade entries chronologically and scales each trade to the
+realized account equity and available unreserved cash. Same-bar entries run
+before exits, with symbol order breaking ties. The report measures realized
+equity and drawdown. Each symbol generates its own trade intents, so rejecting
+an unaffordable intent does not reopen later signals suppressed by that symbol's
+standalone position. Intrabar mark-to-market, margin and liquidation require a
+joint event simulator.
+
 ## Installation and tests
 
 Python 3.11–3.14, NumPy and pandas are the runtime dependencies. Development tools

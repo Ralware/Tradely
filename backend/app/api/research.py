@@ -122,7 +122,6 @@ def status(job: UUID):
     checkpoint = manifest.with_name("checkpoint.json") if manifest else None
     state = json.loads(checkpoint.read_text()) if checkpoint and checkpoint.exists() else {}
     count = state.get("checkpoint_total", 0)
-    duration = metadata.get("elapsed_seconds", time.time() - request.stat().st_mtime)
     status = metadata.get("status", "starting")
     error = None
     if child and code is None and status not in ("starting", "running"):
@@ -137,6 +136,15 @@ def status(job: UUID):
         error = (directory / "run.log").read_text(encoding="utf8", errors="replace")[-1000:]
     if status == "paused_cap_reached":
         status = "completed"
+    if status == "running" and manifest and metadata.get("status") == "running":
+        duration = time.time() - manifest.stat().st_mtime
+        processed = max(0, count - metadata.get("checkpoint_total", 0))
+    elif status not in ("starting", "running"):
+        duration = metadata.get("elapsed_seconds", 0)
+        processed = metadata.get("newly_evaluated", 0)
+    else:
+        duration = 0
+        processed = 0
     rows = []
     if manifest and status not in ("starting", "running"):
         top = manifest.with_name("top_configs.csv")
@@ -152,7 +160,7 @@ def status(job: UUID):
         "error": error,
         "completed": count,
         "total": config["combinations"],
-        "rate": count / duration if duration > 0 else 0,
+        "rate": processed / duration if duration > 0 else 0,
         "top": rows,
         "backend": state.get("active_backend"),
         "fallback": state.get("backend_fallback"),
