@@ -462,7 +462,6 @@ class InstrumentResolver:
         if not ranked:
             return "not_found", None, [], NO_MATCH_MESSAGE
 
-        top = ranked[0]
         exact = [item for item in ranked if item.match_type in _EXACT_TYPES and item.score >= 176]
         pool = exact if exact else ranked
         top_score = pool[0].score

@@ -6,7 +6,7 @@ Prepared November 21, 2026. This summarizes work performed on November 20 and 21
 
 - Repository is C:\tradely\Tradely on branch main.
 - November 20 changes were committed and pushed to origin/main in commit e9eeb44, "Add net accounting and batched research optimization".
-- November 21 continuation changes remain local and uncommitted. They include research validation workloads, the 45,000-result verification report, snapshot builder changes, a research API progress fix, tests, README, and updated audit.
+- The first November 21 continuation was committed as `5b5fe18` and merged with the remote changes in `2b809d1`. That merge was pushed to origin/main.
 - The untracked .vscode/ directory existed when the continuation started and was preserved.
 - The original request is in C:\Users\gunji\Downloads\message (1).txt. The requested work is still incomplete.
 
@@ -33,7 +33,7 @@ Prepared November 21, 2026. This summarizes work performed on November 20 and 21
 
 - Physical NVIDIA CUDA parity and GPU benchmarking remain unverified. This machine has AMD Radeon 860M graphics. CPU fallback was tested. Automatic CUDA selection uses a provisional threshold. CPU and GPU financial parity cannot yet be claimed.
 - The full line-by-line repository and vendor audit, live exchange integration, and cross-platform testing remain incomplete. The audit report identifies which paths were reviewed and what was tested.
-- The shared-cash portfolio replay reports realized drawdown. It uses independently generated symbol trade intents and does not recalculate later signals after a rejected trade. A joint event-driven portfolio engine, unrealized mark-to-market, maintenance margin, and liquidation remain open.
+- The CSV replay still reports realized drawdown. The local `portfolio-backtest` command now simulates competing signals with a shared wallet, bar-close marks and an optional flat maintenance-margin stress scenario. Exchange-specific liquidation still requires historical margin brackets and a mark-price series.
 - Exchange queue position and actual partial-fill generation are not simulated. Partial-fill fee arithmetic was tested. Intrabar funding and exit timing rely on the assumptions documented in the audit.
 - The attached original brief requested broad production-quality financial verification and GPU benchmarks. Do not describe that definition of done as achieved until the outstanding work is complete.
 - The 45,000-grid result is one specified parameter grid and dataset. It is not an out-of-sample validation of the best strategy.
@@ -45,3 +45,11 @@ Prepared November 21, 2026. This summarizes work performed on November 20 and 21
 - research/strategy_analyzer.py, research/exit_paths.py, research/optimization_runtime.py, and research/v42_exhaustive_combination_tester.py contain the research engine and optimizer.
 - research/validation_workloads.py contains the new validation commands. research/verify_cpu_sweep.py verifies sweep records and exports.
 - backend/app/core/fills.py contains the fee schedule. backend/app/api/research.py and frontend/src/components/analysis/ResearchSearch.tsx implement the browser search.
+
+## Latest local CPU work
+
+The joint BTCUSDT and ETHUSDT run used 1,000 USDT and a hypothetical 0.5% maintenance threshold. It settled 132 trades and ended at 987.16790676 USDT. Marked drawdown was 9.63735432%. ETH funding was excluded and BTC funding used the bundled historical settlements. A separate Decimal verifier priced every trade and all 8,772 closes against the source candles. The largest equity discrepancy was 1.13e-12 USDT. Reproduction commands are in research/README.md and the input hashes, configurations and residuals are in research/benchmarks/joint_portfolio_cpu.json.
+
+SQLite validation and FIFO reporting now share the same quantity tolerance. Regression tests check rollback for a fractional oversell and overcover. The backend and research lint checks pass. The manual review of every application and vendor source file is still open. Physical CUDA parity, GPU performance and cross-platform execution remain unverified.
+
+Latest validation on Windows passed 364 Python tests, 35 frontend tests and one Edge integration test. Two physical CUDA tests skipped. Python 3.12 and 3.14 produced identical portfolio trades and equity curves. The frontend build, configured static checks and read-only SQLite integrity checks passed.

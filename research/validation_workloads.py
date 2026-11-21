@@ -15,6 +15,7 @@ from typing import Any
 import numpy as np
 import strategy_analyzer as engine
 from exit_paths import prefix_max
+from joint_portfolio import joint_portfolio
 
 
 def walk_forward(timeframe, base, htf, boundaries, configs, *, min_train_trades=1, mode="cpu"):
@@ -245,9 +246,11 @@ def portfolio_replay(ledgers: Mapping[str, Sequence[Mapping[str, Any]]], *, capi
     }
 
 
-def portfolio_backtest(timeframe, datasets, cutoff, *, capital=1000.0, mode="auto"):
-    """Generate comparable ledgers, then make them compete for shared cash."""
-    ledgers, provenance = {}, {}
+def portfolio_backtest(
+    timeframe, datasets, cutoff, *, capital=1000.0, mode="auto", maintenance_rate=None
+):
+    """Simulate concurrent signals against a shared futures wallet."""
+    frames, configs, provenance = {}, {}, {}
     for symbol, dataset in sorted(datasets.items()):
         base, htf = Path(dataset["base"]), Path(dataset["htf"])
         analysis = engine.run_analysis(
@@ -263,7 +266,8 @@ def portfolio_backtest(timeframe, datasets, cutoff, *, capital=1000.0, mode="aut
         report = analysis["report"]
         if report["warmup"]["evaluation_start_index"] is None:
             raise ValueError(f"{symbol} has no eligible evaluation interval")
-        ledgers[symbol] = analysis["trades"]
+        frames[symbol] = analysis["signals"].iloc[report["warmup"]["evaluation_start_index"] :]
+        configs[symbol] = report["configuration"]
         provenance[symbol] = {
             "run_id": report["run_id"],
             "configuration": report["configuration"],
@@ -273,8 +277,18 @@ def portfolio_backtest(timeframe, datasets, cutoff, *, capital=1000.0, mode="aut
             "execution_backend": report["active_backend"],
             "fallback_reason": report["backend_fallback"],
         }
+    if not frames:
+        raise ValueError("Supply at least one symbol history")
+    start = max(frame.index[0] for frame in frames.values())
+    frames = {symbol: frame.loc[start:] for symbol, frame in frames.items()}
     return {
-        **portfolio_replay(ledgers, capital=capital),
+        "common_evaluation_start": str(start),
+        "portfolio_source_sha256": engine.sha256_file(
+            Path(__file__).with_name("joint_portfolio.py")
+        ),
+        **joint_portfolio(
+            frames, configs, timeframe, capital=capital, maintenance_rate=maintenance_rate
+        ),
         "timeframe": timeframe,
         "data_cutoff": str(cutoff),
         "engine_source_sha256": engine.engine_source_hash(),
@@ -318,6 +332,9 @@ def main():
         "datasets", type=Path, help="JSON mapping symbols to base/htf/config objects"
     )
     combined.add_argument("--capital", type=float, default=1000)
+    combined.add_argument(
+        "--maintenance-rate", type=float, help="Flat close-mark maintenance stress rate"
+    )
     combined.add_argument("--mode", choices=("cpu", "gpu", "auto"), default="auto")
     args = parser.parse_args()
     if args.command == "walk-forward":
@@ -359,6 +376,7 @@ def main():
             datasets,
             args.cutoff,
             capital=args.capital,
+            maintenance_rate=args.maintenance_rate,
             mode=args.mode,
         )
     else:

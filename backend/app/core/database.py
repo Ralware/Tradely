@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +13,12 @@ from app.core.instruments import (
     instrument_id_for,
     parse_instrument_id,
 )
-from app.core.models import HoldingTransaction, Instrument, WatchlistItem
+from app.core.models import (
+    HOLDING_QUANTITY_TOLERANCE,
+    HoldingTransaction,
+    Instrument,
+    WatchlistItem,
+)
 
 SCHEMA_VERSION = 3
 _CATALOGUE_COLUMNS: dict[str, str] = {
@@ -31,7 +37,7 @@ _CATALOGUE_COLUMNS: dict[str, str] = {
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _instrument_from_row(row: dict[str, Any]) -> Instrument:
@@ -190,7 +196,7 @@ class Database:
         """Create a consistent backup before an additive schema migration."""
         backup_dir = self.file_path.parent / "backups"
         backup_dir.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         target = backup_dir / f"{self.file_path.stem}-v{previous_version}-{stamp}.sqlite3"
         source = sqlite3.connect(self.file_path)
         destination = sqlite3.connect(target)
@@ -703,11 +709,11 @@ class Database:
             )
             item["name"] = item.get("instrument_name") or item.get("display_name") or item["symbol"]
             held_quantity = float(item.get("held_quantity") or 0)
-            item["is_held"] = abs(held_quantity) > 1e-9
+            item["is_held"] = abs(held_quantity) > HOLDING_QUANTITY_TOLERANCE
             item["held_quantity"] = held_quantity
             item["held_side"] = (
-                "LONG" if held_quantity > 1e-9
-                else "SHORT" if held_quantity < -1e-9
+                "LONG" if held_quantity > HOLDING_QUANTITY_TOLERANCE
+                else "SHORT" if held_quantity < -HOLDING_QUANTITY_TOLERANCE
                 else None
             )
             items.append(item)
@@ -848,9 +854,9 @@ class Database:
     ) -> str | None:
         long_quantity = self.available_quantity(instrument_id, currency, trade_time)
         short_quantity = self.available_short_quantity(instrument_id, currency, trade_time)
-        if long_quantity > 1e-9:
+        if long_quantity > HOLDING_QUANTITY_TOLERANCE:
             return "LONG"
-        if short_quantity > 1e-9:
+        if short_quantity > HOLDING_QUANTITY_TOLERANCE:
             return "SHORT"
         return None
 
@@ -870,36 +876,38 @@ class Database:
             sql += " AND id<>?"
             parameters.append(excluding_id)
         sql += " ORDER BY trade_time, id"
-        balances: dict[str, dict[str, float]] = {}
+        balances: dict[str, dict[str, Decimal]] = {}
         for row in connection.execute(sql, parameters).fetchall():
             side = str(row["intent"] or row["side"]).upper()
-            quantity = float(row["quantity"])
-            balance = balances.setdefault(row["currency"], {"long": 0.0, "short": 0.0})
+            quantity = Decimal(str(row["quantity"]))
+            balance = balances.setdefault(row["currency"], {"long": Decimal(0), "short": Decimal(0)})
             if side == "BUY":
-                if balance["short"] > 1e-9:
+                if balance["short"] > HOLDING_QUANTITY_TOLERANCE:
                     raise ValueError(
                         "BUY cannot reverse an open SHORT exposure; use BUY_TO_COVER first"
                     )
                 balance["long"] += quantity
             elif side == "SELL":
-                if balance["long"] + 1e-9 < quantity:
+                if balance["long"] <= HOLDING_QUANTITY_TOLERANCE or balance["long"] + HOLDING_QUANTITY_TOLERANCE < quantity:
                     raise ValueError(
                         f"Sell quantity {quantity} exceeds recorded holdings {balance['long']}"
                     )
-                balance["long"] = max(0.0, balance["long"] - quantity)
+                remaining = balance["long"] - quantity
+                balance["long"] = remaining if remaining > HOLDING_QUANTITY_TOLERANCE else Decimal(0)
             elif side == "SELL_SHORT":
-                if balance["long"] > 1e-9:
+                if balance["long"] > HOLDING_QUANTITY_TOLERANCE:
                     raise ValueError(
                         "SELL_SHORT cannot reverse an open LONG exposure; use SELL first"
                     )
                 balance["short"] += quantity
             elif side == "BUY_TO_COVER":
-                if balance["short"] + 1e-9 < quantity:
+                if balance["short"] <= HOLDING_QUANTITY_TOLERANCE or balance["short"] + HOLDING_QUANTITY_TOLERANCE < quantity:
                     raise ValueError(
                         f"Cover quantity {quantity} exceeds recorded short holdings "
                         f"{balance['short']}"
                     )
-                balance["short"] = max(0.0, balance["short"] - quantity)
+                remaining = balance["short"] - quantity
+                balance["short"] = remaining if remaining > HOLDING_QUANTITY_TOLERANCE else Decimal(0)
             else:
                 raise ValueError(f"Unsupported transaction intent: {side}")
 
@@ -1023,8 +1031,8 @@ class Database:
         try:
             parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
             if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=timezone.utc)
-            return parsed.astimezone(timezone.utc)
+                parsed = parsed.replace(tzinfo=UTC)
+            return parsed.astimezone(UTC)
         except ValueError:
             return None
 

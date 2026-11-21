@@ -105,6 +105,13 @@ def test_portfolio_backtest_one_symbol_reconciles_to_strategy_ledger():
     assert result["skipped_trades"] == 0
     assert len(result["trades"]) == 69
     assert result["datasets"]["BTCUSDT"]["execution_backend"] == "cpu"
+    from verify_joint_portfolio import reconcile
+
+    inputs = {"BTCUSDT": {"base": engine.BASE_DATA_FILES[timeframe]}}
+    assert reconcile(result, inputs)["checked_marks"] == len(result["marked_equity"])
+    result["marked_equity"][0]["equity"] -= 1
+    with pytest.raises(ValueError, match="reconciliation failed"):
+        reconcile(result, inputs)
 
 
 def test_physical_cuda_bootstrap_parity():
@@ -157,3 +164,65 @@ def test_snapshot_candle_only_mode_does_not_claim_funding(tmp_path, monkeypatch)
     assert source["symbol"] == "ETHUSDT"
     assert source["funding_model"] == "UNAVAILABLE_EXCLUDED_ZERO"
     assert not source["funding_events"]
+
+
+def portfolio_fixture(sides, closes=None):
+    import pandas as pd
+
+    return pd.DataFrame(
+        {
+            "signal": sides,
+            "open": 100.0,
+            "high": 101.0,
+            "low": 95.0,
+            "close": closes or [100.0] * len(sides),
+            "atr": 50.0,
+            "long_stop": 50.0,
+            "short_stop": 150.0,
+            "long_stop_distance_atr_signal": 1.0,
+            "short_stop_distance_atr_signal": 1.0,
+        },
+        index=pd.date_range("2025-01-01", periods=len(sides), freq="2h", tz="UTC", name="datetime"),
+    )
+
+
+def test_joint_portfolio_rechecks_later_signal_after_cash_rejection():
+    from joint_portfolio import joint_portfolio
+
+    frames = {
+        "A": portfolio_fixture(["LONG", "WAIT", "WAIT", "WAIT", "WAIT"]),
+        "B": portfolio_fixture(["LONG", "WAIT", "SHORT", "WAIT", "WAIT"]),
+    }
+    config = {**engine.BASELINE_CONFIGS["2h"], "risk_pct": 1.0, "chandelier_atr": 100}
+    configs = {"A": {**config, "time_stop": 2}, "B": {**config, "time_stop": 5}}
+    report = joint_portfolio(frames, configs, "2h")
+    assert report["skipped_trades"] == 1
+    a, b = report["trades"]
+    assert (a["symbol"], b["symbol"], b["side"]) == ("A", "B", "SHORT")
+    assert a["reserved_notional"] + a["entry_fee"] == pytest.approx(1000)
+    assert b["entry_time"] == str(frames["B"].index[3])
+    assert report["net_pnl"] == pytest.approx(a["net_pnl"] + b["net_pnl"])
+
+
+def test_joint_marks_funding_and_maintenance_close():
+    from joint_portfolio import joint_portfolio
+
+    frame = portfolio_fixture(["LONG", "WAIT", "WAIT", "WAIT"], [100, 95, 100, 100])
+    frame["funding_open_per_unit"] = [0.0, 50.0, 1.0, 0.0]
+    frame["funding_inside_per_unit"] = [0.0, 0.5, 0.0, 0.0]
+    config = {**engine.BASELINE_CONFIGS["2h"], "risk_pct": 1.0, "chandelier_atr": 100}
+    options = ({"A": frame}, {"A": config}, "2h")
+    normal = joint_portfolio(*options)
+    trade = normal["trades"][0]
+    q = trade["quantity"]
+    mark = 1000 - trade["entry_fee"] - q * (5 + 0.5 + 95 * engine.TAKER_RATE)
+    assert normal["marked_equity"][1]["equity"] == pytest.approx(mark)
+    assert trade["funding"] == pytest.approx(1.5 * q)
+    assert normal["marked_max_drawdown_pct"] == pytest.approx((mark / 1000 - 1) * 100)
+    stressed = joint_portfolio(*options, maintenance_rate=0.999)
+    assert stressed["maintenance_close_events"] == 1
+    assert stressed["trades"][0]["exit_reason"] == "MAINTENANCE_CLOSE"
+    assert stressed["ending_capital"] == pytest.approx(mark)
+    assert stressed["marked_equity"][-1]["equity"] == pytest.approx(mark)
+    with pytest.raises(ValueError, match="timestamps"):
+        joint_portfolio({"A": frame, "B": frame.iloc[:-1]}, {"A": config, "B": config}, "2h")

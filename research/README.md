@@ -54,13 +54,26 @@ settlements by default. When settlement history is unavailable, pass
 `--exclude-funding` with a separate output directory. Both the snapshot manifest
 and analyzer report record the exclusion.
 
-The replay orders trade entries chronologically and scales each trade to the
-realized account equity and available unreserved cash. Same-bar entries run
-before exits, with symbol order breaking ties. The report measures realized
-equity and drawdown. Each symbol generates its own trade intents, so rejecting
-an unaffordable intent does not reopen later signals suppressed by that symbol's
-standalone position. Intrabar mark-to-market, margin and liquidation require a
-joint event simulator.
+The `portfolio-backtest` command trades synchronized bars starting at the latest
+eligible evaluation start across symbols. Each bar settles open funding on
+existing positions, sizes new signals against shared equity at the open, and
+reserves entry notional plus fees. Symbol order breaks simultaneous entry ties.
+Entries precede same-bar exits and a rejected entry leaves later signals eligible.
+Each close reports equity including unrealized PnL, funding and estimated taker
+exit fees. A same-symbol signal on an exit bar follows the standalone cooldown.
+The `portfolio` command still replays historical trade CSVs and reports realized drawdown.
+
+Pass `--maintenance-rate 0.005` to stress a hypothetical flat 0.5% cross-account
+requirement. The check runs after ordinary exits at each bar close. A breach closes
+all surviving positions at that close with taker fees. Binance mark-price ticks,
+tiered brackets and exchange liquidation fees require additional historical inputs.
+Maintenance checks default to disabled. For snapshot-builder CSVs, audit every
+reported equity mark independently with Decimal arithmetic:
+
+```powershell
+python research/validation_workloads.py portfolio-backtest 2h 2026-01-01T00:00:00Z datasets.json --mode cpu --maintenance-rate 0.005 > portfolio-result.json
+python research/verify_joint_portfolio.py portfolio-result.json datasets.json
+```
 
 ## Installation and tests
 

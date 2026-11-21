@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 import pytest
-
 from app.services.backtest import run_trend_breakout_backtest
 
 

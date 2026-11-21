@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Conventional technical-summary classification.
 
 This module does not compute new indicators and does not reproduce the Tradely
@@ -11,6 +9,8 @@ counts required by the UI.
 The classification is deliberately explicit so every number in the interface
 can be traced back to a documented rule.
 """
+
+from __future__ import annotations
 
 from typing import Any, Literal
 

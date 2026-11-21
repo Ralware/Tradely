@@ -5,7 +5,7 @@ import time
 from collections import OrderedDict
 from collections.abc import Callable
 from concurrent.futures import Future
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pandas as pd
@@ -101,7 +101,7 @@ class MarketService:
             # Ask TradingView for every bar it exposes for this timeframe.
             start = end = None
         else:
-            end = datetime.now(timezone.utc).date()
+            end = datetime.now(UTC).date()
             start = end - timedelta(days=days)
         canonical_id = instrument_id_for(
             normalize_symbol(symbol, market), market, resolve_exchange(market, exchange)

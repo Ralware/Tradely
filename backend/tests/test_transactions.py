@@ -3,13 +3,11 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
-
 from app.core.models import TradingRules
 from app.core.trading_rules import (
     calculate_amount_transaction,
     tradingview_rules_from_symbol_info,
 )
-
 
 CRYPTO_RULES = TradingRules(
     quantity_step=0.00001,

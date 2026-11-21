@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 
@@ -39,7 +39,6 @@ def _evaluate_trend_breakout_long_only(
 
     data = compute_indicators(frame)
     row = data.iloc[-1]
-    prior = data.iloc[-2]
     required = ["sma_50", "sma_200", "rsi_14", "adx", "atr_14", "donchian_upper_20", "donchian_lower_10", "rvol_20"]
     if any(pd.isna(row[name]) for name in required) or pd.isna(data["sma_200"].iloc[-21]):
         return StrategySignal(
@@ -133,7 +132,7 @@ def _evaluate_trend_breakout_long_only(
     stop = close - 2.0 * atr_value
     timestamp = row.name.to_pydatetime() if hasattr(row.name, "to_pydatetime") else row.name
     if isinstance(timestamp, datetime) and timestamp.tzinfo is None:
-        timestamp = timestamp.replace(tzinfo=timezone.utc)
+        timestamp = timestamp.replace(tzinfo=UTC)
     explanation = (
         "All seven pre-defined entry conditions passed on the latest completed candle. This is a research "
         "signal, not an order; any backtest/live execution must use the next executable price."

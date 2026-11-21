@@ -1,6 +1,5 @@
-from fastapi.testclient import TestClient
-
 from app.main import app
+from fastapi.testclient import TestClient
 
 client = TestClient(app)
 
@@ -115,7 +114,6 @@ def test_news_accepts_an_instrument_id():
 def test_indicator_series_is_additive_and_uses_backend_calculations(monkeypatch):
     import numpy as np
     import pandas as pd
-
     from app.main import app
 
     index = pd.date_range("2025-01-01", periods=260, freq="D", tz="UTC")
@@ -143,7 +141,6 @@ def test_indicator_series_is_additive_and_uses_backend_calculations(monkeypatch)
 def test_intraday_analysis_evaluates_signals_instead_of_returning_insufficient_data(monkeypatch):
     import numpy as np
     import pandas as pd
-
     from app.main import app
 
     end = pd.Timestamp.now(tz="UTC").floor("4h")
@@ -173,7 +170,6 @@ def test_completed_weekly_and_monthly_bars_use_interval_aware_freshness():
     from datetime import timedelta
 
     import pandas as pd
-
     from app.api.routes import _is_stale
 
     now = pd.Timestamp.now(tz="UTC")
@@ -191,7 +187,6 @@ def test_completed_weekly_and_monthly_bars_use_interval_aware_freshness():
 def test_technicals_endpoint_classifies_existing_values_without_writing_signals(monkeypatch):
     import numpy as np
     import pandas as pd
-
     from app.main import app
 
     index = pd.date_range("2024-01-01", periods=320, freq="D", tz="UTC")

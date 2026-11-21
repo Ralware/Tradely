@@ -1,7 +1,7 @@
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pandas as pd
 import pytest
@@ -121,7 +121,7 @@ def test_tradingview_drops_the_still_forming_final_candle(monkeypatch):
         "app.providers.tradingview.httpx.get",
         lambda *a, **k: FakeResponse({"candles": rows}),
     )
-    today = datetime.now(timezone.utc).date()
+    today = datetime.now(UTC).date()
     frame = TradingViewProvider(Settings(_env_file=None)).fetch_candles(
         "BTCUSDT", market="crypto", exchange="BINANCE", interval="1m",
         start=today, end=today,

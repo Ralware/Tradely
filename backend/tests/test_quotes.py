@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 import pytest
-
 from app.core.config import Settings
 from app.core.instruments import TRADINGVIEW_PROVIDER
 from app.providers.base import ProviderError
@@ -15,7 +14,7 @@ from app.services.quotes import (
     market_status_for,
 )
 
-NOW = datetime.now(timezone.utc).replace(microsecond=0)
+NOW = datetime.now(UTC).replace(microsecond=0)
 
 CRYPTO = {
     "instrument_id": "crypto:BINANCE:BTCUSDT",
@@ -296,8 +295,8 @@ def test_quotes_for_batches_stale_instruments(monkeypatch):
 
 def test_market_status_distinguishes_sessions():
     assert market_status_for("crypto", NOW) == "24/7"
-    india_open = datetime(2026, 1, 5, 4, 0, tzinfo=timezone.utc)  # 09:30 IST
-    india_closed = datetime(2026, 1, 5, 14, 0, tzinfo=timezone.utc)  # 19:30 IST
+    india_open = datetime(2026, 1, 5, 4, 0, tzinfo=UTC)  # 09:30 IST
+    india_closed = datetime(2026, 1, 5, 14, 0, tzinfo=UTC)  # 19:30 IST
     assert market_status_for("india", india_open) == "open"
     assert market_status_for("india", india_closed) == "closed"
 

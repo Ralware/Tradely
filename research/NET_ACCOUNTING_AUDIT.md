@@ -129,3 +129,42 @@ Physical NVIDIA parity and speed, a full line-by-line repository and vendor
 audit, multi-market or cross-platform live integration, and a joint portfolio
 engine with mark-to-market remain unverified. Recursive EMA and Wilder
 calculations still run on the CPU, as does shared cash allocation.
+
+## Joint portfolio and local accounting verification
+
+The CPU portfolio backtest now admits signals against one shared account. It records
+fees at entry, settles historical funding on open positions, enforces an opening
+gross-exposure budget, and values surviving positions at every close. Same-bar entry
+ties follow symbol order. Signal and exit logic comes from the existing strategy.
+Existing trade CSVs still use the separate replay command. Synchronized, gap-free
+evaluation bars are required.
+
+The local 2024-2025 BTCUSDT and ETHUSDT run started with 1,000 USDT and ended
+with 987.16790676 USDT. All 132 trades and 8,772 equity marks were independently
+repriced using Decimal and the source candles. The maximum marked-equity error
+was 1.13e-12 USDT. Marked drawdown reached 9.6374% and realized drawdown reached
+9.2310%. Python 3.12.10 and 3.14.6 produced identical trades and equity curves
+on Windows. ETH funding was excluded after another public endpoint connection
+timeout. BTC funding used the recorded settlements.
+[Inputs and verification results](benchmarks/joint_portfolio_cpu.json)
+
+The example's flat 0.5% maintenance requirement was a user-selectable stress
+assumption. No maintenance close occurred in the historical run. A synthetic
+regression exercises forced closure and checks funding, settlement fees, and
+ending cash. Exchange-tiered intrabar liquidation requires historical mark prices,
+margin brackets and liquidation charges. Historical candles also lack queue data
+for matching partial fills.
+
+A separate holdings audit found that database validation used a 1e-9 tolerance
+and floating-point balances, while FIFO accounting used 1e-12 and Decimal. A
+small excess sale or cover could be recorded successfully and then break reporting.
+Database validation now uses Decimal balances and the shared FIFO tolerance.
+Tests exercise rollback and subsequent exact closure for long and short holdings.
+
+Local regression results were 364 Python tests passed, two physical CUDA tests
+skipped, 35 frontend tests passed and one Edge integration test passed. The
+frontend production build and type check, configured research mypy, backend and
+research Ruff, vendored TypeScript check, bridge syntax and Python dependency
+checks passed. Read-only SQLite integrity and foreign-key checks passed. Physical
+CUDA, another operating system, exchange-specific liquidation and the exhaustive
+manual source review remain open.

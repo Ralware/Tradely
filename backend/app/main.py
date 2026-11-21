@@ -7,8 +7,8 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import router
 from app.api.research import router as research_router
+from app.api.routes import router
 from app.core.config import get_settings
 from app.core.database import Database
 from app.instruments.resolver import InstrumentResolver

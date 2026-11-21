@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-
 from app.services.strategy import evaluate_trend_breakout, position_size
 
 

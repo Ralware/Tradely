@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -46,15 +46,15 @@ def _iso(value: datetime | None) -> str | None:
     if value is None:
         return None
     if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc).isoformat()
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).isoformat()
 
 
 def _iso_from_unix(value: Any) -> str | None:
     if value in (None, ""):
         return None
     try:
-        return datetime.fromtimestamp(float(value), tz=timezone.utc).isoformat()
+        return datetime.fromtimestamp(float(value), tz=UTC).isoformat()
     except (TypeError, ValueError, OSError):
         return None
 
@@ -70,8 +70,8 @@ def _parse_time(value: Any) -> datetime | None:
         except ValueError:
             return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _as_float(value: Any) -> float | None:
@@ -87,7 +87,7 @@ def _as_float(value: Any) -> float | None:
 
 
 def market_status_for(market: str, now: datetime | None = None) -> str:
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     if market == "crypto":
         return "24/7"
     if market == "india":
@@ -107,7 +107,7 @@ def market_status_for(market: str, now: datetime | None = None) -> str:
 
 def _present_quote(raw: dict[str, Any], now: datetime | None = None) -> dict[str, Any]:
     """Recompute age, freshness and market status without inventing prices."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     quote = dict(raw)
     quote_type = quote.get("quote_type") or "unavailable"
     price = _as_float(quote.get("price"))
@@ -318,10 +318,10 @@ class QuoteService:
         ``historical``; the current quote is never substituted for a historical
         transaction.
         """
-        now = now or datetime.now(timezone.utc)
+        now = now or datetime.now(UTC)
         if trade_time.tzinfo is None:
-            trade_time = trade_time.replace(tzinfo=timezone.utc)
-        trade_time = trade_time.astimezone(timezone.utc)
+            trade_time = trade_time.replace(tzinfo=UTC)
+        trade_time = trade_time.astimezone(UTC)
         if trade_time > now + timedelta(minutes=1):
             raise QuoteError("Transaction time cannot be in the future")
         if now - trade_time <= HISTORICAL_QUOTE_AFTER:
@@ -360,8 +360,8 @@ class QuoteService:
     ) -> dict[str, Any]:
         """Fetch a provider price at or before a backdated transaction time."""
         payload = _instrument_payload(instrument)
-        now = now or datetime.now(timezone.utc)
-        trade_time = trade_time.astimezone(timezone.utc)
+        now = now or datetime.now(UTC)
+        trade_time = trade_time.astimezone(UTC)
         age = now - trade_time
         market = payload["market"]
         interval = "1d"
@@ -516,7 +516,7 @@ class QuoteService:
         if raw and raw.get("price") is not None:
             raw = dict(raw)
             raw["quote_type"] = "cached"
-            raw["retrieved_at"] = raw.get("retrieved_at") or _iso(datetime.now(timezone.utc))
+            raw["retrieved_at"] = raw.get("retrieved_at") or _iso(datetime.now(UTC))
             raw["error"] = error
             quote = _present_quote(raw)
             if quote["freshness"] not in {"stale", "unavailable"}:
@@ -532,7 +532,7 @@ class QuoteService:
             "day_low": None,
             "volume": None,
             "quote_time": None,
-            "retrieved_at": _iso(datetime.now(timezone.utc)),
+            "retrieved_at": _iso(datetime.now(UTC)),
             "quote_type": "unavailable",
             "freshness": "unavailable",
             "is_stale": False,
@@ -579,7 +579,7 @@ class QuoteService:
             "day_low": _as_float(raw.get("low_price")),
             "volume": _as_float(raw.get("volume")),
             "quote_time": quote_time,
-            "retrieved_at": _iso(datetime.now(timezone.utc)),
+            "retrieved_at": _iso(datetime.now(UTC)),
             "quote_type": "delayed" if delayed else "real_time",
             "transport": "bridge",
             "is_adjusted": False,

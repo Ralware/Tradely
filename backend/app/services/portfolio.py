@@ -11,9 +11,11 @@ from dataclasses import dataclass, field
 from decimal import Decimal, getcontext
 from typing import Any
 
+from app.core.models import HOLDING_QUANTITY_TOLERANCE
+
 getcontext().prec = 28
 
-_EPSILON = Decimal("1e-12")
+_EPSILON = HOLDING_QUANTITY_TOLERANCE
 _ZERO = Decimal("0")
 
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import calendar
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -69,7 +69,7 @@ def _iso_from_unix(value: Any) -> str | None:
     if value in (None, ""):
         return None
     try:
-        return datetime.fromtimestamp(float(value), tz=timezone.utc).isoformat()
+        return datetime.fromtimestamp(float(value), tz=UTC).isoformat()
     except (TypeError, ValueError, OSError):
         return None
 
@@ -291,7 +291,7 @@ class TradingViewProvider(MarketDataProvider):
             raise ProviderError("TradingView requires an exchange-qualified symbol")
         tv_symbol = f"{exchange.upper()}:{symbol.upper()}"
 
-        end_date = end or datetime.now(timezone.utc).date()
+        end_date = end or datetime.now(UTC).date()
         start_date = start or (end_date - timedelta(days=365 * 3))
         if start_date > end_date:
             raise ProviderError("History start date must be before the end date")

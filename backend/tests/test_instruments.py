@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.core.config import Settings
 from app.core.database import Database
 from app.core.models import WatchlistItem
@@ -17,6 +15,7 @@ from app.instruments.resolver import (
     UNAVAILABLE_MESSAGE,
     InstrumentResolver,
 )
+from fastapi.testclient import TestClient
 
 
 def make_resolver(tmp_path, **settings_overrides) -> InstrumentResolver:
@@ -400,7 +399,7 @@ def _legacy_database(path):
     connection = sqlite3.connect(path)
     try:
         connection.executescript(LEGACY_SCHEMA)
-        now = datetime(2026, 1, 1, tzinfo=timezone.utc).isoformat()
+        now = datetime(2026, 1, 1, tzinfo=UTC).isoformat()
         connection.execute(
             "INSERT INTO instruments VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             (

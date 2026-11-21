@@ -1,11 +1,10 @@
 import numpy as np
 import pandas as pd
 import pytest
-from pydantic import ValidationError
-
+from app.services.backtest import run_trend_breakout_backtest
 from app.services.indicators import compute_indicators, sma
 from app.services.strategy_config import StrategyConfig
-from app.services.backtest import run_trend_breakout_backtest
+from pydantic import ValidationError
 
 
 def sample_frame(periods=1100):

@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from datetime import datetime, timedelta, timezone
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -126,7 +127,7 @@ def _market_target(
 def health() -> dict[str, Any]:
     return {"status": "ok", "application": "Tradely", "mode": "private-single-user", "ai": False,
             "paper_trading": False, "order_execution": False,
-            "timestamp": datetime.now(timezone.utc).isoformat()}
+            "timestamp": datetime.now(UTC).isoformat()}
 
 
 @router.get("/providers/status")
@@ -153,7 +154,7 @@ def provider_status(request: Request) -> dict[str, Any]:
     return {
         "providers": providers,
         "bridge": bridge or {"status": "unavailable", "error": bridge_error},
-        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "checked_at": datetime.now(UTC).isoformat(),
     }
 
 
@@ -257,7 +258,7 @@ def analyze(
     position_side = request.app.state.db.position_side_at(
         instrument["instrument_id"],
         instrument["currency"],
-        datetime.now(timezone.utc),
+        datetime.now(UTC),
     )
     signal = evaluate_trend_breakout(
         frame,
@@ -484,7 +485,7 @@ def backtest_trend_breakout(request: Request, payload: BacktestRequest) -> dict[
                    "strategy": "Trend + Donchian 20 Breakout", "strategy_version": STRATEGY_VERSION,
                    "data_adjusted": bool(frame.attrs.get("is_adjusted", False)),
                    "date_range": {"start": frame.index[0].isoformat(), "end": frame.index[-1].isoformat()},
-                   "executed_at": datetime.now(timezone.utc).isoformat(),
+                   "executed_at": datetime.now(UTC).isoformat(),
                    "execution_assumptions": {"initial_capital": payload.initial_capital,
                        "risk_fraction": payload.risk_fraction, "max_position_fraction": payload.max_position_fraction,
                        "cost_bps_per_side": result["cost_bps_per_side"],
@@ -678,12 +679,12 @@ def market_quotes(
         ))
 
     if not instruments:
-        return {"quotes": [], "as_of": datetime.now(timezone.utc).isoformat()}
+        return {"quotes": [], "as_of": datetime.now(UTC).isoformat()}
 
     quotes = request.app.state.quote_service.quotes_for(instruments, force=force)
     return {
         "quotes": [_quote_payload(instrument, quote) for instrument, quote in zip(instruments, quotes)],
-        "as_of": datetime.now(timezone.utc).isoformat(),
+        "as_of": datetime.now(UTC).isoformat(),
         "currency_conversion": "unavailable",
     }
 
@@ -851,8 +852,8 @@ def _quote_datetime(quote: dict[str, Any]) -> datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _usable_transaction_quote(quote: dict[str, Any], instrument: dict[str, Any]) -> None:

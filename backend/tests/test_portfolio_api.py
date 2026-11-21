@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.core.database import Database
 from app.core.models import TradingRules
 from app.main import app
+from fastapi.testclient import TestClient
 
-BASE = datetime(2026, 2, 1, 9, 30, tzinfo=timezone.utc)
+BASE = datetime(2026, 2, 1, 9, 30, tzinfo=UTC)
 
 
 class FakeQuoteService:
@@ -53,7 +52,7 @@ class FakeQuoteService:
         self.transaction_times.append(trade_time)
         self.quote_forces.append(force)
         quote = self.quote_for(instrument, force=True)
-        current = now or datetime.now(timezone.utc)
+        current = now or datetime.now(UTC)
         if current - trade_time > timedelta(minutes=10):
             quote = {**quote, "quote_type": "historical", "freshness": "historical"}
         return quote
@@ -354,7 +353,7 @@ def test_preview_derives_quantity_precision_and_remainder(api):
         "amount": 100.001,
         "currency": "USDT",
         "fees": 0.5,
-        "trade_time": datetime.now(timezone.utc).isoformat(),
+        "trade_time": datetime.now(UTC).isoformat(),
         "notes": None,
     })
     assert response.status_code == 200
@@ -379,7 +378,7 @@ def test_preview_reuses_cached_quote_while_recording_forces_a_refresh(api):
         "amount": 1200,
         "currency": "INR",
         "fees": 0,
-        "trade_time": datetime.now(timezone.utc).isoformat(),
+        "trade_time": datetime.now(UTC).isoformat(),
         "notes": None,
     })
     assert preview.status_code == 200
@@ -398,7 +397,7 @@ def test_preview_rejects_sell_above_available_holdings(api):
         "amount": 2500,
         "currency": "INR",
         "fees": 0,
-        "trade_time": datetime.now(timezone.utc).isoformat(),
+        "trade_time": datetime.now(UTC).isoformat(),
         "notes": None,
     })
     assert response.status_code == 200

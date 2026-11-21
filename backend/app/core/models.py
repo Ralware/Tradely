@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import math
+from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
+
 from app.services.strategy_config import StrategyConfig
+
+HOLDING_QUANTITY_TOLERANCE = Decimal("1e-12")
 
 Market = Literal["india", "global", "crypto"]
 TransactionIntent = Literal["BUY", "SELL", "SELL_SHORT", "BUY_TO_COVER"]
@@ -160,8 +164,8 @@ class HoldingTransaction(BaseModel):
     @classmethod
     def make_utc(cls, value: datetime) -> datetime:
         if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
 
     @field_validator("quote_time")
     @classmethod
@@ -169,8 +173,8 @@ class HoldingTransaction(BaseModel):
         if value is None:
             return None
         if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
 
 
 class AmountTransactionRequest(BaseModel):
@@ -198,8 +202,8 @@ class AmountTransactionRequest(BaseModel):
     @classmethod
     def make_utc(cls, value: datetime) -> datetime:
         if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
 
     @field_validator("instrument_id")
     @classmethod
