@@ -10,7 +10,7 @@ Every function takes and returns a pandas Series indexed like the input.  A
 missing value is represented by ``numpy.nan`` and propagates the same way as
 Pine's ``na``.  No value is back-filled, and no intermediate result is rounded.
 
-Source references are recorded in ``docs/reference/tradingview``.
+The source/version audit is recorded in ``docs/TECHNICAL_RATING_SOURCE_AUDIT.md``.
 """
 
 from __future__ import annotations
@@ -62,12 +62,11 @@ def _seeded_recursive(
     *,
     name: str | None = None,
 ) -> pd.Series:
-    """Pine-style recursive average seeded with the first full SMA window.
+    """Pine-style RMA seed: first full SMA window, then recursive smoothing.
 
-    Pine's ``ta.ema`` and ``ta.rma`` do not seed from the first observation.
-    They wait for ``length`` valid values and use their arithmetic mean, then
-    apply the recursive filter.  A later ``na`` emits ``na`` for that bar; the
-    previous state is retained so the filter can resume without inventing data.
+    A later ``na`` emits ``na`` for that bar; the previous state is retained
+    so the filter can resume without inventing data. Pine ``ta.ema`` uses a
+    different first-value seed and is implemented separately below.
     """
     if length < 1:
         raise ValueError("length must be >= 1")
@@ -99,10 +98,25 @@ def _seeded_recursive(
 
 
 def ema(source: pd.Series, length: int) -> pd.Series:
-    """Pine ``ta.ema``: alpha ``2 / (length + 1)``, seeded by SMA."""
+    """Pine ``ta.ema``: alpha ``2 / (length + 1)``, seeded by first valid value.
+
+    Pine's EMA starts on the first non-``na`` source value and then applies
+    ``alpha * source + (1 - alpha) * previous_ema``. Unlike ``ta.rma``, it does
+    not wait for a full SMA window. Missing source values emit ``na`` while
+    preserving the previous recursive state for the next valid observation.
+    """
     if length < 1:
         raise ValueError("length must be >= 1")
-    return _seeded_recursive(source, length, 2.0 / (length + 1.0), name=source.name)
+    values = _values(source)
+    output = np.full(len(values), np.nan, dtype=float)
+    alpha = 2.0 / (length + 1.0)
+    previous: float | None = None
+    for index, value in enumerate(values):
+        if not np.isfinite(value):
+            continue
+        previous = value if previous is None else alpha * value + (1.0 - alpha) * previous
+        output[index] = previous
+    return _series(output, source.index, source.name)
 
 
 def rma(source: pd.Series, length: int) -> pd.Series:

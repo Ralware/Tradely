@@ -86,6 +86,11 @@ def test_ohlcv_fingerprint_changes_on_any_input_mutation():
     df3.iloc[-1, df3.columns.get_loc("close")] += 0.01
     assert ohlcv_fingerprint(df3) != fp1
 
+    # Mutating an older bar must also invalidate derived ratings.
+    df_old = df1.copy()
+    df_old.iloc[20, df_old.columns.get_loc("low")] -= 0.01
+    assert ohlcv_fingerprint(df_old) != fp1
+
     # Mutating volume changes fingerprint
     df4 = df1.copy()
     df4.iloc[-1, df4.columns.get_loc("volume")] += 1.0
@@ -146,3 +151,110 @@ def test_cache_bypass_flag_passed_to_service(monkeypatch):
     called_kwargs.clear()
     client.get("/api/instruments/TEST/technical-ratings?market=india&interval=1d&refresh=true")
     assert called_kwargs.get("bypass_cache") is True
+
+
+def test_unavailable_constituents_are_not_counted_as_neutral():
+    snapshot = build_technical_summary(_sample_ohlcv(80))
+    rows = snapshot["moving_averages"]
+    sma_200 = next(row for row in rows if row["key"] == "sma_200")
+    summary = snapshot["summary"]["moving_averages"]
+
+    assert sma_200["value"] is None
+    assert sma_200["rating"] is None
+    assert sma_200["action"] == "Unavailable"
+    assert summary["unavailable"] > 0
+    assert summary["available"] + summary["unavailable"] == summary["total"]
+    assert summary["neutral"] < summary["available"]
+
+
+def test_multi_component_values_and_parameters_are_exposed():
+    snapshot = build_technical_summary(_sample_ohlcv(300))
+    rows = {row["key"]: row for row in snapshot["oscillators"] + snapshot["moving_averages"]}
+
+    assert rows["adx_14"]["parameters"] == {"di_length": 14, "adx_smoothing": 14}
+    assert {"plus_di_14", "minus_di_14"} <= set(rows["adx_14"]["details"])
+    assert {"macd_signal", "macd_hist"} <= set(rows["macd_line"]["details"])
+    assert {"stoch_d"} <= set(rows["stoch_k"]["details"])
+    assert {"ema_50"} <= set(rows["stoch_rsi_k"]["details"])
+    assert {"ichimoku_span1_displaced_26", "ichimoku_span2_displaced_26"} <= set(rows["ichimoku_base"]["details"])
+    assert {"bull_power_13", "bear_power_13", "ema_50"} <= set(rows["bbp"]["details"])
+
+
+def test_analytics_snapshot_is_atomic_and_exposes_provenance(monkeypatch):
+    import numpy as np
+    import pandas as pd
+    import app.api.routes as routes
+    from app.main import app
+    from app.services.technical_rating_cache import technical_rating_cache
+
+    frame = _sample_ohlcv(300)
+    frame.attrs["is_adjusted"] = True
+    frame.attrs["last_bar_confirmed"] = True
+    monkeypatch.setattr(
+        app.state.market_service,
+        "candles",
+        lambda *args, **kwargs: (frame.copy(), "tradingview"),
+    )
+    technical_rating_cache.invalidate()
+    original = routes.build_tv_technical_summary
+    call_count = 0
+
+    def counted(frame_arg):
+        nonlocal call_count
+        call_count += 1
+        return original(frame_arg)
+
+    monkeypatch.setattr(routes, "build_tv_technical_summary", counted)
+    client = TestClient(app)
+
+    first = client.get(
+        "/api/instruments/TEST/analytics-snapshot?market=india&interval=1d&days=3650"
+    )
+    second = client.get(
+        "/api/instruments/TEST/analytics-snapshot?market=india&interval=1d&days=3650"
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    body = first.json()
+    assert body["analysis"]["fingerprint"] == body["indicator_series"]["fingerprint"]
+    assert body["analysis"]["fingerprint"] == body["technical_ratings"]["fingerprint"]
+    assert body["provenance"]["candle_count"] == 300
+    assert body["provenance"]["candle_status"] == "confirmed"
+    assert body["provenance"]["technical_rating_version"].startswith("v3")
+    assert len(body["technical_ratings"]["moving_averages"]) == 15
+    assert len(body["technical_ratings"]["oscillators"]) == 11
+    assert second.json()["technical_ratings"]["cache_hit"] is True
+    assert call_count == 1
+
+
+def test_analytics_snapshot_refresh_bypasses_market_cache_and_rating_cache(monkeypatch):
+    import app.api.routes as routes
+    from app.main import app
+    from app.services.technical_rating_cache import technical_rating_cache
+
+    frame = _sample_ohlcv(300)
+    frame.attrs["is_adjusted"] = True
+    calls = []
+
+    def fake_candles(*args, **kwargs):
+        calls.append(kwargs.get("bypass_cache", False))
+        return frame.copy(), "tradingview"
+
+    monkeypatch.setattr(app.state.market_service, "candles", fake_candles)
+    technical_rating_cache.invalidate()
+    original = routes.build_tv_technical_summary
+    rating_calls = 0
+
+    def counted(frame_arg):
+        nonlocal rating_calls
+        rating_calls += 1
+        return original(frame_arg)
+
+    monkeypatch.setattr(routes, "build_tv_technical_summary", counted)
+    client = TestClient(app)
+    url = "/api/instruments/TEST/analytics-snapshot?market=india&interval=1d&days=3650"
+    assert client.get(url).status_code == 200
+    assert client.get(url + "&refresh=true").status_code == 200
+    assert calls == [False, True]
+    assert rating_calls == 2

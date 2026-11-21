@@ -8,15 +8,31 @@ export interface ApiState<T> {
 }
 
 export interface UseApiResult<T> extends ApiState<T> {
-  /** True while a request is in flight and previous data is still on screen. */
+  /** True while a request is in flight and the last coherent snapshot remains visible. */
   refreshing: boolean;
+  /** True when the visible snapshot belongs to the same scope but an older request key. */
+  isPreviousData: boolean;
   reload: () => void;
 }
 
-export interface UseApiOptions {
+export interface UseApiOptions<T> {
   enabled?: boolean;
   keepPreviousData?: boolean;
+  /** Full identity of the requested response (e.g. instrument + timeframe + parameters). */
   keepPreviousDataKey?: unknown;
+  /** Identity boundary across which old data must never be retained (e.g. instrument ID). */
+  keepPreviousDataScopeKey?: unknown;
+  /** Return a fresh cache entry synchronously so keyed views do not flash empty. */
+  getCachedData?: () => T | null;
+}
+
+interface InternalApiState<T> extends ApiState<T> {
+  /** Identity of the data currently stored in `data`. */
+  dataKey: unknown;
+  /** Scope of the data currently stored in `data`. */
+  scopeKey: unknown;
+  /** Identity of the most recent request. */
+  requestKey: unknown;
 }
 
 function toMessage(error: unknown): string {
@@ -34,81 +50,133 @@ function isAbort(error: unknown): boolean {
 }
 
 /**
- * Robust typed data-fetching hook with cancellation, reload trigger, and stale-response protection.
+ * Typed data-fetching hook with cancellation, request identity protection,
+ * synchronous keyed-cache reads, and optional same-scope stale-while-revalidate.
+ * Old data is never carried across a scope boundary such as a symbol change.
  */
 export function useApi<T>(
   fetcher: (signal: AbortSignal) => Promise<T>,
   deps: readonly unknown[],
-  options: UseApiOptions = {},
+  options: UseApiOptions<T> = {},
 ): UseApiResult<T> {
   const enabled = options.enabled ?? true;
   const keepPreviousData = options.keepPreviousData ?? false;
-  const [state, setState] = useState<ApiState<T>>({
-    data: null,
-    loading: enabled,
-    error: null,
-  });
-  const [reloadToken, setReloadToken] = useState(0);
+  const requestKey = options.keepPreviousDataKey;
+  const scopeKey = options.keepPreviousDataScopeKey ?? requestKey;
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
-  const previousDataKeyRef = useRef(options.keepPreviousDataKey);
+  const cachedDataRef = useRef(options.getCachedData);
+  cachedDataRef.current = options.getCachedData;
+
+  const [state, setState] = useState<InternalApiState<T>>(() => {
+    const cached = enabled ? cachedDataRef.current?.() ?? null : null;
+    return {
+      data: cached,
+      loading: enabled && cached === null,
+      error: null,
+      dataKey: requestKey,
+      scopeKey,
+      requestKey,
+    };
+  });
+  const [reloadToken, setReloadToken] = useState(0);
+
+  // A valid exact cache hit is returned during render, before the fetch effect
+  // runs. If it misses, the previous snapshot may remain visible only inside
+  // the same scope (e.g. changing timeframe for the same instrument).
+  const cacheData = enabled ? cachedDataRef.current?.() ?? null : null;
+  const canShowStoredData = Object.is(state.scopeKey, scopeKey);
+  const data = cacheData ?? (canShowStoredData ? state.data : null);
+  const dataKey = cacheData !== null ? requestKey : state.dataKey;
+  const isPreviousData = data !== null && !Object.is(dataKey, requestKey);
+  const requestMatchesKey = Object.is(state.requestKey, requestKey);
+  const loading = enabled && cacheData === null
+    ? (requestMatchesKey ? state.loading : true)
+    : false;
+  const error = requestMatchesKey ? state.error : null;
 
   useEffect(() => {
     if (!enabled) {
-      setState({ data: null, loading: false, error: null });
-      return;
+      setState({
+        data: null,
+        loading: false,
+        error: null,
+        dataKey: requestKey,
+        scopeKey,
+        requestKey,
+      });
+      return undefined;
     }
 
     const controller = new AbortController();
     let active = true;
+    const cached = cachedDataRef.current?.() ?? null;
 
-    const sameDataKey = Object.is(
-      previousDataKeyRef.current,
-      options.keepPreviousDataKey,
-    );
-    previousDataKeyRef.current = options.keepPreviousDataKey;
-
-    setState((previous) => ({
-      data: keepPreviousData && sameDataKey ? previous.data : null,
-      loading: true,
-      error: null,
-    }));
+    setState((previous) => {
+      const sameScope = Object.is(previous.scopeKey, scopeKey);
+      const retained = cached ?? (keepPreviousData && sameScope ? previous.data : null);
+      const retainedKey = cached !== null
+        ? requestKey
+        : retained !== null
+          ? previous.dataKey
+          : requestKey;
+      return {
+        data: retained,
+        loading: cached === null,
+        error: null,
+        dataKey: retainedKey,
+        scopeKey,
+        requestKey,
+      };
+    });
 
     fetcherRef
       .current(controller.signal)
-      .then((data) => {
-        if (!active) {
-          return;
-        }
-        setState({ data, loading: false, error: null });
-      })
-      .catch((error: unknown) => {
-        if (!active || isAbort(error)) {
-          return;
-        }
-        setState((previous) => ({
-          data: keepPreviousData && sameDataKey ? previous.data : null,
+      .then((result) => {
+        if (!active) return;
+        setState({
+          data: result,
           loading: false,
-          error: toMessage(error),
-        }));
+          error: null,
+          dataKey: requestKey,
+          scopeKey,
+          requestKey,
+        });
+      })
+      .catch((caught: unknown) => {
+        if (!active || isAbort(caught)) return;
+        setState((previous) => {
+          const sameScope = Object.is(previous.scopeKey, scopeKey);
+          const retained = keepPreviousData && sameScope ? previous.data : null;
+          return {
+            data: retained,
+            loading: false,
+            error: toMessage(caught),
+            dataKey: retained !== null ? previous.dataKey : requestKey,
+            scopeKey,
+            requestKey,
+          };
+        });
       });
 
     return () => {
       active = false;
       controller.abort();
     };
+    // The caller supplies stable dependency values; the fetcher and cache getter are read through refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     ...deps,
     enabled,
     reloadToken,
     keepPreviousData,
-    options.keepPreviousDataKey,
+    requestKey,
+    scopeKey,
   ]);
 
   const reload = useCallback(() => {
     setReloadToken((token) => token + 1);
   }, []);
 
-  return { ...state, refreshing: state.loading && state.data !== null, reload };
+  return { data, loading, error, refreshing: loading && data !== null, isPreviousData, reload };
 }

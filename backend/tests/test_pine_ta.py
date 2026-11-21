@@ -31,16 +31,24 @@ def test_sma_length_validation_and_values():
     assert res.iloc[3] == 35.0
 
 
-def test_ema_seeded_by_first_full_sma():
+def test_ema_seeded_from_first_valid_source_value():
     s = pd.Series([10.0, 20.0, 30.0, 40.0])
     res = pine.ema(s, 3)
-    # length=3: seed at index 2 is SMA(10, 20, 30) = 20.0
+    # Pine ta.ema begins at the first source value; alpha = 2 / (3 + 1) = 0.5.
+    assert res.iloc[0] == pytest.approx(10.0)
+    assert res.iloc[1] == pytest.approx(15.0)
+    assert res.iloc[2] == pytest.approx(22.5)
+    assert res.iloc[3] == pytest.approx(31.25)
+
+
+def test_ema_skips_missing_source_without_reseeding():
+    s = pd.Series([np.nan, 10.0, 20.0, np.nan, 30.0])
+    res = pine.ema(s, 3)
     assert np.isnan(res.iloc[0])
-    assert np.isnan(res.iloc[1])
-    assert res.iloc[2] == pytest.approx(20.0)
-    # alpha = 2 / (3 + 1) = 0.5
-    # index 3: 0.5 * 40 + 0.5 * 20 = 30.0
-    assert res.iloc[3] == pytest.approx(30.0)
+    assert res.iloc[1] == pytest.approx(10.0)
+    assert res.iloc[2] == pytest.approx(15.0)
+    assert np.isnan(res.iloc[3])
+    assert res.iloc[4] == pytest.approx(22.5)
 
 
 def test_rma_wilder_smoothing():

@@ -27,13 +27,13 @@ import pandas as pd
 
 from app.services import pine_ta as pine
 
-Action = Literal["Buy", "Sell", "Neutral"]
+Action = Literal["Buy", "Sell", "Neutral", "Unavailable"]
 Assessment = Literal["Strong Buy", "Buy", "Neutral", "Sell", "Strong Sell"]
 
 SOURCE_NAME = "TradingView TechnicalRating"
-SOURCE_VERSION = "v3 (2024-11-29)"
+SOURCE_VERSION = "v3 · Pine Script v6 (2024-11-29)"
 SOURCE_URL = "https://www.tradingview.com/script/jDWyb5PG-TechnicalRating/"
-DEPENDENCY = "TradingView/ta/9 (2024-11-26)"
+DEPENDENCY = "TradingView/ta/9 (pinned by TechnicalRating v3; 2024-11-26)"
 STRONG_BOUND = 0.5
 WEAK_BOUND = 0.1
 
@@ -117,7 +117,10 @@ PRICE_KEYS = {
 }
 
 DETAILS: dict[str, tuple[str, ...]] = {
-    "ichimoku_base": ("ichimoku_conversion", "ichimoku_span1", "ichimoku_span2"),
+    "ichimoku_base": (
+        "ichimoku_conversion", "ichimoku_span1", "ichimoku_span2",
+        "ichimoku_span1_displaced_26", "ichimoku_span2_displaced_26",
+    ),
     "rsi_14": ("rsi_14_previous",),
     "stoch_k": ("stoch_d", "stoch_k_previous", "stoch_d_previous"),
     "cci_20": ("cci_20_previous", "cci_20_hlc3"),
@@ -127,20 +130,52 @@ DETAILS: dict[str, tuple[str, ...]] = {
     "macd_line": ("macd_signal", "macd_hist"),
     "stoch_rsi_k": ("stoch_rsi_d", "ema_50"),
     "williams_r_14": ("williams_r_14_previous",),
-    "bbp": ("bull_power_13", "bear_power_13", "bear_power_13_previous", "bull_power_13_previous"),
+    "bbp": (
+        "bull_power_13", "bear_power_13", "ema_13", "ema_50",
+        "bull_power_13_previous", "bear_power_13_previous",
+    ),
     "uo": (),
+}
+
+PARAMETERS: dict[str, dict[str, int | str]] = {
+    "ema_10": {"length": 10}, "sma_10": {"length": 10},
+    "ema_20": {"length": 20}, "sma_20": {"length": 20},
+    "ema_30": {"length": 30}, "sma_30": {"length": 30},
+    "ema_50": {"length": 50}, "sma_50": {"length": 50},
+    "ema_100": {"length": 100}, "sma_100": {"length": 100},
+    "ema_200": {"length": 200}, "sma_200": {"length": 200},
+    "ichimoku_base": {"conversion": 9, "base": 26, "span_b": 52},
+    "vwma_20": {"length": 20}, "hma_9": {"length": 9},
+    "rsi_14": {"length": 14}, "stoch_k": {"length": 14, "smooth_k": 3, "smooth_d": 3},
+    "cci_20": {"length": 20}, "adx_14": {"di_length": 14, "adx_smoothing": 14},
+    "ao": {"short_length": 5, "long_length": 34, "source": "hl2"},
+    "mom_10": {"length": 10}, "macd_line": {"fast": 12, "slow": 26, "signal": 9},
+    "stoch_rsi_k": {"rsi_length": 14, "stoch_length": 14, "smooth_k": 3, "smooth_d": 3},
+    "williams_r_14": {"length": 14}, "bbp": {"length": 13},
+    "uo": {"short_length": 7, "medium_length": 14, "long_length": 28},
 }
 
 
 def ohlcv_fingerprint(frame: pd.DataFrame) -> str:
-    """Deterministic SHA-256 fingerprint of the OHLCV series."""
+    """Deterministic SHA-256 fingerprint of every OHLCV row and timestamp.
+
+    A tail-only fingerprint is insufficient for technical analysis: changing an
+    older candle can alter long-lookback indicator values without touching the
+    most recent bars. Hash the complete canonical numeric series instead.
+    """
     if frame.empty:
         return "empty"
-    tail = frame[["open", "high", "low", "close", "volume"]].tail(10)
-    buffer = f"{len(frame)}:{frame.index[0]}:{frame.index[-1]}:"
-    for row in tail.itertuples(index=True):
-        buffer += f"{row[0]},{row[1]:.8f},{row[2]:.8f},{row[3]:.8f},{row[4]:.8f},{row[5]:.8f};"
-    return hashlib.sha256(buffer.encode("utf-8")).hexdigest()[:16]
+    columns = ("open", "high", "low", "close", "volume")
+    missing = set(columns) - set(frame.columns)
+    if missing:
+        raise ValueError(f"Missing OHLCV columns for fingerprint: {', '.join(sorted(missing))}")
+    digest = hashlib.sha256()
+    digest.update(f"rows={len(frame)};columns={','.join(columns)};".encode("utf-8"))
+    timestamps = np.asarray(frame.index.asi8, dtype="<i8")
+    values = np.asarray(frame.loc[:, columns], dtype="<f8")
+    digest.update(timestamps.tobytes(order="C"))
+    digest.update(values.tobytes(order="C"))
+    return digest.hexdigest()[:16]
 
 
 def rating_status(value: float | None) -> Assessment | str:
@@ -159,6 +194,8 @@ def rating_status(value: float | None) -> Assessment | str:
 
 
 def _action(rating: int | None) -> Action:
+    if rating is None:
+        return "Unavailable"
     if rating == 1:
         return "Buy"
     if rating == -1:
@@ -236,7 +273,9 @@ class TechnicalRatingEvaluation:
                         "rating": rating,
                         "action": _action(rating),
                         "precision": 4 if key in PRICE_KEYS else 2,
-                        "details": detail_values,
+                        "parameters": PARAMETERS.get(key, {}),
+                        "details": ({"reference_price": self.close, **detail_values}
+                                    if key in PRICE_KEYS else detail_values),
                     }
                 )
 
@@ -259,6 +298,7 @@ class TechnicalRatingEvaluation:
                 "score": score,
                 **counts,
                 "available": sum(counts.values()),
+                "unavailable": len(keys) - sum(counts.values()),
                 "total": len(keys),
             }
 
@@ -275,6 +315,7 @@ class TechnicalRatingEvaluation:
             "score": total_score,
             **overall_counts,
             "available": moving_average_summary["available"] + oscillator_summary["available"],
+            "unavailable": (moving_average_summary["unavailable"] + oscillator_summary["unavailable"]),
             "total": 26,
         }
 
@@ -292,9 +333,13 @@ class TechnicalRatingEvaluation:
             "source_version": SOURCE_VERSION,
             "source_url": SOURCE_URL,
             "dependency": DEPENDENCY,
+            "candle_count": len(self.frame),
+            "latest_candle_timestamp": self.frame.index[-1].isoformat(),
+            "last_candle_confirmed": self.frame.attrs.get("last_bar_confirmed"),
             "method": (
-                "TradingView TechnicalRating v3 (2024-11-29) with TradingView/ta/9 "
-                "(2024-11-26). Pine-compatible calculations; not investment advice."
+                "TradingView TechnicalRating v3 / Pine Script v6 (2024-11-29), "
+                "using its pinned TradingView/ta/9 dependency (2024-11-26). "
+                "Pine-compatible calculations; not investment advice."
             ),
         }
 
@@ -348,6 +393,8 @@ def evaluate(frame: pd.DataFrame) -> TechnicalRatingEvaluation:
     history["ichimoku_base"] = kijun
     history["ichimoku_span1"] = span_one
     history["ichimoku_span2"] = span_two
+    history["ichimoku_span1_displaced_26"] = span_one.shift(26)
+    history["ichimoku_span2_displaced_26"] = span_two.shift(26)
 
     history["rsi_14"] = pine.rsi(close, 14)
     history["rsi_14_previous"] = history["rsi_14"].shift(1)

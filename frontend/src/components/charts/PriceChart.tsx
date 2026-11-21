@@ -210,6 +210,13 @@ export function PriceChart({
   }, []);
 
   useEffect(() => {
+    chartRef.current?.timeScale().applyOptions({
+      timeVisible: intraday,
+      secondsVisible: false,
+    });
+  }, [intraday]);
+
+  useEffect(() => {
     const chart = chartRef.current;
     const candleSeries = candleSeriesRef.current;
     const volumeSeries = volumeSeriesRef.current;

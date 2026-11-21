@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from app.core.instruments import canonical_instrument, parse_instrument_id
+from app.core.config import get_settings
 from app.core.models import (
     AmountTransactionRequest,
     BacktestRequest,
@@ -35,10 +36,12 @@ from app.services.portfolio import build_ledger, detail_view, position_view, sum
 from app.services.strategy import STRATEGY_VERSION, evaluate_trend_breakout, position_size
 from app.services.technicals import build_technical_summary as build_conventional_summary
 from app.services.tv_technical_rating import (
+    DEPENDENCY as TV_RATING_DEPENDENCY,
+    SOURCE_VERSION as TV_RATING_SOURCE_VERSION,
     build_technical_summary as build_tv_technical_summary,
-    evaluate as evaluate_tv_ratings,
     ohlcv_fingerprint,
 )
+from app.services.technical_rating_cache import technical_rating_cache
 
 router = APIRouter(prefix="/api")
 
@@ -126,6 +129,43 @@ def _market_target(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+
+def _cached_tv_rating_snapshot(
+    *,
+    instrument: dict[str, Any],
+    frame: pd.DataFrame,
+    fingerprint: str,
+    source: str,
+    interval: str,
+    days: int,
+    provider: str,
+    refresh: bool = False,
+) -> dict[str, Any]:
+    """Return the authoritative v3 snapshot, caching only completed results."""
+    scope = str(instrument.get("instrument_id") or "").strip()
+    if not scope:
+        scope = f"{instrument.get('market')}:{instrument.get('exchange')}:{instrument.get('symbol')}"
+    if refresh:
+        technical_rating_cache.invalidate(scope)
+    adjusted = bool(frame.attrs.get("is_adjusted", False))
+    key = (
+        scope, interval, days, provider, source, adjusted, fingerprint,
+        TV_RATING_SOURCE_VERSION, TV_RATING_DEPENDENCY,
+    )
+
+    def calculate() -> dict[str, Any]:
+        payload = build_tv_technical_summary(frame)
+        payload["calculation_timestamp"] = datetime.now(UTC).isoformat()
+        return payload
+
+    request_ttl = max(1, get_settings().market_cache_seconds)
+    payload, cache_hit = technical_rating_cache.get_or_compute(
+        key=key,
+        scope=scope,
+        ttl_seconds=request_ttl,
+        compute=calculate,
+    )
+    return {**payload, "cache_hit": cache_hit, "cache_ttl_seconds": request_ttl}
 
 
 @router.get("/health")
@@ -272,6 +312,7 @@ def analyze(
         source=source,
         direction_mode=direction_mode,
         position_side=position_side,
+        indicators=indicators,
     )
     adjusted = bool(frame.attrs.get("is_adjusted", False))
     stale = _is_stale(frame, market, interval)
@@ -301,6 +342,7 @@ def analyze(
         "history_truncated": bool(frame.attrs.get("history_truncated", False)),
         "history_pages": frame.attrs.get("history_pages"),
         "as_of": frame.index[-1].isoformat(),
+        "fingerprint": ohlcv_fingerprint(frame),
         "latest": {key: float(latest[key]) for key in ("open", "high", "low", "close", "volume")},
         "indicators": values,
         "strategy": signal_payload,
@@ -347,6 +389,7 @@ def indicator_series(
         "source": source, "is_adjusted": bool(frame.attrs.get("is_adjusted", False)),
         "is_stale": _is_stale(frame, market, interval),
         "as_of": frame.index[-1].isoformat(),
+        "fingerprint": ohlcv_fingerprint(frame),
         "count": len(records),
         "series": records,
     }
@@ -394,7 +437,11 @@ def technical_summary(
 
     fingerprint = ohlcv_fingerprint(frame)
     if version in ("v3", "3") or method in ("v3", "tradingview"):
-        payload = build_tv_technical_summary(frame)
+        payload = _cached_tv_rating_snapshot(
+            instrument=instrument, frame=frame, fingerprint=fingerprint,
+            source=source, interval=interval, days=days, provider=provider,
+            refresh=bypass_cache or refresh,
+        )
     else:
         indicators = compute_indicators(frame)
         latest = indicators.iloc[-1]
@@ -449,7 +496,11 @@ def technical_ratings(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     fingerprint = ohlcv_fingerprint(frame)
-    payload = build_tv_technical_summary(frame)
+    payload = _cached_tv_rating_snapshot(
+        instrument=instrument, frame=frame, fingerprint=fingerprint,
+        source=source, interval=interval, days=days, provider=provider,
+        refresh=bypass_cache or refresh,
+    )
     return {
         "symbol": symbol,
         "market": market,
@@ -462,6 +513,155 @@ def technical_ratings(
         "as_of": frame.index[-1].isoformat(),
         "fingerprint": fingerprint,
         **payload,
+    }
+
+
+@router.get("/instruments/{symbol}/analytics-snapshot")
+def analytics_snapshot(
+    request: Request,
+    symbol: str | None = None,
+    instrument_id: str | None = None,
+    market: str | None = Query(None, pattern="^(india|global|crypto)$"),
+    exchange: str | None = None,
+    interval: str = "1d",
+    days: int = Query(3650, ge=1, le=3650),
+    provider: str = "auto",
+    direction_mode: DirectionMode = Query("long_only"),
+    refresh: bool = False,
+    prefetch: bool = False,
+) -> dict[str, Any]:
+    """One atomic Analytics snapshot for a single instrument/timeframe.
+
+    Candle retrieval is shared by all Analytics outputs. The chart series,
+    latest indicators, strategy output and TradingView v3 ratings therefore
+    carry one identical OHLCV fingerprint.
+    """
+    instrument = _market_target(
+        request, symbol=symbol, instrument_id=instrument_id, market=market, exchange=exchange
+    )
+    symbol = instrument["symbol"]
+    market = instrument["market"]
+    exchange = instrument["exchange"]
+    try:
+        frame, source = request.app.state.market_service.candles(
+            symbol, market=market, exchange=exchange, interval=interval,
+            days=days, provider=provider, bypass_cache=refresh,
+        )
+    except (ProviderError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    if frame.empty:
+        raise HTTPException(status_code=422, detail="No completed candles are available for this timeframe")
+
+    fingerprint = ohlcv_fingerprint(frame)
+    indicators = compute_indicators(frame)
+    latest = indicators.iloc[-1]
+    values = {
+        column: None if pd.isna(value) else float(value)
+        for column, value in latest.items()
+        if column not in {"open", "high", "low", "close", "volume"}
+    }
+    position_side = request.app.state.db.position_side_at(
+        instrument["instrument_id"], instrument["currency"], datetime.now(UTC),
+    )
+    signal = evaluate_trend_breakout(
+        frame, symbol=symbol, market=market, source=source,
+        direction_mode=direction_mode, position_side=position_side, indicators=indicators,
+    )
+    adjusted = bool(frame.attrs.get("is_adjusted", False))
+    stale = _is_stale(frame, market, interval)
+    warnings: list[str] = []
+    if stale:
+        warnings.append("Latest candle is stale for this market; actionable signal output is suppressed.")
+        signal.state = "STALE_DATA"
+        signal.entry_reference = None
+        signal.stop_reference = None
+        signal.risk_per_unit = None
+        signal.direction = None
+        signal.explanation = "Signal suppressed because the latest candle exceeds the configured freshness window. Verify the provider and market session."
+    if market == "india" and not adjusted:
+        warnings.append("Indian equity candles are unadjusted. Corporate actions can distort long-term indicators; do not treat strategy output as actionable.")
+        signal.state = "DATA_QUALITY_ERROR"
+        signal.entry_reference = None
+        signal.stop_reference = None
+        signal.risk_per_unit = None
+        signal.direction = None
+        signal.explanation = "Signal suppressed because TradingView did not confirm split-adjusted history for this instrument."
+
+    technical_payload = _cached_tv_rating_snapshot(
+        instrument=instrument, frame=frame, fingerprint=fingerprint,
+        source=source, interval=interval, days=days, provider=provider,
+        refresh=refresh,
+    )
+    technical_payload = {
+        **technical_payload,
+        "symbol": symbol, "market": market, "exchange": exchange,
+        "instrument": instrument, "interval": interval, "source": source,
+        "is_adjusted": adjusted, "is_stale": stale,
+        "as_of": frame.index[-1].isoformat(), "fingerprint": fingerprint,
+    }
+    signal_payload = signal.model_dump(mode="json")
+    if not prefetch:
+        request.app.state.db.save_signal(signal_payload)
+    analysis_payload = {
+        "symbol": symbol, "market": market, "exchange": exchange,
+        "interval": interval, "instrument": instrument, "source": source,
+        "is_adjusted": adjusted, "is_stale": stale,
+        "history_truncated": bool(frame.attrs.get("history_truncated", False)),
+        "history_pages": frame.attrs.get("history_pages"),
+        "as_of": frame.index[-1].isoformat(), "fingerprint": fingerprint,
+        "latest": {key: float(latest[key]) for key in ("open", "high", "low", "close", "volume")},
+        "indicators": values, "strategy": signal_payload,
+        "warnings": warnings, "candles": _to_json_records(frame),
+    }
+    indicator_payload = {
+        "symbol": symbol, "market": market, "exchange": exchange,
+        "interval": interval, "instrument": instrument, "source": source,
+        "is_adjusted": adjusted, "is_stale": stale,
+        "as_of": frame.index[-1].isoformat(), "fingerprint": fingerprint,
+        "count": len(indicators), "series": _to_json_records(indicators),
+    }
+    generated_at = datetime.now(UTC).isoformat()
+    snapshot_identity = "|".join((
+        str(instrument.get("instrument_id") or ""), interval, fingerprint,
+        TV_RATING_SOURCE_VERSION, direction_mode,
+    ))
+    import hashlib
+    snapshot_id = hashlib.sha256(snapshot_identity.encode("utf-8")).hexdigest()[:24]
+    provenance = {
+        "instrument_id": instrument.get("instrument_id"),
+        "symbol": symbol, "market": market, "exchange": exchange,
+        "interval": interval, "source": source, "is_adjusted": adjusted,
+        "candle_count": len(frame),
+        "latest_candle_timestamp": frame.index[-1].isoformat(),
+        "last_candle_confirmed": frame.attrs.get("last_bar_confirmed"),
+        "candle_status": (
+            "confirmed" if frame.attrs.get("last_bar_confirmed") is True
+            else "unconfirmed" if frame.attrs.get("last_bar_confirmed") is False
+            else "unknown"
+        ),
+        "ohlcv_fingerprint": fingerprint,
+        "calculation_timestamp": technical_payload.get("calculation_timestamp"),
+        "snapshot_generated_at": generated_at,
+        "technical_rating_source": technical_payload.get("source_name"),
+        "technical_rating_version": technical_payload.get("source_version"),
+        "technical_rating_dependency": technical_payload.get("dependency"),
+        "data_freshness": "stale" if stale else "fresh",
+        "indicator_available": technical_payload["summary"]["overall"]["available"],
+        "indicator_total": technical_payload["summary"]["overall"]["total"],
+        "indicator_unavailable": technical_payload["summary"]["overall"]["unavailable"],
+        "technical_rating_cache_hit": technical_payload.get("cache_hit", False),
+    }
+    return {
+        "snapshot_id": snapshot_id,
+        "generated_at": generated_at,
+        "symbol": symbol, "market": market, "exchange": exchange,
+        "interval": interval, "source": source, "is_adjusted": adjusted,
+        "fingerprint": fingerprint,
+        "analysis": analysis_payload,
+        "indicator_series": indicator_payload,
+        "technical_ratings": technical_payload,
+        "provenance": provenance,
     }
 
 

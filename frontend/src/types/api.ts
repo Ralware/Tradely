@@ -235,6 +235,7 @@ export interface AnalysisResponse {
   history_truncated: boolean;
   history_pages: number | null;
   as_of: string;
+  fingerprint: string;
   latest: LatestOhlcv;
   indicators: IndicatorValues;
   strategy: StrategySignal;
@@ -262,6 +263,7 @@ export interface IndicatorSeriesResponse {
   is_adjusted: boolean;
   is_stale: boolean;
   as_of: string;
+  fingerprint: string;
   count: number;
   series: IndicatorSeriesRow[];
 }
@@ -658,23 +660,32 @@ export interface InstrumentSearchResponse extends InstrumentResolutionResponse {
   items: InstrumentCandidate[];
 }
 
-export type TechnicalAction = 'Buy' | 'Sell' | 'Neutral';
+export type TechnicalAction = 'Buy' | 'Sell' | 'Neutral' | 'Unavailable';
 
-export type TechnicalAssessment = 'Strong Buy' | 'Buy' | 'Neutral' | 'Sell' | 'Strong Sell';
+export type TechnicalAssessment = 'Strong Buy' | 'Buy' | 'Neutral' | 'Sell' | 'Strong Sell' | '-';
 
 export interface TechnicalRow {
+  key: string;
   name: string;
   field: string;
+  group: 'oscillators' | 'moving_averages';
   value: number | null;
+  rating: -1 | 0 | 1 | null;
   action: TechnicalAction;
+  precision: number;
+  parameters: Record<string, number | string>;
+  details: Record<string, number | null>;
 }
 
 export interface TechnicalCounts {
   action: TechnicalAssessment;
-  score: number;
+  score: number | null;
   sell: number;
   neutral: number;
   buy: number;
+  available: number;
+  unavailable: number;
+  total: number;
 }
 
 export interface TechnicalSummaryResponse {
@@ -687,7 +698,11 @@ export interface TechnicalSummaryResponse {
   is_adjusted: boolean;
   is_stale: boolean;
   as_of: string;
+  fingerprint: string;
   close: number;
+  candle_count: number;
+  latest_candle_timestamp: string;
+  last_candle_confirmed: boolean | null;
   oscillators: TechnicalRow[];
   moving_averages: TechnicalRow[];
   summary: {
@@ -695,6 +710,54 @@ export interface TechnicalSummaryResponse {
     moving_averages: TechnicalCounts;
     overall: TechnicalCounts;
   };
+  source_name: string;
+  source_version: string;
+  source_url: string;
+  dependency: string;
+  calculation_timestamp: string;
+  cache_hit: boolean;
+  cache_ttl_seconds: number;
   method: string;
+}
+
+export interface AnalyticsProvenance {
+  instrument_id: string | null;
+  symbol: string;
+  market: Market;
+  exchange: string | null;
+  interval: string;
+  source: string;
+  is_adjusted: boolean;
+  candle_count: number;
+  latest_candle_timestamp: string;
+  last_candle_confirmed: boolean | null;
+  candle_status: 'confirmed' | 'unconfirmed' | 'unknown';
+  ohlcv_fingerprint: string;
+  calculation_timestamp: string | null;
+  snapshot_generated_at: string;
+  technical_rating_source: string;
+  technical_rating_version: string;
+  technical_rating_dependency: string;
+  data_freshness: 'fresh' | 'stale';
+  indicator_available: number;
+  indicator_total: number;
+  indicator_unavailable: number;
+  technical_rating_cache_hit: boolean;
+}
+
+export interface AnalyticsSnapshotResponse {
+  snapshot_id: string;
+  generated_at: string;
+  symbol: string;
+  market: Market;
+  exchange: string | null;
+  interval: string;
+  source: string;
+  is_adjusted: boolean;
+  fingerprint: string;
+  analysis: AnalysisResponse;
+  indicator_series: IndicatorSeriesResponse;
+  technical_ratings: TechnicalSummaryResponse;
+  provenance: AnalyticsProvenance;
 }
 

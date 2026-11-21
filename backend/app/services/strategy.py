@@ -19,6 +19,7 @@ def _evaluate_trend_breakout_long_only(
     source: str | None = None,
     min_adx: float = 20.0,
     min_rvol: float = 1.0,
+    indicators: pd.DataFrame | None = None,
 ) -> StrategySignal:
     """Long-only completed-bar candidate; close breakout over the prior 20 bars.
 
@@ -37,7 +38,7 @@ def _evaluate_trend_breakout_long_only(
             data_source=source,
         )
 
-    data = compute_indicators(frame)
+    data = indicators if indicators is not None else compute_indicators(frame)
     row = data.iloc[-1]
     required = ["sma_50", "sma_200", "rsi_14", "adx", "atr_14", "donchian_upper_20", "donchian_lower_10", "rvol_20"]
     if any(pd.isna(row[name]) for name in required) or pd.isna(data["sma_200"].iloc[-21]):
@@ -167,6 +168,7 @@ def evaluate_trend_breakout(
     min_rvol: float = 1.0,
     direction_mode: DirectionMode = "long_only",
     position_side: PositionDirection | None = None,
+    indicators: pd.DataFrame | None = None,
 ) -> StrategySignal:
     if direction_mode not in ("long_only", "short_only", "long_short"):
         raise ValueError("Invalid direction_mode")
@@ -202,6 +204,7 @@ def evaluate_trend_breakout(
         source=source,
         min_adx=min_adx,
         min_rvol=min_rvol,
+        indicators=indicators,
     )
     if long_signal.state == "INSUFFICIENT_DATA":
         return long_signal.model_copy(update={"direction_mode": direction_mode})
@@ -211,7 +214,7 @@ def evaluate_trend_breakout(
             update={"direction_mode": direction_mode, "direction": direction}
         )
 
-    data = compute_indicators(frame)
+    data = indicators if indicators is not None else compute_indicators(frame)
     row = data.iloc[-1]
     close = float(row["close"])
     short_entry_level = float(data["low"].iloc[-21:-1].min())

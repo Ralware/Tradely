@@ -341,6 +341,9 @@ class TradingViewProvider(MarketDataProvider):
         frame.attrs["history_truncated"] = False
         frame.attrs["provider_symbol"] = tv_symbol
         frame.attrs["candle_timeframe"] = timeframe
+        # _drop_incomplete_final_bar removes the latest bar when its interval
+        # has not completed. The final returned row is therefore confirmed.
+        frame.attrs["last_bar_confirmed"] = True
         return frame
 
     def quotes(self, symbols: list[str]) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
