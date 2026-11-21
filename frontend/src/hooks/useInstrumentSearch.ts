@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
-import { instrumentService } from '../services/instrumentService';
+import { useCallback, useEffect, useState } from "react";
+import { instrumentService } from "../services/instrumentService";
 import type {
   Instrument,
   InstrumentCandidate,
   InstrumentRecognitionStatus,
   RecognizedAsset,
-} from '../types/api';
+} from "../types/api";
 
 const DEBOUNCE_MS = 220;
 
@@ -24,22 +24,24 @@ export interface InstrumentSearchState {
 }
 
 function toMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Instrument search failed';
+  return error instanceof Error ? error.message : "Instrument search failed";
 }
 
 function isAbort(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError';
+  return error instanceof DOMException && error.name === "AbortError";
 }
 
 /**
  * Debounced recognition against the single backend instrument catalogue. The
  * UI never guesses a market, exchange or provider from the typed text.
  */
-export function useInstrumentSearch(initialQuery = ''): InstrumentSearchState {
+export function useInstrumentSearch(initialQuery = ""): InstrumentSearchState {
   const [query, setQuery] = useState(initialQuery);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<InstrumentRecognitionStatus | null>(null);
+  const [status, setStatus] = useState<InstrumentRecognitionStatus | null>(
+    null,
+  );
   const [message, setMessage] = useState<string | null>(null);
   const [instrument, setInstrument] = useState<Instrument | null>(null);
   const [candidates, setCandidates] = useState<InstrumentCandidate[]>([]);
@@ -53,7 +55,7 @@ export function useInstrumentSearch(initialQuery = ''): InstrumentSearchState {
     const result = await instrumentService.search(clean);
     setStatus(result.status);
     setMessage(result.message);
-    setInstrument(result.status === 'resolved' ? result.instrument : null);
+    setInstrument(result.status === "resolved" ? result.instrument : null);
     setCandidates(result.candidates ?? []);
     setRecognized(result.recognized ?? null);
   }, []);
@@ -84,7 +86,9 @@ export function useInstrumentSearch(initialQuery = ''): InstrumentSearchState {
           }
           setStatus(result.status);
           setMessage(result.message);
-          setInstrument(result.status === 'resolved' ? result.instrument : null);
+          setInstrument(
+            result.status === "resolved" ? result.instrument : null,
+          );
           setCandidates(result.candidates ?? []);
           setRecognized(result.recognized ?? null);
         })
@@ -114,7 +118,7 @@ export function useInstrumentSearch(initialQuery = ''): InstrumentSearchState {
   }, [query]);
 
   const reset = useCallback(() => {
-    setQuery('');
+    setQuery("");
     setStatus(null);
     setMessage(null);
     setInstrument(null);

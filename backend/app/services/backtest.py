@@ -23,12 +23,12 @@ def run_trend_breakout_backtest(
     direction_mode: Literal["long_only", "short_only", "long_short"] = "long_only",
     strategy_config: StrategyConfig = DEFAULT_STRATEGY_CONFIG,
 ) -> dict:
-    """Single-instrument directional research backtest.
+    """Single-instrument directional backtest.
 
     Signal is evaluated on a completed close; entry/market exit is next bar open.
     Existing protective stop is checked against the current bar's range. If the
     market gaps through the stop, fill is conservatively modelled at the open.
-    Short exposure is a research simulation only and is not an exchange order.
+    Short exposure is a simulation only and is not an exchange order.
     """
     excluded_incomplete = False
     if "is_final" in frame.columns:
@@ -257,15 +257,15 @@ def run_trend_breakout_backtest(
     if len(returns) > 1 and downside_deviation > 0:
         sortino = float(np.sqrt(annualization) * returns.mean() / downside_deviation)
     limitations = [
-        f"Single instrument, {direction_mode.replace('_', '-')} research simulation; not a portfolio backtest.",
+        f"Single instrument, {direction_mode.replace('_', '-')} simulation; not a portfolio backtest.",
         "Signals use completed daily bars and entries/exits execute at next bar open.",
         "Protective stop fills model gap-through conservatively, but intrabar price path is unknown.",
         "Cost is a configurable aggregate basis-point estimate, not a broker-specific Indian tax engine.",
         "No survivorship-free historical universe or point-in-time symbol membership is supplied by this endpoint.",
         "Position quantity is fractional so every positive capital value is usable; venues that require whole shares will differ.",
-        "This result is not out-of-sample proof; use a locked walk-forward research protocol before relying on it.",
+        "This result is not out-of-sample proof; use a locked walk-forward validation protocol before relying on it.",
         (
-            "Short exposure is hypothetical research exposure; no margin, borrow, or exchange execution is modelled."
+            "Short exposure is hypothetical simulated exposure; no margin, borrow, or exchange execution is modelled."
             if direction_mode != "long_only"
             else "A SELL rule exits an existing long and never opens a short in long-only mode."
         ),

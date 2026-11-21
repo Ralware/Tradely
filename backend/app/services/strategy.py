@@ -134,7 +134,7 @@ def _evaluate_trend_breakout_long_only(
     if isinstance(timestamp, datetime) and timestamp.tzinfo is None:
         timestamp = timestamp.replace(tzinfo=UTC)
     explanation = (
-        "All seven pre-defined entry conditions passed on the latest completed candle. This is a research "
+        "All seven pre-defined entry conditions passed on the latest completed candle. This is a simulation "
         "signal, not an order; any backtest/live execution must use the next executable price."
         if state == "BUY" else
         "The close broke the previous 10-bar low. SELL means exit an existing long position, not open a short."
@@ -313,7 +313,7 @@ def evaluate_trend_breakout(
     )
     if state == "SELL_SHORT":
         explanation = (
-            "All seven short-entry conditions passed on the latest completed candle. This is manual research "
+            "All seven short-entry conditions passed on the latest completed candle. This is manual simulated "
             "exposure, not a borrow or an order; execution is not provided."
         )
     elif state == "SELL":

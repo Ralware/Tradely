@@ -40,11 +40,9 @@ export function PortfolioPage() {
     [],
     { keepPreviousData: true },
   );
-  const summary = useApi(
-    (signal) => portfolioService.getSummary(signal),
-    [],
-    { keepPreviousData: true },
-  );
+  const summary = useApi((signal) => portfolioService.getSummary(signal), [], {
+    keepPreviousData: true,
+  });
   const transactions = useApi(
     (signal) => portfolioService.getTransactions(signal),
     [],

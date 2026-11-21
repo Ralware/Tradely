@@ -11,7 +11,6 @@ import { EmptyState, ErrorState, Notice } from '../components/common/States';
 import { Stat } from '../components/common/Stat';
 import { TimeSeriesChart } from '../components/charts/TimeSeriesChart';
 import type { TimeSeriesPoint } from '../components/charts/TimeSeriesChart';
-import { ResearchSearch } from '../components/analysis/ResearchSearch';
 import { TradesTable } from '../components/tables/TradesTable';
 
 const marketOptions = [
@@ -206,7 +205,6 @@ export function BacktestingPage() {
     <div className="w-full px-4 py-4 lg:px-6">
       <PageHeader title="Backtesting" subtitle="Trend Breakout · Daily Bars · Costs Included" />
 
-      <ResearchSearch />
       <Card className="mb-3" title="Daily trend breakout configuration">
         <form onSubmit={runBacktest} className="space-y-2">
           <div className="border-b border-terminal-border pb-1 text-2xs font-semibold uppercase tracking-wide text-terminal-muted">Instrument, Test Range & Execution Assumptions</div>

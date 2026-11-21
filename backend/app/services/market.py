@@ -92,6 +92,7 @@ class MarketService:
         days: int = 365,
         provider: str = "auto",
         full_history: bool = True,
+        bypass_cache: bool = False,
     ) -> tuple[pd.DataFrame, str]:
         if days < 1 or days > 3650:
             raise ValueError("days must be between 1 and 3650")
@@ -127,6 +128,8 @@ class MarketService:
             except Exception as exc:
                 raise ProviderError(f"{adapter.name}: {exc}") from exc
 
+        if bypass_cache:
+            return fetch()
         adapter = self.tradingview
         cache_key = (
             canonical_id, interval, adapter.is_adjusted,

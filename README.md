@@ -101,25 +101,25 @@ Settings are read from the repository-root `.env` (see `.env.example`). The
 backend binds to loopback only; `HOST` values other than `127.0.0.1`, `localhost`
 or `::1` are rejected at startup.
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `HOST` | `127.0.0.1` | FastAPI bind address (loopback only) |
-| `DATABASE_PATH` | `./data/tradely.sqlite3` | SQLite file location |
-| `TRADINGVIEW_BRIDGE_URL` | `http://127.0.0.1:8010` | Loopback bridge origin |
-| `TRADINGVIEW_BRIDGE_TIMEOUT_SECONDS` | `60` | Bridge request timeout |
-| `TRADINGVIEW_CANDLES_TIMEOUT_SECONDS` | `50` | Candle request timeout |
-| `TRADINGVIEW_QUOTES_TIMEOUT_SECONDS` | `30` | Quote request timeout |
-| `TRADINGVIEW_SEARCH_TIMEOUT_SECONDS` | `15` | Search request timeout |
-| `TRADINGVIEW_LIVE_SEARCH_ENABLED` | `true` | Allow live TradingView search for unknown symbols |
-| `MARKET_CACHE_SECONDS` | `300` | Candle cache lifetime |
-| `QUOTE_CRYPTO_TTL_SECONDS` | `10` | Crypto quote cache |
-| `QUOTE_GLOBAL_TTL_SECONDS` | `300` | Global equity quote cache |
-| `QUOTE_INDIA_TTL_SECONDS` | `600` | Indian equity quote cache |
-| `QUOTE_BACKOFF_BASE_SECONDS` | `5` | Provider backoff base |
-| `QUOTE_BACKOFF_MAX_SECONDS` | `300` | Provider backoff ceiling |
-| `QUOTE_STREAM_INTERVAL_SECONDS` | `5` | SSE replay interval |
-| `DEFAULT_ACCOUNT_CURRENCY` | `INR` | Reporting currency for risk sizing |
-| `MAX_RISK_FRACTION` | `0.02` | Maximum accepted risk fraction |
+| Variable                              | Default                  | Purpose                                           |
+| ------------------------------------- | ------------------------ | ------------------------------------------------- |
+| `HOST`                                | `127.0.0.1`              | FastAPI bind address (loopback only)              |
+| `DATABASE_PATH`                       | `./data/tradely.sqlite3` | SQLite file location                              |
+| `TRADINGVIEW_BRIDGE_URL`              | `http://127.0.0.1:8010`  | Loopback bridge origin                            |
+| `TRADINGVIEW_BRIDGE_TIMEOUT_SECONDS`  | `60`                     | Bridge request timeout                            |
+| `TRADINGVIEW_CANDLES_TIMEOUT_SECONDS` | `50`                     | Candle request timeout                            |
+| `TRADINGVIEW_QUOTES_TIMEOUT_SECONDS`  | `30`                     | Quote request timeout                             |
+| `TRADINGVIEW_SEARCH_TIMEOUT_SECONDS`  | `15`                     | Search request timeout                            |
+| `TRADINGVIEW_LIVE_SEARCH_ENABLED`     | `true`                   | Allow live TradingView search for unknown symbols |
+| `MARKET_CACHE_SECONDS`                | `300`                    | Candle cache lifetime                             |
+| `QUOTE_CRYPTO_TTL_SECONDS`            | `10`                     | Crypto quote cache                                |
+| `QUOTE_GLOBAL_TTL_SECONDS`            | `300`                    | Global equity quote cache                         |
+| `QUOTE_INDIA_TTL_SECONDS`             | `600`                    | Indian equity quote cache                         |
+| `QUOTE_BACKOFF_BASE_SECONDS`          | `5`                      | Provider backoff base                             |
+| `QUOTE_BACKOFF_MAX_SECONDS`           | `300`                    | Provider backoff ceiling                          |
+| `QUOTE_STREAM_INTERVAL_SECONDS`       | `5`                      | SSE replay interval                               |
+| `DEFAULT_ACCOUNT_CURRENCY`            | `INR`                    | Reporting currency for risk sizing                |
+| `MAX_RISK_FRACTION`                   | `0.02`                   | Maximum accepted risk fraction                    |
 
 Optional `TRADINGVIEW_SESSION` and `TRADINGVIEW_SIGNATURE` cookies are read by the
 bridge for account data. Leave them empty for anonymous access. Credentials stay
@@ -127,32 +127,32 @@ in `.env`, which is git-ignored and never sent to the browser.
 
 ## API
 
-| Method | Route | Purpose |
-| --- | --- | --- |
-| `GET` | `/api/health` | App status and scope flags |
-| `GET` | `/api/providers/status` | Bridge health and provider limits |
-| `GET` | `/api/market/candles` | Normalised OHLCV candles |
-| `GET` | `/api/scanner/watchlist` | Daily strategy scan of the saved watchlist |
-| `GET` | `/api/instruments/search` | Catalogue plus live TradingView search |
-| `GET` | `/api/instruments/resolve` | Resolve a query to canonical identity |
-| `GET` | `/api/instruments/{instrument_id}` | Stored instrument metadata and capabilities |
-| `GET` | `/api/instruments/{symbol}/analysis` | Indicators, strategy signal and candles |
-| `GET` | `/api/instruments/{symbol}/indicators` | Per-bar indicator series for charts |
-| `GET` | `/api/instruments/{symbol}/technicals` | Conventional Buy/Sell/Neutral labels |
-| `GET` | `/api/instruments/{symbol}/news` | Explicit empty result (no news provider) |
-| `POST` | `/api/backtests/trend-breakout` | Daily single-instrument backtest |
-| `POST` | `/api/risk/position-size` | Direction-aware position sizing |
-| `GET`/`POST` | `/api/watchlist` | Read or add watchlist entries |
-| `DELETE` | `/api/watchlist/instruments/{instrument_id}` | Remove by canonical identity |
-| `DELETE` | `/api/watchlist/{market}/{symbol}` | Remove by legacy identity |
-| `GET` | `/api/market/quotes` | Deduplicated quotes by instrument, symbol or watchlist |
-| `GET` | `/api/market/quotes/stream` | SSE replay of the shared quote cache |
-| `GET`/`POST` | `/api/portfolio/transactions` | Ledger rows and amount-based entries |
-| `POST` | `/api/portfolio/transactions/preview` | Server-authoritative quantity preview |
-| `DELETE` | `/api/portfolio/transactions/{transaction_id}` | Delete a row if the ledger stays valid |
-| `GET` | `/api/portfolio/summary` | Currency-separated valuation and P&L |
-| `GET` | `/api/portfolio/positions` | Open positions with backend valuation |
-| `GET` | `/api/portfolio/positions/{instrument_id}` | Position detail, ledger history and candles |
+| Method       | Route                                          | Purpose                                                |
+| ------------ | ---------------------------------------------- | ------------------------------------------------------ |
+| `GET`        | `/api/health`                                  | App status and scope flags                             |
+| `GET`        | `/api/providers/status`                        | Bridge health and provider limits                      |
+| `GET`        | `/api/market/candles`                          | Normalised OHLCV candles                               |
+| `GET`        | `/api/scanner/watchlist`                       | Daily strategy scan of the saved watchlist             |
+| `GET`        | `/api/instruments/search`                      | Catalogue plus live TradingView search                 |
+| `GET`        | `/api/instruments/resolve`                     | Resolve a query to canonical identity                  |
+| `GET`        | `/api/instruments/{instrument_id}`             | Stored instrument metadata and capabilities            |
+| `GET`        | `/api/instruments/{symbol}/analysis`           | Indicators, strategy signal and candles                |
+| `GET`        | `/api/instruments/{symbol}/indicators`         | Per-bar indicator series for charts                    |
+| `GET`        | `/api/instruments/{symbol}/technicals`         | Conventional Buy/Sell/Neutral labels                   |
+| `GET`        | `/api/instruments/{symbol}/news`               | Explicit empty result (no news provider)               |
+| `POST`       | `/api/backtests/trend-breakout`                | Daily single-instrument backtest                       |
+| `POST`       | `/api/risk/position-size`                      | Direction-aware position sizing                        |
+| `GET`/`POST` | `/api/watchlist`                               | Read or add watchlist entries                          |
+| `DELETE`     | `/api/watchlist/instruments/{instrument_id}`   | Remove by canonical identity                           |
+| `DELETE`     | `/api/watchlist/{market}/{symbol}`             | Remove by legacy identity                              |
+| `GET`        | `/api/market/quotes`                           | Deduplicated quotes by instrument, symbol or watchlist |
+| `GET`        | `/api/market/quotes/stream`                    | SSE replay of the shared quote cache                   |
+| `GET`/`POST` | `/api/portfolio/transactions`                  | Ledger rows and amount-based entries                   |
+| `POST`       | `/api/portfolio/transactions/preview`          | Server-authoritative quantity preview                  |
+| `DELETE`     | `/api/portfolio/transactions/{transaction_id}` | Delete a row if the ledger stays valid                 |
+| `GET`        | `/api/portfolio/summary`                       | Currency-separated valuation and P&L                   |
+| `GET`        | `/api/portfolio/positions`                     | Open positions with backend valuation                  |
+| `GET`        | `/api/portfolio/positions/{instrument_id}`     | Position detail, ledger history and candles            |
 
 ## Behaviour
 
@@ -166,7 +166,7 @@ in `.env`, which is git-ignored and never sent to the browser.
   for the timeframe; date-bounded requests pass an explicit range. Canonical
   intervals include `1wk` and `1mo`.
 - **Signals.** One versioned daily trend/Donchian strategy supports long-only,
-  short-only and long/short research. Signals are suppressed with `STALE_DATA` or
+  short-only and long/short backtests. Signals are suppressed with `STALE_DATA` or
   `DATA_QUALITY_ERROR` when candles are stale or Indian history is not confirmed
   as split-adjusted.
 - **Indicators.** SMA, EMA, Wilder RSI/ATR/ADX, MACD, Bollinger Bands, Donchian
@@ -206,7 +206,7 @@ that directory when present.
 
 - TradingView is an unofficial community API. Availability, delay and history
   depth can change without notice.
-- The backtest is a single-instrument research model with next-bar-open
+- The backtest is a single-instrument model with next-bar-open
   execution and aggregate basis-point costs. It is not a portfolio simulator,
   tax engine or proof of profitability. Position size is fractional so every
   positive capital value is usable; venues that require whole shares will differ.

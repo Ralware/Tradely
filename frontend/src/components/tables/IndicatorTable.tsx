@@ -1,7 +1,11 @@
-import type { IndicatorValues } from '../../types/api';
-import { formatCompact, formatNumber, titleCase } from '../../utils/format';
+import type { IndicatorValues } from "../../types/api";
+import { formatCompact, formatNumber, titleCase } from "../../utils/format";
 
-export function IndicatorTable({ indicators }: { indicators: IndicatorValues }) {
+export function IndicatorTable({
+  indicators,
+}: {
+  indicators: IndicatorValues;
+}) {
   const entries = Object.entries(indicators);
 
   if (entries.length === 0) {
@@ -19,12 +23,17 @@ export function IndicatorTable({ indicators }: { indicators: IndicatorValues }) 
         </thead>
         <tbody>
           {entries.map(([key, value]) => (
-            <tr key={key} className="border-b border-terminal-borderSoft last:border-0">
-              <td className="py-1.5 pr-3 text-terminal-muted">{titleCase(key)}</td>
+            <tr
+              key={key}
+              className="border-b border-terminal-borderSoft last:border-0"
+            >
+              <td className="py-1.5 pr-3 text-terminal-muted">
+                {titleCase(key)}
+              </td>
               <td className="num py-1.5 text-right text-terminal-text">
                 {value === null
-                  ? '—'
-                  : key === 'obv'
+                  ? "—"
+                  : key === "obv"
                     ? formatCompact(value)
                     : formatNumber(value, 4)}
               </td>

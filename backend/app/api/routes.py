@@ -33,7 +33,12 @@ from app.services.backtest import run_trend_breakout_backtest
 from app.services.indicators import compute_indicators
 from app.services.portfolio import build_ledger, detail_view, position_view, summary_view
 from app.services.strategy import STRATEGY_VERSION, evaluate_trend_breakout, position_size
-from app.services.technicals import build_technical_summary
+from app.services.technicals import build_technical_summary as build_conventional_summary
+from app.services.tv_technical_rating import (
+    build_technical_summary as build_tv_technical_summary,
+    evaluate as evaluate_tv_ratings,
+    ohlcv_fingerprint,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -357,12 +362,16 @@ def technical_summary(
     interval: str = "1d",
     days: int = Query(3650, ge=1, le=3650),
     provider: str = "auto",
+    method: str = Query("conventional", pattern="^(conventional|v3|tradingview)$"),
+    version: str | None = None,
+    bypass_cache: bool = False,
+    refresh: bool = False,
 ) -> dict[str, Any]:
     """Per-indicator Buy/Sell/Neutral labels and gauge counts.
 
-    Additive and read-only. It reuses ``compute_indicators`` unchanged and only
-    classifies the values it already returns with published threshold
-    conventions. No strategy rule, existing route or stored record is changed.
+    Supports both conventional thresholds (default for backward compatibility)
+    and authoritative TradingView TechnicalRating v3 parity (when method='v3'
+    or method='tradingview' or version='v3').
     """
     instrument = _market_target(
         request, symbol=symbol, instrument_id=instrument_id, market=market, exchange=exchange
@@ -372,13 +381,25 @@ def technical_summary(
     exchange = instrument["exchange"]
     try:
         frame, source = request.app.state.market_service.candles(
-            symbol, market=market, exchange=exchange, interval=interval, days=days, provider=provider
+            symbol,
+            market=market,
+            exchange=exchange,
+            interval=interval,
+            days=days,
+            provider=provider,
+            bypass_cache=bypass_cache or refresh,
         )
     except (ProviderError, ValueError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    indicators = compute_indicators(frame)
-    latest = indicators.iloc[-1]
-    payload = build_technical_summary(latest, close=float(latest["close"]))
+
+    fingerprint = ohlcv_fingerprint(frame)
+    if version in ("v3", "3") or method in ("v3", "tradingview"):
+        payload = build_tv_technical_summary(frame)
+    else:
+        indicators = compute_indicators(frame)
+        latest = indicators.iloc[-1]
+        payload = build_conventional_summary(latest, close=float(latest["close"]))
+
     return {
         "symbol": symbol,
         "market": market,
@@ -389,6 +410,57 @@ def technical_summary(
         "is_adjusted": bool(frame.attrs.get("is_adjusted", False)),
         "is_stale": _is_stale(frame, market, interval),
         "as_of": frame.index[-1].isoformat(),
+        "fingerprint": fingerprint,
+        **payload,
+    }
+
+
+@router.get("/instruments/{symbol}/technical-ratings")
+def technical_ratings(
+    request: Request,
+    symbol: str | None = None,
+    instrument_id: str | None = None,
+    market: str | None = Query(None, pattern="^(india|global|crypto)$"),
+    exchange: str | None = None,
+    interval: str = "1d",
+    days: int = Query(3650, ge=1, le=3650),
+    provider: str = "auto",
+    bypass_cache: bool = False,
+    refresh: bool = False,
+) -> dict[str, Any]:
+    """TradingView TechnicalRating v3 authoritative 26-indicator evaluation."""
+    instrument = _market_target(
+        request, symbol=symbol, instrument_id=instrument_id, market=market, exchange=exchange
+    )
+    symbol = instrument["symbol"]
+    market = instrument["market"]
+    exchange = instrument["exchange"]
+    try:
+        frame, source = request.app.state.market_service.candles(
+            symbol,
+            market=market,
+            exchange=exchange,
+            interval=interval,
+            days=days,
+            provider=provider,
+            bypass_cache=bypass_cache or refresh,
+        )
+    except (ProviderError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    fingerprint = ohlcv_fingerprint(frame)
+    payload = build_tv_technical_summary(frame)
+    return {
+        "symbol": symbol,
+        "market": market,
+        "exchange": exchange,
+        "instrument": instrument,
+        "interval": interval,
+        "source": source,
+        "is_adjusted": bool(frame.attrs.get("is_adjusted", False)),
+        "is_stale": _is_stale(frame, market, interval),
+        "as_of": frame.index[-1].isoformat(),
+        "fingerprint": fingerprint,
         **payload,
     }
 
@@ -451,7 +523,7 @@ def backtest_trend_breakout(request: Request, payload: BacktestRequest) -> dict[
     market = instrument["market"]
     exchange = instrument["exchange"]
     if payload.interval != "1d":
-        raise HTTPException(status_code=422, detail="The initial research backtest is defined for daily candles only.")
+        raise HTTPException(status_code=422, detail="The initial backtest is defined for daily candles only.")
     try:
         frame, source = request.app.state.market_service.candles(
             symbol, market=market, exchange=exchange, interval=payload.interval,

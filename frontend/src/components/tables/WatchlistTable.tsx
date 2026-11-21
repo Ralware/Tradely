@@ -1,10 +1,16 @@
-import { useMemo, useState } from 'react';
-import type { Quote, SignalState, WatchlistItem } from '../../types/api';
-import { cn, formatPercent, toneForNumber } from '../../utils/format';
-import { buildWatchlistRows, sortWatchlistRows } from '../../utils/watchlistSort';
-import type { WatchlistSort, WatchlistSortColumn } from '../../utils/watchlistSort';
-import { EmptyState } from '../common/States';
-import { Sparkline } from '../charts/Sparkline';
+import { useMemo, useState } from "react";
+import type { Quote, SignalState, WatchlistItem } from "../../types/api";
+import { cn, formatPercent, toneForNumber } from "../../utils/format";
+import {
+  buildWatchlistRows,
+  sortWatchlistRows,
+} from "../../utils/watchlistSort";
+import type {
+  WatchlistSort,
+  WatchlistSortColumn,
+} from "../../utils/watchlistSort";
+import { EmptyState } from "../common/States";
+import { Sparkline } from "../charts/Sparkline";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -24,32 +30,55 @@ export interface WatchlistTableProps {
 
 function toneClass(value: number | null | undefined): string {
   const tone = toneForNumber(value);
-  if (tone === 'positive') return 'text-terminal-green';
-  if (tone === 'negative') return 'text-terminal-red';
-  return 'text-terminal-muted';
+  if (tone === "positive") return "text-terminal-green";
+  if (tone === "negative") return "text-terminal-red";
+  return "text-terminal-muted";
 }
 
 function formatPrice(value: number | null | undefined): string {
-  if (value === null || value === undefined) return '—';
+  if (value === null || value === undefined) return "—";
   if (value >= 1000) {
-    return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return value.toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
   }
   if (value >= 1) {
-    return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+    return value.toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 4,
+    });
   }
-  return value.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 6 });
+  return value.toLocaleString("en-US", {
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 6,
+  });
 }
 
 function formatSignedChange(value: number | null | undefined): string {
-  if (value === null || value === undefined) return '—';
-  const prefix = value > 0 ? '+' : '';
+  if (value === null || value === undefined) return "—";
+  const prefix = value > 0 ? "+" : "";
   if (Math.abs(value) >= 1000) {
-    return prefix + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return (
+      prefix +
+      value.toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })
+    );
   }
   if (Math.abs(value) >= 1) {
-    return prefix + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return (
+      prefix +
+      value.toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })
+    );
   }
-  return prefix + value.toFixed(value === 0 ? 2 : Math.abs(value) < 0.01 ? 4 : 2);
+  return (
+    prefix + value.toFixed(value === 0 ? 2 : Math.abs(value) < 0.01 ? 4 : 2)
+  );
 }
 
 // ─── Signal badge ─────────────────────────────────────────────────────────────
@@ -60,27 +89,27 @@ interface SignalInfo {
 }
 
 const signalStyle: Record<SignalState, string> = {
-  BUY: 'border-[#1f4d43] text-terminal-green bg-black',
-  SELL: 'border-[#4d2424] text-terminal-red bg-black',
-  SELL_SHORT: 'border-[#4d2424] text-terminal-red bg-black',
-  BUY_TO_COVER: 'border-[#1f4d43] text-terminal-green bg-black',
-  WAIT: 'border-[#4d3d1f] text-terminal-amber bg-black',
-  NO_SIGNAL: 'border-terminal-border text-terminal-muted bg-black',
-  INSUFFICIENT_DATA: 'border-terminal-border text-terminal-muted bg-black',
-  STALE_DATA: 'border-[#4d3d1f] text-terminal-amber bg-black',
-  DATA_QUALITY_ERROR: 'border-[#4d2424] text-terminal-red bg-black',
+  BUY: "border-[#1f4d43] text-terminal-green bg-black",
+  SELL: "border-[#4d2424] text-terminal-red bg-black",
+  SELL_SHORT: "border-[#4d2424] text-terminal-red bg-black",
+  BUY_TO_COVER: "border-[#1f4d43] text-terminal-green bg-black",
+  WAIT: "border-[#4d3d1f] text-terminal-amber bg-black",
+  NO_SIGNAL: "border-terminal-border text-terminal-muted bg-black",
+  INSUFFICIENT_DATA: "border-terminal-border text-terminal-muted bg-black",
+  STALE_DATA: "border-[#4d3d1f] text-terminal-amber bg-black",
+  DATA_QUALITY_ERROR: "border-[#4d2424] text-terminal-red bg-black",
 };
 
 const signalLabel: Record<SignalState, string> = {
-  BUY: 'Buy',
-  SELL: 'Sell · Exit Long',
-  SELL_SHORT: 'Sell Short',
-  BUY_TO_COVER: 'Buy To Cover',
-  WAIT: '→ Wait',
-  NO_SIGNAL: 'No Signal',
-  INSUFFICIENT_DATA: 'No Data',
-  STALE_DATA: 'Stale',
-  DATA_QUALITY_ERROR: 'Data Error',
+  BUY: "Buy",
+  SELL: "Sell · Exit Long",
+  SELL_SHORT: "Sell Short",
+  BUY_TO_COVER: "Buy To Cover",
+  WAIT: "→ Wait",
+  NO_SIGNAL: "No Signal",
+  INSUFFICIENT_DATA: "No Data",
+  STALE_DATA: "Stale",
+  DATA_QUALITY_ERROR: "Data Error",
 };
 
 function InlineSignalBadge({ signal }: { signal: SignalInfo }) {
@@ -118,7 +147,12 @@ export function WatchlistTable({
   function renderSortHeader(column: WatchlistSortColumn, label: string) {
     const active = sort?.column === column;
     const direction = active ? sort.direction : null;
-    const ariaSort = direction === 'asc' ? 'ascending' : direction === 'desc' ? 'descending' : 'none';
+    const ariaSort =
+      direction === "asc"
+        ? "ascending"
+        : direction === "desc"
+          ? "descending"
+          : "none";
 
     return (
       <th className="py-2.5 pr-4 text-right" aria-sort={ariaSort}>
@@ -126,13 +160,13 @@ export function WatchlistTable({
           type="button"
           onClick={() => onSort(column)}
           className={cn(
-            'inline-flex cursor-pointer items-center gap-1 transition-colors hover:text-white',
-            active ? 'text-white' : 'text-terminal-muted',
+            "inline-flex cursor-pointer items-center gap-1 transition-colors hover:text-white",
+            active ? "text-white" : "text-terminal-muted",
           )}
         >
           {label}
           <span aria-hidden="true" className="inline-block w-3 text-center">
-            {direction === 'asc' ? '↑' : direction === 'desc' ? '↓' : '⇅'}
+            {direction === "asc" ? "↑" : direction === "desc" ? "↓" : "⇅"}
           </span>
         </button>
       </th>
@@ -156,9 +190,9 @@ export function WatchlistTable({
           <tr className="border-b border-terminal-border text-left text-2xs font-medium text-terminal-muted select-none">
             <th className="w-10 py-2.5 pl-3 pr-2 text-left">#</th>
             <th className="py-2.5 pr-4">Symbol ⇅</th>
-            {renderSortHeader('price', 'Last')}
-            {renderSortHeader('change', 'Change')}
-            {renderSortHeader('changePct', 'Chg%')}
+            {renderSortHeader("price", "Last")}
+            {renderSortHeader("change", "Change")}
+            {renderSortHeader("changePct", "Chg%")}
             <th className="py-2.5 pr-4 text-center">Signal</th>
             <th className="w-32 py-2.5 pr-4 text-center">Chart (7D)</th>
             <th className="w-10 py-2.5 pr-3 text-right">···</th>
@@ -166,7 +200,8 @@ export function WatchlistTable({
         </thead>
         <tbody className="divide-y divide-terminal-borderSoft">
           {rows.map(({ item, key, quote }, index) => {
-            const signal = signals?.get(key) ?? signals?.get(item.symbol) ?? null;
+            const signal =
+              signals?.get(key) ?? signals?.get(item.symbol) ?? null;
             const sparkData = sparklines?.get(key) ?? [];
             const isRemoving = removing === key;
             const isMenuOpen = actionMenuOpen === key;
@@ -196,17 +231,23 @@ export function WatchlistTable({
                 <td className="num py-3 pr-4 text-right font-mono font-medium text-white">
                   {formatPrice(quote?.price)}
                   {quote?.currency ? (
-                    <span className="ml-1 text-2xs font-normal text-terminal-muted">{quote.currency}</span>
+                    <span className="ml-1 text-2xs font-normal text-terminal-muted">
+                      {quote.currency}
+                    </span>
                   ) : null}
                 </td>
 
                 {/* Change */}
-                <td className={`num py-3 pr-4 text-right font-mono font-medium ${toneClass(quote?.day_change)}`}>
+                <td
+                  className={`num py-3 pr-4 text-right font-mono font-medium ${toneClass(quote?.day_change)}`}
+                >
                   {formatSignedChange(quote?.day_change)}
                 </td>
 
                 {/* Chg% */}
-                <td className={`num py-3 pr-4 text-right font-mono font-medium ${toneClass(quote?.day_change_pct)}`}>
+                <td
+                  className={`num py-3 pr-4 text-right font-mono font-medium ${toneClass(quote?.day_change_pct)}`}
+                >
                   {formatPercent(quote?.day_change_pct ?? null, 2, true)}
                 </td>
 
@@ -220,12 +261,13 @@ export function WatchlistTable({
                 </td>
 
                 {/* Chart 7D */}
-                <td
-                  className="py-3 pr-4"
-                  onClick={(e) => e.stopPropagation()}
-                >
+                <td className="py-3 pr-4" onClick={(e) => e.stopPropagation()}>
                   <div className="w-28 h-9 mx-auto">
-                    <Sparkline values={sparkData} height={36} className="w-full" />
+                    <Sparkline
+                      values={sparkData}
+                      height={36}
+                      className="w-full"
+                    />
                   </div>
                 </td>
 
@@ -244,7 +286,9 @@ export function WatchlistTable({
                     {isRemoving ? (
                       <span className="text-2xs animate-pulse">…</span>
                     ) : (
-                      <span className="text-sm font-bold leading-none">···</span>
+                      <span className="text-sm font-bold leading-none">
+                        ···
+                      </span>
                     )}
                   </button>
 

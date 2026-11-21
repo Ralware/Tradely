@@ -1,11 +1,11 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useSelectedInstrument } from '../contexts/SelectedInstrumentContext';
-import { AnalysisWorkspace } from '../components/analysis/AnalysisWorkspace';
-import { AnalysisWatchlist } from '../components/analysis/AnalysisWatchlist';
-import type { WatchlistItem } from '../types/api';
-import { instrumentPath } from '../utils/navigation';
-import { Icon } from '../components/common/Icon';
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useSelectedInstrument } from "../contexts/SelectedInstrumentContext";
+import { AnalysisWorkspace } from "../components/analysis/AnalysisWorkspace";
+import { AnalysisWatchlist } from "../components/analysis/AnalysisWatchlist";
+import type { WatchlistItem } from "../types/api";
+import { instrumentPath } from "../utils/navigation";
+import { Icon } from "../components/common/Icon";
 
 export function AnalysisPage() {
   const navigate = useNavigate();
@@ -24,7 +24,10 @@ export function AnalysisPage() {
     } else {
       navigate(
         instrumentPath(
-          { instrument_id: `${item.market}:${item.exchange}:${item.symbol}`, market: item.market },
+          {
+            instrument_id: `${item.market}:${item.exchange}:${item.symbol}`,
+            market: item.market,
+          },
           { interval: selected.interval, days: selected.days },
         ),
       );

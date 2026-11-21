@@ -1,10 +1,16 @@
-import type { SignalCondition } from '../../types/api';
-import { cn } from '../../utils/format';
-import { Icon } from '../common/Icon';
+import type { SignalCondition } from "../../types/api";
+import { cn } from "../../utils/format";
+import { Icon } from "../common/Icon";
 
-export function ConditionList({ conditions }: { conditions: SignalCondition[] }) {
+export function ConditionList({
+  conditions,
+}: {
+  conditions: SignalCondition[];
+}) {
   if (conditions.length === 0) {
-    return <p className="text-xs text-terminal-muted">No Conditions Evaluated</p>;
+    return (
+      <p className="text-xs text-terminal-muted">No Conditions Evaluated</p>
+    );
   }
 
   return (
@@ -13,20 +19,24 @@ export function ConditionList({ conditions }: { conditions: SignalCondition[] })
         <li key={condition.name} className="flex items-center gap-2 py-1">
           <span
             className={cn(
-              'flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm border',
+              "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm border",
               condition.passed
-                ? 'border-[#1f4d43] bg-black text-terminal-green'
-                : 'border-terminal-border bg-terminal-panelAlt text-terminal-muted',
+                ? "border-[#1f4d43] bg-black text-terminal-green"
+                : "border-terminal-border bg-terminal-panelAlt text-terminal-muted",
             )}
-            aria-label={condition.passed ? 'Passed' : 'Not Passed'}
+            aria-label={condition.passed ? "Passed" : "Not Passed"}
           >
-            {condition.passed ? <Icon name="check" size={10} /> : <Icon name="close" size={9} />}
+            {condition.passed ? (
+              <Icon name="check" size={10} />
+            ) : (
+              <Icon name="close" size={9} />
+            )}
           </span>
           <div className="min-w-0">
             <p
               className={cn(
-                'text-xs font-medium',
-                condition.passed ? 'text-terminal-text' : 'text-terminal-muted',
+                "text-xs font-medium",
+                condition.passed ? "text-terminal-text" : "text-terminal-muted",
               )}
             >
               {condition.name}

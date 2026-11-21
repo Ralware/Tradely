@@ -1,10 +1,21 @@
-import type { BacktestTrade } from '../../types/api';
-import { cn, formatDateTime, formatNumber, toneForNumber } from '../../utils/format';
-import { EmptyState } from '../common/States';
+import type { BacktestTrade } from "../../types/api";
+import {
+  cn,
+  formatDateTime,
+  formatNumber,
+  toneForNumber,
+} from "../../utils/format";
+import { EmptyState } from "../common/States";
 
 export function TradesTable({ trades }: { trades: BacktestTrade[] }) {
   if (trades.length === 0) {
-    return <EmptyState title="No Completed Trades" description="The strategy produced no round trips." icon="flask" />;
+    return (
+      <EmptyState
+        title="No Completed Trades"
+        description="The strategy produced no round trips."
+        icon="flask"
+      />
+    );
   }
 
   return (
@@ -28,13 +39,22 @@ export function TradesTable({ trades }: { trades: BacktestTrade[] }) {
           {trades.map((trade, index) => {
             const tone = toneForNumber(trade.net_pnl);
             return (
-              <tr key={`${trade.entry_time}-${index}`} className="border-b border-terminal-borderSoft last:border-0">
-                <td className="num py-1.5 pr-3 text-terminal-muted">{formatDateTime(trade.signal_time)}</td>
-                <td className="py-1.5 pr-3 text-terminal-text">
-                  {trade.direction === 'SHORT' ? 'Short' : 'Long'}
+              <tr
+                key={`${trade.entry_time}-${index}`}
+                className="border-b border-terminal-borderSoft last:border-0"
+              >
+                <td className="num py-1.5 pr-3 text-terminal-muted">
+                  {formatDateTime(trade.signal_time)}
                 </td>
-                <td className="num py-1.5 pr-3 text-terminal-muted">{formatDateTime(trade.entry_time)}</td>
-                <td className="num py-1.5 pr-3 text-terminal-muted">{formatDateTime(trade.exit_time)}</td>
+                <td className="py-1.5 pr-3 text-terminal-text">
+                  {trade.direction === "SHORT" ? "Short" : "Long"}
+                </td>
+                <td className="num py-1.5 pr-3 text-terminal-muted">
+                  {formatDateTime(trade.entry_time)}
+                </td>
+                <td className="num py-1.5 pr-3 text-terminal-muted">
+                  {formatDateTime(trade.exit_time)}
+                </td>
                 <td className="num py-1.5 pr-3 text-right text-terminal-text">
                   {formatNumber(trade.entry_price, 2)}
                 </td>
@@ -42,24 +62,29 @@ export function TradesTable({ trades }: { trades: BacktestTrade[] }) {
                   {formatNumber(trade.exit_price, 2)}
                 </td>
                 <td className="num py-1.5 pr-3 text-right text-terminal-muted">
-                  {formatNumber(trade.quantity, Number.isInteger(trade.quantity) ? 0 : 8)}
+                  {formatNumber(
+                    trade.quantity,
+                    Number.isInteger(trade.quantity) ? 0 : 8,
+                  )}
                 </td>
                 <td className="num py-1.5 pr-3 text-right text-terminal-muted">
                   {formatNumber(trade.total_costs, 2)}
                 </td>
                 <td
                   className={cn(
-                    'num py-1.5 pr-3 text-right font-medium',
-                    tone === 'positive'
-                      ? 'text-terminal-green'
-                      : tone === 'negative'
-                        ? 'text-terminal-red'
-                        : 'text-terminal-muted',
+                    "num py-1.5 pr-3 text-right font-medium",
+                    tone === "positive"
+                      ? "text-terminal-green"
+                      : tone === "negative"
+                        ? "text-terminal-red"
+                        : "text-terminal-muted",
                   )}
                 >
                   {formatNumber(trade.net_pnl, 2)}
                 </td>
-                <td className="py-1.5 text-terminal-muted">{trade.exit_reason}</td>
+                <td className="py-1.5 text-terminal-muted">
+                  {trade.exit_reason}
+                </td>
               </tr>
             );
           })}

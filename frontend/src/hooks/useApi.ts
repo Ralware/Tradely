@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { ApiError } from '../services/api';
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ApiError } from "../services/api";
 
 export interface ApiState<T> {
   data: T | null;
@@ -26,11 +26,11 @@ function toMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
   }
-  return 'Request failed';
+  return "Request failed";
 }
 
 function isAbort(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError';
+  return error instanceof DOMException && error.name === "AbortError";
 }
 
 /**
@@ -62,7 +62,10 @@ export function useApi<T>(
     const controller = new AbortController();
     let active = true;
 
-    const sameDataKey = Object.is(previousDataKeyRef.current, options.keepPreviousDataKey);
+    const sameDataKey = Object.is(
+      previousDataKeyRef.current,
+      options.keepPreviousDataKey,
+    );
     previousDataKeyRef.current = options.keepPreviousDataKey;
 
     setState((previous) => ({
@@ -95,7 +98,13 @@ export function useApi<T>(
       controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [...deps, enabled, reloadToken, keepPreviousData, options.keepPreviousDataKey]);
+  }, [
+    ...deps,
+    enabled,
+    reloadToken,
+    keepPreviousData,
+    options.keepPreviousDataKey,
+  ]);
 
   const reload = useCallback(() => {
     setReloadToken((token) => token + 1);

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { quoteHub, type QuoteRef } from '../services/quoteHub';
-import type { Quote } from '../types/api';
+import { useCallback, useEffect, useRef, useState } from "react";
+import { quoteHub, type QuoteRef } from "../services/quoteHub";
+import type { Quote } from "../types/api";
 
 export interface UseQuotesResult {
   quotes: Map<string, Quote>;
@@ -14,7 +14,10 @@ export interface UseQuotesResult {
  * subscription, so mounting another consumer does not duplicate provider calls.
  */
 export function useQuotes(instruments: QuoteRef[]): UseQuotesResult {
-  const signature = instruments.map((item) => item.instrument_id).sort().join('|');
+  const signature = instruments
+    .map((item) => item.instrument_id)
+    .sort()
+    .join("|");
   const instrumentsRef = useRef(instruments);
   instrumentsRef.current = instruments;
 
