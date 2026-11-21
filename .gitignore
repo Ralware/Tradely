@@ -8,3 +8,8 @@ htmlcov/
 research/benchmarks/run_*/
 research/optimization/100k_2h/results/2h/a3dcf664ad210841/records/
 research/optimization/100k_2h/
+.venv/
+frontend/node_modules/.vite/
+frontend/node_modules/.vitest-cache/
+frontend/node_modules/.tmp/
+research/optimization/ui_runs/

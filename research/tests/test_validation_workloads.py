@@ -109,6 +109,9 @@ def test_portfolio_backtest_one_symbol_reconciles_to_strategy_ledger():
 
     inputs = {"BTCUSDT": {"base": engine.BASE_DATA_FILES[timeframe]}}
     assert reconcile(result, inputs)["checked_marks"] == len(result["marked_equity"])
+    for field in ("net_pnl", "marked_max_drawdown_pct", "realized_max_drawdown_pct"):
+        with pytest.raises(ValueError, match=field):
+            reconcile({**result, field: result[field] + 1}, inputs)
     result["marked_equity"][0]["equity"] -= 1
     with pytest.raises(ValueError, match="reconciliation failed"):
         reconcile(result, inputs)

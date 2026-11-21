@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 from functools import lru_cache
+from itertools import islice
 from pathlib import Path
 from threading import Lock
 from typing import Literal
@@ -133,7 +134,11 @@ def status(job: UUID):
             (directory / "failed").touch()
     if (directory / "failed").exists() or status in ("complete_with_errors", "worker_pool_failed"):
         status = "failed"
-        error = (directory / "run.log").read_text(encoding="utf8", errors="replace")[-1000:]
+        with (directory / "run.log").open("rb") as log:
+            # Read enough UTF-8 bytes for the displayed tail without loading the entire log.
+            size = log.seek(0, 2)
+            log.seek(max(size - 4000, 0))
+            error = log.read().decode("utf8", errors="replace")[-1000:]
     if status == "paused_cap_reached":
         status = "completed"
     if status == "running" and manifest and metadata.get("status") == "running":
@@ -150,7 +155,7 @@ def status(job: UUID):
         top = manifest.with_name("top_configs.csv")
         if top.exists():
             with top.open(encoding="utf8", newline="") as handle:
-                rows = list(csv.DictReader(handle))[:10]
+                rows = list(islice(csv.DictReader(handle), 10))
     config = json.loads(request.read_text())
     return {
         "id": job,

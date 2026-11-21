@@ -96,12 +96,25 @@ def reconcile(report, datasets):
         or not (open_pnl.keys() | settled.keys()) <= marks.keys()
     ):
         raise ValueError("Missing or duplicated portfolio marks")
-    balance = start
+    balance = marked_peak = realized_peak = start
+    marked_drawdown = realized_drawdown = Decimal(0)
     largest_mark_error = Decimal(0)
     for stamp in sorted(marks):
         balance += settled[stamp]
-        largest_mark_error = max(largest_mark_error, abs(balance + open_pnl[stamp] - marks[stamp]))
+        marked = balance + open_pnl[stamp]
+        largest_mark_error = max(largest_mark_error, abs(marked - marks[stamp]))
+        marked_peak = max(marked_peak, marked)
+        realized_peak = max(realized_peak, balance)
+        marked_drawdown = min(marked_drawdown, 100 * (marked / marked_peak - 1))
+        realized_drawdown = min(realized_drawdown, 100 * (balance / realized_peak - 1))
     ending_error = abs(balance - Decimal(str(report["ending_capital"])))
+    for field, expected_value in (
+        ("net_pnl", balance - start),
+        ("marked_max_drawdown_pct", marked_drawdown),
+        ("realized_max_drawdown_pct", realized_drawdown),
+    ):
+        if abs(expected_value - Decimal(str(report[field]))) > Decimal("1e-8"):
+            raise ValueError(f"Portfolio reconciliation failed for {field}")
     if max(largest_trade_error, largest_mark_error, ending_error) > Decimal("1e-8"):
         raise ValueError(
             f"Ledger reconciliation failed: {largest_trade_error}, {largest_mark_error}, {ending_error}"

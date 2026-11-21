@@ -49,9 +49,9 @@ if [ ! -f frontend/package.json ]; then
   exit 1
 fi
 
-if [ ! -d frontend/node_modules ]; then
+if [ ! -x frontend/node_modules/.bin/vite ] || ! (cd frontend && node -e "require('rollup'); require('esbuild').transformSync('')" >/dev/null 2>&1); then
   echo "[Tradely] Installing frontend dependencies (first run)..."
-  (cd frontend && npm install --no-fund --no-audit)
+  (cd frontend && npm ci --no-fund --no-audit)
 fi
 
 # The Python backend talks to the unofficial TradingView Node.js library
@@ -73,14 +73,16 @@ cleanup() {
     kill "$BRIDGE_PID" 2>/dev/null || true
   fi
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 BRIDGE_PID=""
 if curl -fsS http://127.0.0.1:8010/health >/dev/null 2>&1; then
   echo "[Tradely] TradingView bridge is already running on http://127.0.0.1:8010 - reusing it."
 else
   echo "[Tradely] Starting the TradingView bridge on http://127.0.0.1:8010 ..."
-  (cd tradingview-bridge && npm start) &
+  node tradingview-bridge/server.mjs &
   BRIDGE_PID=$!
   for _ in $(seq 1 40); do
     if curl -fsS http://127.0.0.1:8010/health >/dev/null 2>&1; then
