@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -20,7 +21,7 @@ from app.core.models import (
     WatchlistItem,
 )
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 _CATALOGUE_COLUMNS: dict[str, str] = {
     "display_name": "TEXT NOT NULL DEFAULT ''",
     "base_currency": "TEXT NOT NULL DEFAULT ''",
@@ -214,6 +215,199 @@ class Database:
         backups = sorted(backup_dir.glob(f"{self.file_path.stem}-*.sqlite3"))
         return backups[-1] if backups else None
 
+    def save_news_refresh(
+        self,
+        *,
+        instrument_id: str,
+        symbol: str,
+        articles: list[dict[str, Any]],
+        attempted_at: str,
+        expires_at: str,
+    ) -> None:
+        """Upsert normalized Yahoo articles and associate them with one canonical instrument."""
+        with self.connect() as connection:
+            for article in articles:
+                yahoo_id = article.get("yahoo_id")
+                canonical_url = article.get("canonical_url")
+                existing = None
+                if yahoo_id:
+                    existing = connection.execute(
+                        "SELECT article_id FROM news_articles WHERE yahoo_id=? LIMIT 1", (yahoo_id,)
+                    ).fetchone()
+                if existing is None and canonical_url:
+                    existing = connection.execute(
+                        "SELECT article_id FROM news_articles WHERE canonical_url=? LIMIT 1", (canonical_url,)
+                    ).fetchone()
+                article_id = str(existing["article_id"]) if existing else str(article.get("article_id") or "")
+                if not article_id:
+                    seed = f"yahoo:{yahoo_id}" if yahoo_id else f"url:{canonical_url}" if canonical_url else f"fingerprint:{article.get('fingerprint', '')}"
+                    article_id = hashlib.sha256(seed.encode("utf-8")).hexdigest()
+                now = attempted_at
+                if existing:
+                    connection.execute(
+                        """UPDATE news_articles SET
+                           yahoo_id=COALESCE(yahoo_id,?), title=?,
+                           summary=COALESCE(?,summary), publisher=COALESCE(?,publisher),
+                           published_at=COALESCE(?,published_at), article_url=?,
+                           canonical_url=COALESCE(?,canonical_url),
+                           thumbnail_url=COALESCE(?,thumbnail_url), related_symbols_json=?,
+                           primary_symbol=COALESCE(primary_symbol,?), source=?, last_updated_at=?
+                           WHERE article_id=?""",
+                        (yahoo_id, article["title"], article.get("summary"), article.get("publisher"),
+                         article.get("published_at"), article["article_url"], canonical_url,
+                         article.get("thumbnail_url"), json.dumps(article.get("related_symbols") or []),
+                         symbol, article.get("source") or "Yahoo Finance", now, article_id),
+                    )
+                else:
+                    connection.execute(
+                        """INSERT INTO news_articles
+                           (article_id,yahoo_id,title,summary,publisher,published_at,article_url,
+                            canonical_url,thumbnail_url,related_symbols_json,primary_symbol,source,
+                            first_seen_at,last_updated_at)
+                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (article_id, yahoo_id, article["title"], article.get("summary"),
+                         article.get("publisher"), article.get("published_at"), article["article_url"],
+                         canonical_url, article.get("thumbnail_url"),
+                         json.dumps(article.get("related_symbols") or []), symbol,
+                         article.get("source") or "Yahoo Finance", now, now),
+                    )
+                connection.execute(
+                    """INSERT INTO news_article_symbols
+                       (article_id,instrument_id,symbol,associated_at) VALUES(?,?,?,?)
+                       ON CONFLICT(article_id,instrument_id) DO UPDATE SET
+                         symbol=excluded.symbol,associated_at=excluded.associated_at""",
+                    (article_id, instrument_id, symbol, now),
+                )
+            connection.execute(
+                """INSERT INTO news_symbol_cache
+                   (instrument_id,symbol,last_attempt_at,last_success_at,expires_at,status,
+                    provider_status,error_code,failure_count)
+                   VALUES(?,?,?,? ,?,'ok','available',NULL,0)
+                   ON CONFLICT(instrument_id) DO UPDATE SET
+                     symbol=excluded.symbol,last_attempt_at=excluded.last_attempt_at,
+                     last_success_at=excluded.last_success_at,expires_at=excluded.expires_at,
+                     status='ok',provider_status='available',error_code=NULL,failure_count=0""",
+                (instrument_id, symbol, attempted_at, attempted_at, expires_at),
+            )
+            # Retain at most 500 recent article links for each canonical instrument.
+            connection.execute(
+                """DELETE FROM news_article_symbols WHERE instrument_id=? AND article_id IN (
+                   SELECT article_id FROM news_article_symbols WHERE instrument_id=?
+                   ORDER BY associated_at DESC LIMIT -1 OFFSET 500)""",
+                (instrument_id, instrument_id),
+            )
+            connection.execute(
+                """DELETE FROM news_articles WHERE article_id NOT IN
+                   (SELECT article_id FROM news_article_symbols)"""
+            )
+
+    def begin_news_refresh(self, *, instrument_id: str, symbol: str, attempted_at: str) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO news_symbol_cache
+                   (instrument_id,symbol,last_attempt_at,last_success_at,expires_at,status,
+                    provider_status,error_code,failure_count)
+                   VALUES(?,?,?,NULL,NULL,'refreshing','pending',NULL,0)
+                   ON CONFLICT(instrument_id) DO UPDATE SET
+                     symbol=excluded.symbol,last_attempt_at=excluded.last_attempt_at,
+                     status='refreshing',provider_status='pending',error_code=NULL""",
+                (instrument_id, symbol, attempted_at),
+            )
+
+    def mark_news_refresh_failure(
+        self, *, instrument_id: str, symbol: str, attempted_at: str,
+        provider_status: str, error_code: str,
+    ) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO news_symbol_cache
+                   (instrument_id,symbol,last_attempt_at,last_success_at,expires_at,status,
+                    provider_status,error_code,failure_count)
+                   VALUES(?,?,?,NULL,NULL,'error',?,?,1)
+                   ON CONFLICT(instrument_id) DO UPDATE SET
+                     symbol=excluded.symbol,last_attempt_at=excluded.last_attempt_at,
+                     status='error',provider_status=excluded.provider_status,
+                     error_code=excluded.error_code,failure_count=news_symbol_cache.failure_count+1""",
+                (instrument_id, symbol, attempted_at, provider_status, error_code[:80]),
+            )
+
+    def news_cache_state(self, instrument_id: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM news_symbol_cache WHERE instrument_id=?", (instrument_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def list_news(
+        self, *, instrument_id: str | None = None, symbol: str | None = None,
+        query: str | None = None, date_from: str | None = None, date_to: str | None = None,
+        limit: int = 50, offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        sql = "SELECT DISTINCT a.* FROM news_articles a JOIN news_article_symbols s USING(article_id) WHERE 1=1"
+        values: list[Any] = []
+        if instrument_id:
+            sql += " AND s.instrument_id=?"
+            values.append(instrument_id)
+        elif symbol:
+            sql += " AND UPPER(s.symbol)=UPPER(?)"
+            values.append(symbol)
+        if query:
+            sql += " AND (a.title LIKE ? OR COALESCE(a.summary,'') LIKE ? OR COALESCE(a.publisher,'') LIKE ?)"
+            pattern = f"%{query}%"
+            values.extend((pattern, pattern, pattern))
+        if date_from:
+            sql += " AND a.published_at>=?"
+            values.append(date_from)
+        if date_to:
+            sql += " AND a.published_at<=?"
+            values.append(date_to)
+        sql += " ORDER BY a.published_at IS NULL, a.published_at DESC, a.first_seen_at DESC LIMIT ? OFFSET ?"
+        values.extend((limit, offset))
+        with self.connect() as connection:
+            rows = connection.execute(sql, values).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            try:
+                item["related_symbols"] = json.loads(item.pop("related_symbols_json") or "[]")
+            except (TypeError, ValueError):
+                item["related_symbols"] = []
+            result.append(item)
+        return result
+
+    def count_news(
+        self, *, instrument_id: str | None = None, symbol: str | None = None,
+        query: str | None = None, date_from: str | None = None, date_to: str | None = None,
+    ) -> int:
+        sql = "SELECT COUNT(DISTINCT a.article_id) FROM news_articles a JOIN news_article_symbols s USING(article_id) WHERE 1=1"
+        values: list[Any] = []
+        if instrument_id:
+            sql += " AND s.instrument_id=?"
+            values.append(instrument_id)
+        elif symbol:
+            sql += " AND UPPER(s.symbol)=UPPER(?)"
+            values.append(symbol)
+        if query:
+            sql += " AND (a.title LIKE ? OR COALESCE(a.summary,'') LIKE ? OR COALESCE(a.publisher,'') LIKE ?)"
+            pattern = f"%{query}%"
+            values.extend((pattern, pattern, pattern))
+        if date_from:
+            sql += " AND a.published_at>=?"
+            values.append(date_from)
+        if date_to:
+            sql += " AND a.published_at<=?"
+            values.append(date_to)
+        with self.connect() as connection:
+            row = connection.execute(sql, values).fetchone()
+        return int(row[0] if row else 0)
+
+    def list_news_cache_states(self) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM news_symbol_cache ORDER BY last_attempt_at DESC"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
 
     # ------------------------------------------------------------------
     # Migrations
@@ -273,6 +467,29 @@ class Database:
             CREATE UNIQUE INDEX IF NOT EXISTS idx_analytics_jobs_active_identity
                 ON analytics_jobs(instrument_id, interval, job_type)
                 WHERE status IN ('QUEUED','RUNNING');
+            CREATE TABLE IF NOT EXISTS news_articles (
+                article_id TEXT PRIMARY KEY, yahoo_id TEXT UNIQUE, title TEXT NOT NULL,
+                summary TEXT, publisher TEXT, published_at TEXT, article_url TEXT NOT NULL,
+                canonical_url TEXT UNIQUE, thumbnail_url TEXT, related_symbols_json TEXT NOT NULL DEFAULT '[]',
+                primary_symbol TEXT, source TEXT NOT NULL, first_seen_at TEXT NOT NULL,
+                last_updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_news_published ON news_articles(published_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_news_article_yahoo ON news_articles(yahoo_id);
+            CREATE TABLE IF NOT EXISTS news_article_symbols (
+                article_id TEXT NOT NULL REFERENCES news_articles(article_id) ON DELETE CASCADE,
+                instrument_id TEXT NOT NULL, symbol TEXT NOT NULL, associated_at TEXT NOT NULL,
+                PRIMARY KEY(article_id,instrument_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_news_symbol_date
+                ON news_article_symbols(instrument_id,associated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_news_symbol_text ON news_article_symbols(symbol);
+            CREATE TABLE IF NOT EXISTS news_symbol_cache (
+                instrument_id TEXT PRIMARY KEY, symbol TEXT NOT NULL, last_attempt_at TEXT,
+                last_success_at TEXT, expires_at TEXT, status TEXT NOT NULL,
+                provider_status TEXT NOT NULL, error_code TEXT, failure_count INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_news_cache_expiry ON news_symbol_cache(expires_at);
             """
         )
         for column, definition in _CATALOGUE_COLUMNS.items():

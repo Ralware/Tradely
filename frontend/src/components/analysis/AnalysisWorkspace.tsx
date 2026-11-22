@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSelectedInstrument } from '../../contexts/SelectedInstrumentContext';
 import { apiRequest } from '../../services/api';
 import { snapshotStore } from '../../services/snapshotStore';
+import { isCompleteSnapshot, loadAnalyticsSnapshot } from '../../services/analyticsSnapshotLoader';
 import { portfolioService } from '../../services/portfolioService';
 import type { DirectionMode, Instrument } from '../../types/api';
 import { changeDigits, cn, formatDate, formatNumber, formatPercent, formatSignedFixed, toneForNumber } from '../../utils/format';
@@ -26,6 +27,7 @@ import { IndicatorTable } from '../tables/IndicatorTable';
 import { TechnicalGauge } from './TechnicalGauge';
 import { TechnicalTable } from './TechnicalTable';
 import { TimeframeSelector } from './TimeframeSelector';
+import { StockNewsPreview } from './StockNewsPreview';
 
 function ToggleChip({
   active,
@@ -91,6 +93,12 @@ export function AnalysisWorkspace({
   const [tab, setTab] = useState('risk');
   const [, forceSnapshotRender] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [loadState, setLoadState] = useState<{
+    key: string;
+    status: 'loading' | 'ready' | 'error';
+    error?: string;
+  } | null>(null);
   const [watchState, setWatchState] = useState<{
     loading: boolean;
     message: string | null;
@@ -104,22 +112,64 @@ export function AnalysisWorkspace({
   }, [instrumentId, interval]);
 
   const snapshot = instrumentId ? snapshotStore.getSnapshot(instrumentId, interval) : undefined;
-  const data = snapshot?.analysis ? {
-    ...snapshot.analysis,
-    strategy: snapshot.strategy_variants?.[`${directionMode}:NONE`]
-      ?? snapshot.strategy_variants?.[`${directionMode}:LONG`]
-      ?? snapshot.strategy_variants?.[`${directionMode}:SHORT`],
+  const usableSnapshot = isCompleteSnapshot(snapshot) ? snapshot : undefined;
+  const snapshotKey = instrumentId ? `${instrumentId}\u0000${interval}` : '';
+  const snapshotLoading = loadState?.key === snapshotKey && loadState.status === 'loading';
+  const snapshotError = loadState?.key === snapshotKey && loadState.status === 'error'
+    ? loadState.error ?? 'Analytics could not be loaded.'
+    : null;
+  const data = usableSnapshot?.analysis ? {
+    ...usableSnapshot.analysis,
+    strategy: usableSnapshot.strategy_variants?.[`${directionMode}:NONE`]
+      ?? usableSnapshot.strategy_variants?.[`${directionMode}:LONG`]
+      ?? usableSnapshot.strategy_variants?.[`${directionMode}:SHORT`],
   } : null;
-  const technicals = snapshot?.technical_ratings ?? null;
-  const indicatorSeries = snapshot?.indicator_series ?? null;
+  const technicals = usableSnapshot?.technical_ratings ?? null;
+  const indicatorSeries = usableSnapshot?.indicator_series ?? null;
   const currency = selected.currency || (market === 'india' ? 'INR' : market === 'crypto' ? 'USDT' : 'USD');
   const quote = selected.quote;
   const displayedInterval = data?.interval ?? interval;
   const intraday = isIntradayInterval(displayedInterval);
   const manifest = instrumentId ? snapshotStore.getManifestItem(instrumentId, interval) : undefined;
   const updating = refreshing;
-  const missing = !snapshot;
+  const missing = !usableSnapshot;
   const error = manifest?.last_error ?? null;
+
+  useEffect(() => {
+    if (!instrumentId) return undefined;
+    const identity = instrumentId;
+    const timeframe = interval;
+    const key = `${identity}\u0000${timeframe}`;
+    const controller = new AbortController();
+    let active = true;
+    async function load(): Promise<void> {
+      setLoadState({ key, status: 'loading' });
+      try {
+        const payload = await loadAnalyticsSnapshot(identity, timeframe, {
+          signal: controller.signal,
+          onCached: (cached) => {
+            if (active) snapshotStore.setSnapshot(identity, timeframe, cached);
+          },
+        });
+        if (!active) return;
+        snapshotStore.setSnapshot(identity, timeframe, payload);
+        setLoadState({ key, status: 'ready' });
+      } catch (caught) {
+        if (!active || controller.signal.aborted) return;
+        setLoadState({
+          key,
+          status: 'error',
+          error: caught instanceof Error ? caught.message : 'Analytics could not be loaded.',
+        });
+      }
+    }
+
+    void load();
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [instrumentId, interval, loadAttempt]);
 
   const last = quote?.last ?? data?.latest.close ?? null;
   const previousClose =
@@ -209,6 +259,10 @@ export function AnalysisWorkspace({
         </div>
       </div>
 
+      {snapshotError && usableSnapshot ? (
+        <Notice tone="warning">Refresh failed; showing the last known-good local analytics. {snapshotError}</Notice>
+      ) : null}
+
       {!instrumentId ? (
         <EmptyState
           title="No Instrument Selected"
@@ -217,9 +271,10 @@ export function AnalysisWorkspace({
         />
       ) : missing ? (
         <EmptyState
-          title={manifest?.status === 'FAILED' ? 'Preparation Failed' : 'Analytics Preparing'}
-          description={error ?? `The ${intervalLabel(interval)} snapshot is not available locally yet. Preparation continues in the background; opening Analytics will not trigger market-data requests.`}
+          title={snapshotLoading ? 'Loading Analytics' : snapshotError || manifest?.status === 'FAILED' ? 'Analytics Unavailable' : 'Loading Analytics'}
+          description={snapshotError ?? error ?? `Checking local ${intervalLabel(interval)} analytics; retrieving and calculating this timeframe only if no complete local snapshot is available.`}
           icon="chart"
+          action={snapshotError ? <Button size="sm" icon="refresh" onClick={() => setLoadAttempt((value) => value + 1)}>Retry</Button> : undefined}
         />
       ) : data ? (
         <>
@@ -460,6 +515,7 @@ export function AnalysisWorkspace({
 
         </>
       ) : null}
+      {instrumentId ? <StockNewsPreview instrumentId={instrumentId} symbol={symbol} /> : null}
     </div>
   );
 }

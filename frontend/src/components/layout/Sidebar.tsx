@@ -15,6 +15,7 @@ const navItems: NavItem[] = [
   { to: '/analysis', label: 'Analysis', icon: 'chart' },
   { to: '/portfolio', label: 'Portfolio', icon: 'portfolio' },
   { to: '/backtesting', label: 'Backtesting', icon: 'flask' },
+  { to: '/news', label: 'News', icon: 'news' },
 ];
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {

@@ -1,0 +1,124 @@
+from datetime import UTC, datetime
+from pathlib import Path
+
+import httpx
+
+from app.core.database import Database
+from app.providers.yahoo_news import (
+    YahooFinanceNewsProvider,
+    canonical_article_url,
+    normalize_search_article,
+    safe_http_url,
+)
+
+
+def test_search_article_normalizes_fields_and_keeps_utc_and_safe_links():
+    raw = {
+        "uuid": "article-1",
+        "title": "<b>Apple</b> launches a new service",
+        "publisher": "Example Publisher",
+        "link": "https://publisher.example/story?utm_source=yahoo&ref=feed#section",
+        "providerPublishTime": 1_700_000_000,
+        "summary": "<p>Details&nbsp;here</p>",
+        "thumbnail": {"resolutions": [{"url": "javascript:alert(1)"}]},
+        "relatedTickers": ["AAPL", "MSFT", "AAPL"],
+    }
+    article = normalize_search_article(raw)
+    assert article is not None
+    assert article["title"] == "Apple launches a new service"
+    assert article["summary"] == "Details here"
+    assert article["related_symbols"] == ["AAPL", "MSFT"]
+    assert article["published_at"].endswith("+00:00")
+    assert article["thumbnail_url"] is None
+    assert article["canonical_url"] == "https://publisher.example/story?ref=feed"
+
+
+def test_url_safety_and_canonical_tracking_cleanup():
+    assert safe_http_url("javascript:alert(1)") is None
+    assert safe_http_url("https://user:secret@example.com/news") is None
+    assert canonical_article_url("https://EXAMPLE.com/story/?utm_campaign=x&keep=1#part") == "https://example.com/story?keep=1"
+
+
+def test_provider_filters_exact_related_ticker_and_deduplicates():
+    payload = {
+        "news": [
+            {
+                "uuid": "a1", "title": "Apple reports results", "publisher": "Wire",
+                "link": "https://example.com/a?utm_source=yahoo", "providerPublishTime": 1_700_000_000,
+                "relatedTickers": ["AAPL"],
+            },
+            {
+                "uuid": "b1", "title": "Apple story not this issuer", "publisher": "Wire",
+                "link": "https://example.com/b", "providerPublishTime": 1_700_000_010,
+                "relatedTickers": ["APLE"],
+            },
+            {
+                "uuid": "a2", "title": "Duplicate Apple results", "publisher": "Wire",
+                "link": "https://example.com/a", "providerPublishTime": 1_700_000_001,
+                "relatedTickers": ["AAPL"],
+            },
+        ]
+    }
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload, request=request)
+
+    client = httpx.Client(transport=httpx.MockTransport(respond))
+    provider = YahooFinanceNewsProvider(client=client, max_retries=0)
+    try:
+        articles = provider.get_symbol_articles("AAPL", "Apple Inc.")
+    finally:
+        provider.close()
+    assert len(articles) == 1
+    assert articles[0]["title"] == "Apple reports results"
+
+
+def test_provider_falls_back_to_conservative_rss_and_leaves_missing_fields_null():
+    requests: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if "finance/search" in request.url.path:
+            return httpx.Response(200, json={"news": []}, request=request)
+        return httpx.Response(
+            200,
+            text="""<?xml version=\"1.0\"?><rss version=\"2.0\"><channel>
+            <item><guid>rss-1</guid><title>Apple announces results</title><link>https://publisher.example/apple</link>
+            <description>Apple said revenue rose.</description><pubDate>Tue, 14 Nov 2023 22:13:20 GMT</pubDate></item>
+            <item><guid>rss-2</guid><title>Markets rally broadly</title><link>https://publisher.example/market</link>
+            <description>Investors react to rates.</description><pubDate>Tue, 14 Nov 2023 22:13:20 GMT</pubDate></item>
+            </channel></rss>""",
+            request=request,
+        )
+
+    provider = YahooFinanceNewsProvider(client=httpx.Client(transport=httpx.MockTransport(respond)), max_retries=0)
+    try:
+        articles = provider.get_symbol_articles("AAPL", "Apple Inc.")
+    finally:
+        provider.close()
+    assert len(requests) == 2
+    assert len(articles) == 1
+    assert articles[0]["publisher"] is None
+    assert articles[0]["thumbnail_url"] is None
+    assert articles[0]["published_at"] == datetime(2023, 11, 14, 22, 13, 20, tzinfo=UTC).isoformat()
+
+
+def test_news_cache_persistence_date_and_text_filters(tmp_path: Path):
+    db = Database(tmp_path / "news-test.sqlite3")
+    article = {
+        "yahoo_id": "persist-1", "title": "Apple quarterly earnings", "summary": "Revenue grew",
+        "publisher": "Newswire", "published_at": "2024-01-02T12:00:00+00:00",
+        "article_url": "https://publisher.example/story", "canonical_url": "https://publisher.example/story",
+        "thumbnail_url": None, "related_symbols": ["AAPL"], "source": "Yahoo Finance Search",
+    }
+    db.save_news_refresh(
+        instrument_id="global:NASDAQ:AAPL", symbol="AAPL", articles=[article],
+        attempted_at="2024-01-02T13:00:00+00:00", expires_at="2024-01-02T13:05:00+00:00",
+    )
+    rows = db.list_news(instrument_id="global:NASDAQ:AAPL", query="earnings", date_from="2024-01-02T00:00:00+00:00")
+    assert len(rows) == 1
+    assert rows[0]["related_symbols"] == ["AAPL"]
+    assert rows[0]["article_id"]
+    assert db.count_news(instrument_id="global:NASDAQ:AAPL", query="earnings") == 1
+    assert db.count_news(instrument_id="global:NASDAQ:AAPL", query="Apple", date_to="2024-01-01T00:00:00+00:00") == 0
+    assert db.news_cache_state("global:NASDAQ:AAPL")["status"] == "ok"

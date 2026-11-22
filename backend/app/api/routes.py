@@ -181,6 +181,22 @@ def precomputed_index(request: Request) -> dict[str, Any]:
     return request.app.state.analytics_precompute.manifest()
 
 
+@router.get("/analytics/on-demand/{instrument_id}/{interval}")
+def on_demand_analytics(request: Request, instrument_id: str, interval: str) -> dict[str, Any]:
+    """Return valid local analytics or compute and persist one selected timeframe on a miss."""
+    instrument = request.app.state.instrument_resolver.get(instrument_id)
+    if instrument is None:
+        raise HTTPException(status_code=404, detail=f"Unknown instrument {instrument_id}")
+    try:
+        return request.app.state.analytics_precompute.get_or_compute_snapshot(
+            str(instrument["instrument_id"]), interval
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 @router.get("/analytics/precomputed/{instrument_id}/{interval}")
 def precomputed_snapshot(request: Request, instrument_id: str, interval: str) -> dict[str, Any]:
     if interval == "bundle":
@@ -748,20 +764,20 @@ def instrument_news(
         symbol = _clean_symbol(symbol)
     else:
         raise HTTPException(status_code=404, detail="No Supported Instrument Found")
-    # News is intentionally not sourced. Tradely now reads market data from
-    # TradingView only, so the route stays for client compatibility and returns
-    # an explicit empty result rather than fabricating headlines.
+    if instrument is None:
+        try:
+            instrument = request.app.state.news_service.resolve_instrument(symbol)
+        except Exception as exc:
+            raise HTTPException(status_code=404, detail="No Supported Instrument Found") from exc
+    feed = request.app.state.news_service.symbol_feed(instrument, page=1, page_size=limit)
     return {
-        "symbol": symbol, "market": market, "instrument": instrument,
-        "items": [],
-        "count": 0,
-        "providers": {},
+        "symbol": instrument["symbol"], "market": instrument["market"], "instrument": instrument,
+        "items": feed["items"], "count": len(feed["items"]),
+        "providers": {"Yahoo Finance": feed["provider_status"]},
         "requested_limit": limit,
-        "note": (
-            "News discovery is not configured. Tradely uses TradingView for market data "
-            "and does not bundle a news provider, so this endpoint returns an explicit "
-            "empty result. An empty list is not proof that no news exists."
-        ),
+        "stale": feed["stale"],
+        "last_updated": feed["last_successful_refresh"],
+        "note": "News is sourced only from Yahoo Finance. An empty feed may reflect Yahoo Finance coverage or an unavailable refresh.",
     }
 
 
@@ -921,20 +937,46 @@ def get_watchlist(request: Request) -> dict[str, Any]:
 @router.post("/watchlist")
 def add_watchlist(request: Request, item: WatchlistItem) -> dict[str, Any]:
     try:
-        return request.app.state.db.add_watchlist(item)
+        saved = request.app.state.db.add_watchlist(item)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"watchlist_saved": False, "prefetch_registration": "not_attempted", "error": str(exc)},
+        ) from exc
+    try:
+        registration = request.app.state.analytics_precompute.register_watchlist_instrument(
+            str(saved["instrument_id"])
+        )
+    except Exception as exc:
+        # Membership remains durable; retrying this idempotent POST or startup
+        # reconciliation will register its missing work.
+        raise HTTPException(
+            status_code=503,
+            detail={"watchlist_saved": True, "prefetch_registration": "failed", "error": str(exc)},
+        ) from exc
+    return {**saved, "prefetch_registration": registration}
 
 
 @router.delete("/watchlist/instruments/{instrument_id}")
 def delete_watchlist_instrument(request: Request, instrument_id: str) -> dict[str, Any]:
     removed = request.app.state.db.remove_watchlist_instrument(instrument_id)
+    if removed:
+        request.app.state.analytics_precompute.cancel_watchlist_jobs(instrument_id)
     return {"removed": removed}
 
 
 @router.delete("/watchlist/{market}/{symbol}")
 def delete_watchlist(request: Request, market: str, symbol: str, exchange: str | None = None) -> dict[str, Any]:
-    removed = request.app.state.db.remove_watchlist(_clean_symbol(symbol), market, exchange)
+    target_symbol = _clean_symbol(symbol)
+    target_exchange = (exchange or "").upper()
+    identity = next((item.get("instrument_id") for item in request.app.state.db.get_watchlist()
+                     if item.get("symbol") == target_symbol and item.get("market") == market
+                     and (item.get("exchange") or "").upper() == target_exchange), None)
+    removed = request.app.state.db.remove_watchlist(target_symbol, market, exchange)
+    if removed and identity:
+        request.app.state.analytics_precompute.cancel_watchlist_jobs(str(identity))
     return {"removed": removed}
 
 

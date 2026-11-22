@@ -27,6 +27,89 @@ def test_precomputed_get_is_persistence_only(monkeypatch):
     assert response.json() == expected
 
 
+def test_on_demand_analytics_uses_canonical_identity_and_returns_persisted_bundle(monkeypatch):
+    identity = "global:NASDAQ:MSFT"
+    expected = {"interval": "1d", "fingerprint": "stable", "provenance": {"instrument_id": identity}}
+    monkeypatch.setattr(app.state.instrument_resolver, "get", lambda instrument_id: {
+        "instrument_id": identity, "symbol": "MSFT", "market": "global",
+    } if instrument_id == identity else None)
+    calls = []
+    monkeypatch.setattr(app.state.analytics_precompute, "get_or_compute_snapshot",
+                        lambda instrument_id, interval: calls.append((instrument_id, interval)) or expected)
+
+    response = client.get(f"/api/analytics/on-demand/{identity}/1d")
+
+    assert response.status_code == 200
+    assert response.json() == expected
+    assert calls == [(identity, "1d")]
+
+
+def test_non_watchlisted_search_miss_fetches_persists_and_reuses_complete_analytics(monkeypatch):
+    import numpy as np
+    import pandas as pd
+
+    identity = "global:NASDAQ:MSFT"
+    instrument = app.state.db.resolve_instrument("MSFT", "global", exchange="NASDAQ")
+    frame_index = pd.date_range(end=pd.Timestamp.now(tz="UTC").floor("D"), periods=260, freq="D")
+    close = pd.Series(100 + np.arange(260) * 0.2 + np.sin(np.arange(260) / 5), index=frame_index)
+    frame = pd.DataFrame({"open": close - .1, "high": close + 1, "low": close - 1,
+                          "close": close, "volume": 1000 + np.arange(260)}, index=frame_index)
+    frame.attrs.update({"is_adjusted": True, "last_bar_confirmed": True})
+    calls = []
+    monkeypatch.setattr(app.state.instrument_resolver, "get", lambda _id: app.state.db.instrument_for_id(identity))
+    monkeypatch.setattr(app.state.market_service, "candles",
+                        lambda *args, **kwargs: calls.append(kwargs) or (frame.copy(), "mock-live"))
+
+    first = client.get(f"/api/analytics/on-demand/{instrument.instrument_id}/1d")
+    second = client.get(f"/api/analytics/on-demand/{instrument.instrument_id}/1d")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert len(first.json()["analysis"]["candles"]) == 260
+    assert len(first.json()["strategy_variants"]) == 9
+    assert first.json()["fingerprint"] == second.json()["fingerprint"]
+    assert len(calls) == 1
+    assert all(item.get("instrument_id") != identity for item in app.state.db.get_watchlist())
+    assert app.state.analytics_precompute.get_snapshot(identity, "1d") is not None
+
+
+def test_watchlist_add_confirms_prefetch_registration_after_persisting(monkeypatch):
+    identity = "global:NASDAQ:MSFT"
+    registration = {"instrument_id": identity, "registered": True, "reused": 1, "queued": 2}
+    monkeypatch.setattr(app.state.analytics_precompute, "register_watchlist_instrument",
+                        lambda instrument_id: registration)
+    response = client.post("/api/watchlist", json={"instrument_id": identity})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["instrument_id"] == identity
+    assert body["prefetch_registration"] == registration
+    assert any(item["instrument_id"] == identity for item in app.state.db.get_watchlist())
+    removed = client.delete(f"/api/watchlist/instruments/{identity}")
+    assert removed.status_code == 200
+
+
+def test_watchlist_membership_survives_prefetch_registration_failure_and_can_be_retried(monkeypatch):
+    identity = "global:NASDAQ:AAPL"
+    monkeypatch.setattr(
+        app.state.analytics_precompute,
+        "register_watchlist_instrument",
+        lambda instrument_id: (_ for _ in ()).throw(RuntimeError("temporary queue failure")),
+    )
+    failed = client.post("/api/watchlist", json={"instrument_id": identity})
+    assert failed.status_code == 503
+    assert failed.json()["detail"]["watchlist_saved"] is True
+    assert any(item["instrument_id"] == identity for item in app.state.db.get_watchlist())
+
+    monkeypatch.setattr(app.state.analytics_precompute, "register_watchlist_instrument", lambda _id: {
+        "instrument_id": identity, "registered": True, "reused": 0, "queued": 3,
+    })
+    retried = client.post("/api/watchlist", json={"instrument_id": identity})
+    assert retried.status_code == 200
+    assert retried.json()["prefetch_registration"]["registered"] is True
+    assert client.delete(f"/api/watchlist/instruments/{identity}").json()["removed"] is True
+
+
 def test_root_serves_react_production_build():
     response = client.get("/")
     assert response.status_code == 200
@@ -102,7 +185,8 @@ def test_provider_status_reports_only_tradingview_and_bridge():
     assert "checked_at" in body
 
 
-def test_news_returns_an_explicit_empty_result():
+def test_legacy_news_route_returns_explicit_yahoo_only_empty_result(monkeypatch):
+    monkeypatch.setattr(app.state.news_service, "request_refresh", lambda *args, **kwargs: False)
     response = client.get("/api/instruments/AAPL/news?market=global")
     assert response.status_code == 200
     body = response.json()
@@ -110,11 +194,12 @@ def test_news_returns_an_explicit_empty_result():
     assert body["market"] == "global"
     assert body["items"] == []
     assert body["count"] == 0
-    assert body["providers"] == {}
-    assert "not configured" in body["note"]
+    assert body["providers"] == {"Yahoo Finance": "unknown"}
+    assert "only from Yahoo Finance" in body["note"]
 
 
-def test_news_accepts_an_instrument_id():
+def test_news_accepts_an_instrument_id(monkeypatch):
+    monkeypatch.setattr(app.state.news_service, "request_refresh", lambda *args, **kwargs: False)
     response = client.get(
         "/api/instruments/RELIANCE/news",
         params={"instrument_id": "india:NSE:RELIANCE"},
@@ -123,6 +208,37 @@ def test_news_accepts_an_instrument_id():
     body = response.json()
     assert body["instrument"]["instrument_id"] == "india:NSE:RELIANCE"
     assert body["count"] == 0
+
+
+def test_news_api_feed_filters_and_status_use_canonical_instrument(monkeypatch):
+    monkeypatch.setattr(app.state.news_service, "request_refresh", lambda *args, **kwargs: False)
+    feed = client.get("/api/news/AAPL", params={
+        "instrument_id": "global:NASDAQ:AAPL", "q": "earnings",
+        "date_from": "2024-01-01", "date_to": "2024-01-31", "page_size": 5,
+    })
+    assert feed.status_code == 200
+    assert feed.json()["symbol"] == "AAPL"
+    assert feed.json()["items"] == []
+    assert feed.json()["page_size"] == 5
+    status = client.get("/api/news/status", params={"instrument_id": "global:NASDAQ:AAPL"})
+    assert status.status_code == 200
+    assert status.json()["provider"] == "Yahoo Finance"
+
+
+def test_news_instrument_search_and_manual_refresh_are_yahoo_service_backed(monkeypatch):
+    monkeypatch.setattr(app.state.news_service, "search_instruments", lambda query: {
+        "query": query,
+        "items": [{"instrument_id": "global:NASDAQ:AAPL", "symbol": "AAPL", "name": "Apple Inc."}],
+        "count": 1,
+        "provider": "Yahoo Finance",
+    })
+    search = client.get("/api/news/search", params={"q": "Apple"})
+    assert search.status_code == 200
+    assert search.json()["items"][0]["symbol"] == "AAPL"
+    monkeypatch.setattr(app.state.news_service, "request_refresh", lambda *args, **kwargs: True)
+    refresh = client.post("/api/news/AAPL/refresh", params={"instrument_id": "global:NASDAQ:AAPL"})
+    assert refresh.status_code == 200
+    assert refresh.json()["status"] == "queued"
 
 
 def test_indicator_series_is_additive_and_uses_backend_calculations(monkeypatch):

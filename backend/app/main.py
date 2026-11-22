@@ -8,12 +8,14 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router
+from app.api.news_routes import router as news_router
 from app.core.config import get_settings
 from app.core.database import Database
 from app.instruments.resolver import InstrumentResolver
 from app.services.market import MarketService
 from app.services.quotes import QuoteService
 from app.services.analytics_precompute import AnalyticsPrecompute
+from app.services.news import NewsService
 
 settings = get_settings()
 if settings.host not in {"127.0.0.1", "localhost", "::1"}:
@@ -26,10 +28,12 @@ async def lifespan(app: FastAPI):
     # in this process. Expired leases are recovered when jobs are claimed.
     app.state.analytics_precompute.enqueue_watchlist()
     app.state.analytics_precompute.start()
+    app.state.news_service.start()
     try:
         yield
     finally:
         app.state.analytics_precompute.stop()
+        app.state.news_service.close()
     try:
         app.state.quote_service.shutdown()
     except Exception:
@@ -50,7 +54,9 @@ app.state.instrument_resolver.ensure_catalogue()
 app.state.market_service = MarketService(settings)
 app.state.quote_service = QuoteService(settings, app.state.market_service, app.state.db)
 app.state.analytics_precompute = AnalyticsPrecompute(app.state.db, app.state.market_service)
+app.state.news_service = NewsService(app.state.db, app.state.instrument_resolver, settings)
 app.include_router(router)
+app.include_router(news_router)
 
 FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets", check_dir=False), name="assets")

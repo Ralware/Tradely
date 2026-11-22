@@ -100,6 +100,13 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
       let detail = `HTTP ${response.status} ${response.statusText}`;
       if (isRecord(payload) && typeof payload.detail === 'string') {
         detail = payload.detail;
+      } else if (isRecord(payload) && isRecord(payload.detail)) {
+        const info = payload.detail;
+        if (info.watchlist_saved === true && info.prefetch_registration === 'failed') {
+          detail = `Instrument saved to the watchlist, but prefetch registration failed. Retry Add to Watchlist to reconcile it. ${String(info.error ?? '')}`.trim();
+        } else {
+          detail = JSON.stringify(info);
+        }
       }
       throw new ApiError(detail, response.status);
     }

@@ -8,9 +8,11 @@ import sqlite3
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Iterator
 
+import numpy as np
 import pandas as pd
 
 from app.core.database import Database
@@ -87,12 +89,41 @@ class AnalyticsPrecompute:
         self._active = 0
         self._last_error: str | None = None
         self._provider_requests = 0
+        self._load_locks: dict[tuple[str, str], tuple[threading.Lock, int]] = {}
+        self._load_locks_guard = threading.Lock()
+
+    @contextmanager
+    def _snapshot_load_lock(self, identity: tuple[str, str]) -> Iterator[None]:
+        with self._load_locks_guard:
+            current = self._load_locks.get(identity)
+            lock = current[0] if current else threading.Lock()
+            self._load_locks[identity] = (lock, (current[1] + 1) if current else 1)
+        try:
+            with lock:
+                yield
+        finally:
+            with self._load_locks_guard:
+                current = self._load_locks.get(identity)
+                if current and current[0] is lock:
+                    if current[1] <= 1:
+                        self._load_locks.pop(identity, None)
+                    else:
+                        self._load_locks[identity] = (lock, current[1] - 1)
 
     def enqueue(self, instrument_id: str, interval: str, *, priority: int = 0,
                 job_type: str = "FULL_REFRESH") -> str:
         now = _now()
         job_id = uuid.uuid4().hex
         with self.db.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            active = conn.execute(
+                "SELECT job_id FROM analytics_jobs WHERE instrument_id=? AND interval=? "
+                "AND status IN ('QUEUED','RUNNING') ORDER BY created_at LIMIT 1",
+                (instrument_id, interval),
+            ).fetchone()
+            if active:
+                conn.commit()
+                return str(active["job_id"])
             conn.execute(
                 """INSERT OR IGNORE INTO analytics_jobs
                    (job_id,instrument_id,interval,job_type,priority,status,scheduled_at,
@@ -112,19 +143,50 @@ class AnalyticsPrecompute:
             identity = instrument.get("instrument_id")
             if not identity:
                 continue
-            registry_entry = self.db.instrument_for_id(str(identity)) or instrument
-            configured = registry_entry.get("supported_intervals")
-            if isinstance(configured, str):
-                try:
-                    configured = json.loads(configured)
-                except ValueError:
-                    configured = []
-            intervals = configured or ("1d", "1wk", "1mo")
-            for interval in intervals:
-                if interval in HISTORY_DAYS:
-                    self.enqueue(identity, interval, priority=10, job_type="INITIAL_COMPUTATION")
-                    count += 1
+            count += self.register_watchlist_instrument(str(identity))["queued"]
         return count
+
+    def register_watchlist_instrument(self, instrument_id: str) -> dict[str, Any]:
+        """Reconcile one persisted watchlist member without recomputing valid data."""
+        instrument = self.db.instrument_for_id(instrument_id)
+        if instrument is None:
+            raise ValueError(f"Unknown instrument: {instrument_id}")
+        configured = instrument.get("supported_intervals") or []
+        if isinstance(configured, str):
+            try:
+                configured = json.loads(configured)
+            except ValueError:
+                configured = []
+        intervals = [value for value in (configured or ("1d", "1wk", "1mo")) if value in HISTORY_DAYS]
+        queued = 0
+        reused = 0
+        for interval in intervals:
+            snapshot = self.get_snapshot(instrument_id, interval)
+            if snapshot is not None and not self._snapshot_is_stale(snapshot):
+                reused += 1
+                continue
+            self.enqueue(
+                instrument_id, interval, priority=10,
+                job_type="WATCHLIST_REFRESH" if snapshot is not None else "WATCHLIST_PREFETCH",
+            )
+            queued += 1
+        logger.info(
+            "[PREFETCH] registration complete instrument=%s reused=%d queued=%d",
+            instrument_id, reused, queued,
+        )
+        return {"instrument_id": instrument_id, "registered": True,
+                "intervals": intervals, "reused": reused, "queued": queued}
+
+    def cancel_watchlist_jobs(self, instrument_id: str) -> int:
+        """Cancel queued watchlist-specific jobs while retaining all cached data."""
+        with self.db.connect() as conn:
+            cursor = conn.execute(
+                "UPDATE analytics_jobs SET status='CANCELLED',updated_at=? "
+                "WHERE instrument_id=? AND job_type IN ('INITIAL_COMPUTATION','WATCHLIST_PREFETCH',"
+                "'WATCHLIST_REFRESH') AND status='QUEUED'",
+                (_now(), instrument_id),
+            )
+        return cursor.rowcount
 
     def _claim(self) -> sqlite3.Row | None:
         now = datetime.now(UTC)
@@ -157,7 +219,23 @@ class AnalyticsPrecompute:
             return False
         self._active += 1
         try:
-            self._compute_and_publish(str(job["instrument_id"]), str(job["interval"]))
+            if str(job["job_type"]) in {"INITIAL_COMPUTATION", "WATCHLIST_PREFETCH", "WATCHLIST_REFRESH"}:
+                watched = any(item.get("instrument_id") == job["instrument_id"] for item in self.db.get_watchlist())
+                if not watched:
+                    with self.db.connect() as conn:
+                        conn.execute(
+                            "UPDATE analytics_jobs SET status='CANCELLED',lease_until=NULL,updated_at=? WHERE job_id=?",
+                            (_now(), job["job_id"]),
+                        )
+                    return True
+            identity = (str(job["instrument_id"]), str(job["interval"]))
+            with self._snapshot_load_lock(identity):
+                existing = self.get_snapshot(*identity)
+                if (str(job["job_type"]) in {"INITIAL_COMPUTATION", "WATCHLIST_PREFETCH", "WATCHLIST_REFRESH"}
+                        and existing is not None and not self._snapshot_is_stale(existing)):
+                    logger.info("[PREFETCH] skipped valid dataset instrument=%s interval=%s", *identity)
+                else:
+                    self._compute_and_publish(*identity)
             with self.db.connect() as conn:
                 conn.execute(
                     "UPDATE analytics_jobs SET status='COMPLETED',completed_at=?,lease_until=NULL,updated_at=? WHERE job_id=?",
@@ -181,14 +259,14 @@ class AnalyticsPrecompute:
             self._active -= 1
         return True
 
-    def _compute_and_publish(self, instrument_id: str, interval: str) -> None:
+    def _compute_and_publish(self, instrument_id: str, interval: str, *, bypass_cache: bool = True) -> None:
         instrument = self.db.instrument_for_id(instrument_id)
         if not instrument:
             raise ValueError(f"Unknown instrument: {instrument_id}")
         days = HISTORY_DAYS[interval]
         frame, source = self.market_service.candles(
             instrument["symbol"], market=instrument["market"], exchange=instrument.get("exchange"),
-            interval=interval, days=days, provider="auto", full_history=False, bypass_cache=True,
+            interval=interval, days=days, provider="auto", full_history=False, bypass_cache=bypass_cache,
         )
         self._provider_requests += 1
         if frame.empty:
@@ -197,6 +275,8 @@ class AnalyticsPrecompute:
         frame = frame[~frame.index.duplicated(keep="last")]
         if frame[["open", "high", "low", "close", "volume"]].isna().any().any():
             raise ValueError("OHLCV contains missing values")
+        if not np.isfinite(frame[["open", "high", "low", "close", "volume"]].to_numpy(dtype=float)).all():
+            raise ValueError("OHLCV contains non-finite values")
         if ((frame["high"] < frame[["open", "close", "low"]].max(axis=1)) |
                 (frame["low"] > frame[["open", "close", "high"]].min(axis=1)) |
                 (frame["volume"] < 0)).any():
@@ -207,6 +287,10 @@ class AnalyticsPrecompute:
         now = _now()
         indicators = compute_indicators(frame)
         technical = build_technical_summary(frame)
+        if indicators.empty or technical.get("summary", {}).get("overall", {}).get("available", 0) <= 0:
+            raise ValueError("Analytics calculations are incomplete for the retrieved candle history")
+        if len(indicators) != len(frame):
+            raise ValueError("Indicator series is incomplete for the retrieved candle history")
         latest = indicators.iloc[-1]
         values = {column: (None if pd.isna(value) else float(value))
                   for column, value in latest.items() if column not in {"open","high","low","close","volume"}}
@@ -292,21 +376,126 @@ class AnalyticsPrecompute:
 
     def get_snapshot(self, instrument_id: str, interval: str) -> dict[str, Any] | None:
         with self.db.connect() as conn:
-            row = conn.execute(
+            rows = conn.execute(
                 """SELECT * FROM market_analytics_snapshots WHERE instrument_id=? AND interval=?
-                   AND status='READY' ORDER BY generated_at DESC LIMIT 1""", (instrument_id, interval)
-            ).fetchone()
-            if not row:
-                return None
-            strategy_rows = conn.execute(
-                "SELECT * FROM strategy_snapshots WHERE market_snapshot_id=? AND status='READY'", (row["snapshot_id"],)
+                   AND status='READY' ORDER BY generated_at DESC""", (instrument_id, interval)
             ).fetchall()
-        payload = _decode(row["payload"], row["payload_checksum"])
-        variants = {}
-        for variant in strategy_rows:
-            variants[f"{variant['direction_mode']}:{variant['position_side']}"] = _decode(variant["payload"], variant["payload_checksum"])
-        payload["strategy_variants"] = variants
-        return payload
+            candidates = []
+            for row in rows:
+                variants = conn.execute(
+                    "SELECT * FROM strategy_snapshots WHERE market_snapshot_id=? AND status='READY'",
+                    (row["snapshot_id"],),
+                ).fetchall()
+                if any(variant["strategy_version"] != STRATEGY_VERSION
+                       or variant["strategy_configuration_hash"] != "default-v1"
+                       or variant["ohlcv_fingerprint"] != row["ohlcv_fingerprint"]
+                       for variant in variants):
+                    logger.warning("[CACHE] strategy version mismatch instrument=%s interval=%s",
+                                   instrument_id, interval)
+                    continue
+                candidates.append((row, variants))
+        for row, strategy_rows in candidates:
+            try:
+                payload = _decode(row["payload"], row["payload_checksum"])
+                variants = {
+                    f"{variant['direction_mode']}:{variant['position_side']}":
+                    _decode(variant["payload"], variant["payload_checksum"])
+                    for variant in strategy_rows
+                }
+                payload["strategy_variants"] = variants
+                if self._snapshot_complete(payload, instrument_id, interval, row):
+                    return payload
+                logger.warning("[CACHE] incomplete snapshot skipped instrument=%s interval=%s", instrument_id, interval)
+            except (ValueError, OSError, TypeError, KeyError, json.JSONDecodeError):
+                logger.exception("[CACHE] invalid snapshot skipped instrument=%s interval=%s", instrument_id, interval)
+        return None
+
+    @staticmethod
+    def _snapshot_complete(payload: dict[str, Any], instrument_id: str, interval: str,
+                           row: sqlite3.Row | dict[str, Any] | None = None) -> bool:
+        try:
+            if payload.get("schema_version") != SCHEMA_VERSION or payload.get("interval") != interval:
+                return False
+            if payload.get("provenance", {}).get("instrument_id") != instrument_id:
+                return False
+            fingerprint = payload.get("fingerprint")
+            candles = payload["analysis"]["candles"]
+            series = payload["indicator_series"]["series"]
+            ratings = payload["technical_ratings"]
+            variants = payload.get("strategy_variants", {})
+            expected_variants = {
+                f"{direction}:{position or 'NONE'}"
+                for direction in DIRECTIONS for position in POSITIONS
+            }
+            if (not fingerprint or not candles or len(series) != len(candles)
+                    or payload["indicator_series"].get("count") != len(candles)
+                    or payload.get("provenance", {}).get("candle_count") != len(candles)):
+                return False
+            if ratings.get("fingerprint") != fingerprint:
+                return False
+            if payload["analysis"].get("fingerprint") != fingerprint:
+                return False
+            if set(variants) != expected_variants:
+                return False
+            if ratings.get("summary", {}).get("overall", {}).get("available", 0) <= 0:
+                return False
+            latest = payload["analysis"]["latest"]
+            if not all(np.isfinite(float(latest[key])) for key in ("open", "high", "low", "close", "volume")):
+                return False
+            if row is not None and (
+                row["schema_version"] != SCHEMA_VERSION
+                or row["indicator_version"] != INDICATOR_VERSION
+                or row["indicator_dependency_version"] != RATING_DEPENDENCY
+                or row["rating_version"] != RATING_VERSION
+                or row["ohlcv_fingerprint"] != fingerprint
+                or row["candle_count"] != len(candles)
+            ):
+                return False
+            return all(isinstance(value, dict) and value for value in variants.values())
+        except (KeyError, TypeError, AttributeError):
+            return False
+
+    def get_or_compute_snapshot(self, instrument_id: str, interval: str) -> dict[str, Any]:
+        """Load valid local data, or compute/publish one live snapshot on a miss."""
+        if interval not in HISTORY_DAYS:
+            raise ValueError(f"Unsupported interval: {interval}")
+        cached = self.get_snapshot(instrument_id, interval)
+        if cached is not None and not self._snapshot_is_stale(cached):
+            return cached
+        identity = (instrument_id, interval)
+        with self._snapshot_load_lock(identity):
+            cached = self.get_snapshot(instrument_id, interval)
+            if cached is not None and not self._snapshot_is_stale(cached):
+                return cached
+            logger.info("[CACHE] %s instrument=%s interval=%s",
+                        "stale" if cached is not None else "miss", instrument_id, interval)
+            try:
+                self._compute_and_publish(instrument_id, interval, bypass_cache=False)
+            except Exception:
+                if cached is None:
+                    raise
+                logger.exception("[CACHE] refresh failed; retaining last-known-good instrument=%s interval=%s",
+                                 instrument_id, interval)
+                cached.setdefault("analysis", {})["is_stale"] = True
+                cached.setdefault("technical_ratings", {})["is_stale"] = True
+                cached.setdefault("provenance", {})["data_freshness"] = "stale"
+                return cached
+            result = self.get_snapshot(instrument_id, interval)
+            if result is None:
+                raise ValueError("Analytics calculation did not produce a complete snapshot")
+            return result
+
+    @staticmethod
+    def _snapshot_is_stale(payload: dict[str, Any]) -> bool:
+        try:
+            provenance = payload["provenance"]
+            timestamp = pd.to_datetime(provenance["latest_candle_timestamp"], utc=True)
+            interval = str(payload["interval"])
+            market = str(payload["market"])
+            probe = pd.DataFrame({"close": [0.0]}, index=pd.DatetimeIndex([timestamp]))
+            return _stale(probe, market, interval)
+        except (KeyError, TypeError, ValueError):
+            return True
 
     def manifest(self) -> dict[str, Any]:
         result = []
@@ -330,8 +519,13 @@ class AnalyticsPrecompute:
                         "SELECT status,last_error FROM analytics_jobs WHERE instrument_id=? AND interval=? ORDER BY created_at DESC LIMIT 1",
                         (instrument_id, interval),
                     ).fetchone()
+                if self.get_snapshot(str(instrument_id), str(interval)) is None:
+                    snapshot = None
+                job_status = str(job["status"]) if job else "MISSING"
+                if not snapshot and job_status not in {"QUEUED", "RUNNING", "FAILED"}:
+                    job_status = "MISSING"
                 result.append({"instrument_id":instrument_id,"interval":interval,
-                    "status":"READY" if snapshot else (job["status"] if job else "MISSING"),
+                    "status":"READY" if snapshot else job_status,
                     "snapshot_id":snapshot["snapshot_id"] if snapshot else None,
                     "fingerprint":snapshot["ohlcv_fingerprint"] if snapshot else None,
                     "latest_candle_at":snapshot["latest_candle_at"] if snapshot else None,

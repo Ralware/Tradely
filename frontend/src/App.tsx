@@ -5,6 +5,7 @@ import { AnalysisPage } from "./pages/AnalysisPage";
 import { PortfolioPage } from "./pages/PortfolioPage";
 import { BacktestingPage } from "./pages/BacktestingPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
+import { NewsPage } from "./pages/NewsPage";
 
 export function App() {
   return (
@@ -14,6 +15,7 @@ export function App() {
         <Route path="analysis" element={<AnalysisPage />} />
         <Route path="portfolio" element={<PortfolioPage />} />
         <Route path="backtesting" element={<BacktestingPage />} />
+        <Route path="news" element={<NewsPage />} />
         <Route path="stocks" element={<Navigate to="/analysis" replace />} />
         <Route path="crypto" element={<Navigate to="/analysis" replace />} />
         <Route path="dashboard" element={<Navigate to="/" replace />} />

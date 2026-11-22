@@ -25,6 +25,13 @@ class Settings(BaseSettings):
     quote_backoff_max_seconds: int = 300
     quote_stream_interval_seconds: float = 5.0
 
+    news_cache_seconds: int = 300
+    news_watchlist_refresh_seconds: int = 300
+    news_refresh_cooldown_seconds: int = 30
+    news_timeout_seconds: float = 8.0
+    news_max_retries: int = 2
+    news_max_concurrency: int = 3
+
     default_account_currency: str = "INR"
     max_risk_fraction: float = 0.02
 
