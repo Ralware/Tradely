@@ -49,6 +49,7 @@ const marketDataCache = new Map<string, {
   expiresAt: number;
   sizeBytes: number;
 }>();
+const inFlightResponses = new Map<string, Promise<MarketDataResponse>>();
 const cacheAliases = new Map<string, string>();
 const cacheGenerations = new Map<string, number>();
 let marketCacheBytes = 0;
@@ -182,8 +183,16 @@ function cachedResponse<T extends MarketDataResponse>(
 
   const instrumentId = canonicalIdentity(query);
   const generation = cacheGenerations.get(instrumentId) ?? 0;
+  if (signal?.aborted) {
+    return Promise.reject(new DOMException('The operation was aborted.', 'AbortError'));
+  }
+  const inFlightKey = JSON.stringify([baseKey, generation, options.forceRefresh ? 'force' : 'normal']);
+  const inFlight = inFlightResponses.get(inFlightKey);
+  if (inFlight) {
+    return inFlight as Promise<T>;
+  }
 
-  return request().then((data) => {
+  const pending = request().then((data) => {
     if (!signal?.aborted && (cacheGenerations.get(instrumentId) ?? 0) === generation) {
       const fingerprint = data.fingerprint ?? `${data.interval ?? query.interval ?? '1d'}:${'as_of' in data ? String((data as { as_of?: string }).as_of ?? '') : ''}`;
       const variantKey = JSON.stringify([baseKey, data.source, data.is_adjusted ?? null, fingerprint]);
@@ -210,6 +219,18 @@ function cachedResponse<T extends MarketDataResponse>(
     }
     return data;
   });
+  if (!signal) {
+    inFlightResponses.set(inFlightKey, pending as Promise<MarketDataResponse>);
+    void pending.then(
+      () => {
+        if (inFlightResponses.get(inFlightKey) === pending) inFlightResponses.delete(inFlightKey);
+      },
+      () => {
+        if (inFlightResponses.get(inFlightKey) === pending) inFlightResponses.delete(inFlightKey);
+      },
+    );
+  }
+  return pending;
 }
 
 function clearCachedInstrument(instrumentId: string): void {
@@ -299,7 +320,7 @@ export const analysisService = {
         try {
           await this.getAnalyticsSnapshot(
             { ...query, interval, days: defaultDaysFor(interval) },
-            signal,
+            undefined,
             { prefetch: true },
           );
         } catch (error) {
@@ -322,6 +343,45 @@ export const analysisService = {
     const workers = Math.min(TIMEFRAME_PREFETCH_CONCURRENCY, targets.length);
     await Promise.all(Array.from({ length: workers }, () => worker()));
     return { ...result, failures: [...result.failures] };
+  },
+
+  async prefetchWatchlistSnapshots(
+    instruments: Array<Pick<AnalysisQuery, 'instrumentId' | 'symbol' | 'market' | 'exchange'>>,
+    query: Pick<AnalysisQuery, 'interval' | 'days' | 'provider' | 'directionMode'>,
+    skipInstrumentId?: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const seen = new Set<string>();
+    const targets = instruments.filter((instrument) => {
+      const identity = canonicalIdentity(instrument);
+      if (identity === skipInstrumentId || seen.has(identity)) return false;
+      seen.add(identity);
+      return true;
+    });
+    if (signal?.aborted || targets.length === 0) return;
+
+    let nextIndex = 0;
+    const worker = async (): Promise<void> => {
+      while (!signal?.aborted) {
+        const instrument = targets[nextIndex];
+        nextIndex += 1;
+        if (!instrument) return;
+        try {
+          // Stop scheduling when the page context changes, but let an already
+          // started request finish and populate the shared cache.
+          await this.getAnalyticsSnapshot(
+            { ...instrument, ...query },
+            undefined,
+            { prefetch: true },
+          );
+        } catch {
+          // A failed warm-up must not block other watchlist instruments.
+        }
+      }
+    };
+
+    const workers = Math.min(TIMEFRAME_PREFETCH_CONCURRENCY, targets.length);
+    await Promise.all(Array.from({ length: workers }, () => worker()));
   },
 
   invalidateInstrumentCache(instrumentId: string): void {

@@ -46,6 +46,19 @@ The FastAPI process serves the API under `/api` and, when `frontend/dist/`
 exists, the production React bundle at `/` (client-side routes fall back to
 `index.html`). During development Vite proxies `/api` to FastAPI.
 
+### Analytics precomputation migration
+
+Tradely now has an additive SQLite-backed analytics job queue, compressed and
+checksummed prepared snapshots, a background worker started with FastAPI,
+read-only prepared-data endpoints, and an application-start frontend hydrator
+using IndexedDB plus a reactive in-memory store. Analytics navigation and
+timeframe switching consume already-hydrated snapshots; manual refresh queues
+work rather than running the analytics pipeline inline. The legacy
+`/analytics-snapshot` endpoint remains for backward compatibility during this
+migration and is still synchronous. See
+[`docs/ANALYTICS_PRECOMPUTATION.md`](docs/ANALYTICS_PRECOMPUTATION.md) for schema,
+operations, testing and explicitly identified remaining work.
+
 ## Requirements
 
 - Python 3.11, 3.12, 3.13 or 3.14 (Python 3.15 is unsupported until pandas ships

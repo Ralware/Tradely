@@ -1,5 +1,6 @@
 import type { TechnicalCounts } from '../../types/api';
-import { cn, formatSignedFixed } from '../../utils/format';
+import { cn } from '../../utils/format';
+import { TechnicalDistribution } from './TechnicalDistribution';
 
 interface TechnicalGaugeProps {
   label: string;
@@ -7,79 +8,87 @@ interface TechnicalGaugeProps {
   size?: 'default' | 'hero';
 }
 
-const CX = 100;
-const CY = 100;
-const RADIUS = 78;
+const CX = 158;
+const ARC_CY = 158.5;
+const NEEDLE_CY = 150.5;
+const RADIUS = 151.68;
+
+const SEGMENTS = [
+  { from: 178, to: 146, color: '#f23645' },
+  { from: 142, to: 110, color: '#f7525f' },
+  { from: 106, to: 74, color: '#787b86' },
+  { from: 70, to: 38, color: '#22ab94' },
+  { from: 34, to: 2, color: '#089981' },
+] as const;
 
 function polar(angleDegrees: number, radius: number): { x: number; y: number } {
   const radians = (angleDegrees * Math.PI) / 180;
   return {
     x: CX + radius * Math.cos(radians),
-    y: CY - radius * Math.sin(radians),
+    y: ARC_CY - radius * Math.sin(radians),
   };
 }
 
-function arcPath(startAngle: number, endAngle: number, radius = RADIUS): string {
-  const start = polar(startAngle, radius);
-  const end = polar(endAngle, radius);
-  return `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} A ${radius} ${radius} 0 0 1 ${end.x.toFixed(2)} ${end.y.toFixed(2)}`;
+function arcPath(startAngle: number, endAngle: number): string {
+  const start = polar(startAngle, RADIUS);
+  const end = polar(endAngle, RADIUS);
+  return `M ${start.x.toFixed(3)} ${start.y.toFixed(3)} A ${RADIUS} ${RADIUS} 0 0 1 ${end.x.toFixed(3)} ${end.y.toFixed(3)}`;
+}
+
+function actionTone(action: TechnicalCounts['action']): string {
+  if (action === 'Strong Buy' || action === 'Buy') return 'tv-rating-action-buy';
+  if (action === 'Strong Sell' || action === 'Sell') return 'tv-rating-action-sell';
+  return 'tv-rating-action-neutral';
+}
+
+function actionLabel(action: TechnicalCounts['action']): string {
+  if (action === 'Strong Buy') return 'Strong buy';
+  if (action === 'Strong Sell') return 'Strong sell';
+  return action;
 }
 
 export function TechnicalGauge({ label, summary, size = 'default' }: TechnicalGaugeProps) {
-  const clamped = summary.score === null ? 0 : Math.max(-1, Math.min(1, summary.score));
-  const needleAngle = 180 - ((clamped + 1) / 2) * 180;
+  const score = summary.score === null ? null : Math.max(-1, Math.min(1, summary.score));
+  const rotation = score === null ? null : -90 + score * 90;
   const hero = size === 'hero';
-  const unavailable = summary.score === null;
 
   return (
-    <div className={cn('flex flex-col items-center', hero ? 'w-full max-w-[270px]' : 'w-full max-w-[220px]')}>
-      <svg
-        viewBox="0 0 200 112"
-        className={cn('w-full', hero ? 'h-[150px]' : 'h-[118px]')}
-        role="img"
-        aria-label={`${label}: ${summary.action}; score ${summary.score ?? 'unavailable'}`}
-      >
-        <path d={arcPath(180, 135)} stroke="#ef5350" strokeWidth={7} fill="none" />
-        <path d={arcPath(135, 45)} stroke="#4a4f58" strokeWidth={7} fill="none" />
-        <path d={arcPath(45, 0)} stroke="#2f6feb" strokeWidth={7} fill="none" />
-        {!unavailable ? (
-          <g
-            className="transition-transform duration-300 ease-out"
-            style={{
-              transform: `rotate(${-needleAngle}deg)`,
-              transformOrigin: `${CX}px ${CY}px`,
-              transformBox: 'view-box',
-            }}
-          >
-            <line x1={CX} y1={CY} x2={CX + 64} y2={CY} stroke="#c9ced6" strokeWidth={2.5} strokeLinecap="round" />
-          </g>
-        ) : null}
-        <circle cx={CX} cy={CY} r={3.6} fill="#c9ced6" />
-      </svg>
-
-      <p className="mt-1 text-xs text-terminal-muted">{label}</p>
-      <p className={cn('font-semibold leading-tight text-terminal-text', hero ? 'text-[22px]' : 'text-lg')}>
-        {summary.action}
-      </p>
-      <p className="num mt-0.5 text-sm font-semibold text-terminal-accent">
-        {summary.score === null ? '—' : formatSignedFixed(summary.score, 2)}
-      </p>
-      <p className="text-2xs text-terminal-muted">{summary.available}/{summary.total} available</p>
-
-      <div className="mt-2 grid w-full grid-cols-3 rounded-sm bg-black px-2 py-1.5 text-center">
-        <div>
-          <p className="text-2xs text-terminal-muted">Sell</p>
-          <p className="num text-xs font-medium text-terminal-red">{summary.sell}</p>
-        </div>
-        <div>
-          <p className="text-2xs text-terminal-muted">Neutral</p>
-          <p className="num text-xs font-medium text-terminal-text">{summary.neutral}</p>
-        </div>
-        <div>
-          <p className="text-2xs text-terminal-muted">Buy</p>
-          <p className="num text-xs font-medium text-terminal-green">{summary.buy}</p>
-        </div>
+    <div className={cn('tv-rating-gauge', hero && 'tv-rating-gauge-hero')}>
+      <div className="tv-rating-gauge-dial">
+        <svg
+          viewBox="0 0 316 158.5"
+          className="tv-rating-gauge-svg"
+          role="img"
+          aria-label={`${label}: ${actionLabel(summary.action)}; ${summary.available} of ${summary.total} indicators available`}
+        >
+          {SEGMENTS.map((segment) => (
+            <path
+              key={segment.from}
+              d={arcPath(segment.from, segment.to)}
+              className="tv-rating-gauge-segment"
+              pathLength={1}
+              stroke={segment.color}
+              strokeWidth="12.64"
+              strokeLinecap="round"
+              fill="none"
+            />
+          ))}
+          {rotation !== null ? (
+            <g className="tv-rating-needle" transform={`rotate(${rotation} ${CX} ${NEEDLE_CY})`}>
+              <path
+                d="M 158 142.5 L 268.5 148.9 L 268.5 152.1 L 158 158.5 Z"
+                fill="#d1d4dc"
+              />
+              <circle cx="158" cy="150.5" r="8" fill="#d1d4dc" />
+            </g>
+          ) : null}
+        </svg>
       </div>
+      <p className="tv-rating-gauge-title">{label}</p>
+      <p className={cn('tv-rating-gauge-action', actionTone(summary.action))}>
+        {actionLabel(summary.action)}
+      </p>
+      <TechnicalDistribution label={label} summary={summary} />
     </div>
   );
 }

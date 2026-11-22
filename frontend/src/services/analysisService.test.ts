@@ -26,7 +26,15 @@ function stubFetch() {
 }
 
 afterEach(() => {
-  analysisService.invalidateInstrumentCache(instrumentId);
+  for (const id of [
+    instrumentId,
+    'global:NASDAQ:MSFT',
+    'global:NASDAQ:GOOG',
+    'global:NASDAQ:AMZN',
+    'global:NASDAQ:META',
+  ]) {
+    analysisService.invalidateInstrumentCache(id);
+  }
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -65,6 +73,116 @@ describe('market analysis cache', () => {
     expect(requestedUrls.map((url) => url.searchParams.get('days')).sort()).toEqual(['1825', '365', '3650']);
     expect(requestedUrls.every((url) => url.pathname.endsWith('/analytics-snapshot'))).toBe(true);
     expect(requestedUrls.every((url) => url.searchParams.get('prefetch') === 'true')).toBe(true);
+  });
+
+  it('lets an interactive load join an in-flight warm snapshot request', async () => {
+    stubBrowser();
+    const fetchMock = stubFetch();
+    const query = { instrumentId: 'global:NASDAQ:MSFT', interval: '4h', days: 365 };
+    const controller = new AbortController();
+    const warmRequest = analysisService.getAnalyticsSnapshot(query, undefined, { prefetch: true });
+    const interactiveRequest = analysisService.getAnalyticsSnapshot(query, controller.signal);
+    controller.abort();
+
+    await Promise.all([warmRequest, interactiveRequest]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('warms each distinct watchlist instrument at the active interval and direction, excluding the selected one', async () => {
+    stubBrowser();
+    const fetchMock = stubFetch();
+
+    await analysisService.prefetchWatchlistSnapshots(
+      [
+        { instrumentId },
+        { instrumentId: 'global:NASDAQ:MSFT' },
+        { instrumentId: 'global:NASDAQ:MSFT' },
+      ],
+      { interval: '4h', days: 365, directionMode: 'short_only' },
+      instrumentId,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const url = new URL(String(fetchMock.mock.calls[0][0]), 'http://localhost');
+    expect(url.pathname).toBe(`/api/instruments/${encodeURIComponent('global:NASDAQ:MSFT')}/analytics-snapshot`);
+    expect(url.searchParams.get('interval')).toBe('4h');
+    expect(url.searchParams.get('days')).toBe('365');
+    expect(url.searchParams.get('direction_mode')).toBe('short_only');
+    expect(url.searchParams.get('prefetch')).toBe('true');
+  });
+
+  it('limits watchlist warming to two active requests', async () => {
+    stubBrowser();
+    let active = 0;
+    let maximumActive = 0;
+    const fetchMock = vi.fn().mockImplementation(() => new Promise((resolve) => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      setTimeout(() => {
+        active -= 1;
+        resolve({
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          text: async () => JSON.stringify({ source: 'test-provider', is_adjusted: true }),
+        });
+      }, 15);
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await analysisService.prefetchWatchlistSnapshots(
+      ['MSFT', 'GOOG', 'AMZN', 'META'].map((symbol) => ({
+        instrumentId: `global:NASDAQ:${symbol}`,
+      })),
+      { interval: '1d', days: 3650, directionMode: 'long_only' },
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(maximumActive).toBe(2);
+  });
+
+  it('uses fresh cached snapshots instead of refetching watchlist instruments', async () => {
+    stubBrowser();
+    const fetchMock = stubFetch();
+    const targets = [{ instrumentId: 'global:NASDAQ:MSFT' }];
+    const query = { interval: '4h', days: 365, directionMode: 'long_only' as const };
+
+    await analysisService.prefetchWatchlistSnapshots(targets, query);
+    await analysisService.prefetchWatchlistSnapshots(targets, query);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('continues warming other watchlist instruments when one snapshot fails', async () => {
+    stubBrowser();
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://localhost');
+      const failed = url.pathname.endsWith(encodeURIComponent('global:NASDAQ:MSFT') + '/analytics-snapshot');
+      return Promise.resolve({
+        ok: !failed,
+        status: failed ? 502 : 200,
+        statusText: failed ? 'Bad Gateway' : 'OK',
+        text: async () => JSON.stringify(failed ? { detail: 'provider timeout' } : { source: 'test-provider' }),
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await analysisService.prefetchWatchlistSnapshots(
+      ['MSFT', 'GOOG', 'AMZN'].map((symbol) => ({
+        instrumentId: `global:NASDAQ:${symbol}`,
+      })),
+      { interval: '4h', days: 365, directionMode: 'long_only' },
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls.map(([input]) => new URL(String(input), 'http://localhost').pathname)).toEqual(
+      expect.arrayContaining([
+        `/api/instruments/${encodeURIComponent('global:NASDAQ:MSFT')}/analytics-snapshot`,
+        `/api/instruments/${encodeURIComponent('global:NASDAQ:GOOG')}/analytics-snapshot`,
+        `/api/instruments/${encodeURIComponent('global:NASDAQ:AMZN')}/analytics-snapshot`,
+      ]),
+    );
   });
 
   it('does not start prefetch requests after the instrument scope is cancelled', async () => {

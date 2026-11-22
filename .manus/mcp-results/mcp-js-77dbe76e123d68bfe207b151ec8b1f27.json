@@ -1,0 +1,724 @@
+{"method":"browser_snapshot","warnings":["1 older browser snapshot were evicted by the bounded snapshot registry."]}
+{"capture":{"captureId":"capture_eeeb0cd7-ad61-4ff1-b8dc-7e969c0c1c68","coordinateSpace":"css-pixel","height":768,"mimeType":"image/png","mode":"viewport","width":600}}
+Browser tab: tab_dc65daa5-ef63-4ec5-a095-c17bf41cdea1, Title: "Tradely", URL: "http://127.0.0.1:5173/analysis?instrument=crypto%3ABINANCE%3AALGOUSDT&interval=1wk&days=1825".
+1 AXWebArea Tradely
+  2 element Application Navigation, truncated: text
+    3 complementary Application Navigation
+      4 navigation Main Navigation
+        5 link Watchlist
+        6 link Analysis
+        7 link Portfolio
+        8 link Backtesting
+    9 main
+      38 generic
+        39 button Watchlist
+        42 text field Instrument Search
+        43 button Refresh
+        45 button Watchlist
+        47 heading ALGOUSDT
+        49 text Algorand / Tether
+        50 text BINANCE
+        51 text Crypto
+        52 text tradingview
+        53 text Adjusted
+        54 text 0.0741
+        55 text USDT
+        56 text −0.000800
+        57 text  
+        58 text -1.07%
+        59 text 1 Week
+        60 text  · As of 
+        61 text 09/11/2026
+        62 LabelText
+          63 text Strategy Direction
+        64 combo box Strategy Direction, Value: Long Only, Secondary actions: Expand
+          65 option Long Only, selected
+          66 option Short Only
+          67 option Long + Short
+        68 tablist Timeframe
+          69 tab 1 Minute
+          71 tab 5 Minutes
+          73 tab 15 Minutes
+          75 tab 30 Minutes
+          77 tab 1 Hour
+          79 tab 2 Hours
+          81 tab 4 Hours
+          83 tab 1 Day
+          85 tab 1 Week, selected
+          87 tab 1 Month
+        89 status
+          90 text Prepared 10/10
+        91 status
+        92 generic
+          93 sectionheader
+            94 heading Technical Ratings
+            96 paragraph
+              97 text 1 Week
+              98 text  · TradingView TechnicalRating · v3 · Pine Script v6 (2024-11-29)
+            99 text As of 
+            100 text 09/11/2026
+          101 image Oscillators: Sell; 11 of 11 indicators available
+          102 paragraph
+            103 text Oscillators
+          104 paragraph
+            105 text Sell
+          106 generic Oscillators: 2 sell, 9 neutral, 0 buy, Description: 11 of 11 indicators available; 0 unavailable
+            107 text Sell
+            108 strong
+              109 text 2
+            110 text Neutral
+            111 strong
+              112 text 9
+            113 text Buy
+            114 strong
+              115 text 0
+          116 image Overall: Strong sell; 26 of 26 indicators available
+          117 paragraph
+            118 text Overall
+          119 paragraph
+            120 text Strong sell
+          121 generic Overall: 16 sell, 10 neutral, 0 buy, Description: 26 of 26 indicators available; 0 unavailable
+            122 text Sell
+            123 strong
+              124 text 16
+            125 text Neutral
+            126 strong
+              127 text 10
+            128 text Buy
+            129 strong
+              130 text 0
+          131 image Moving Averages: Strong sell; 15 of 15 indicators available
+          132 paragraph
+            133 text Moving Averages
+          134 paragraph
+            135 text Strong sell
+          136 generic Moving Averages: 14 sell, 1 neutral, 0 buy, Description: 15 of 15 indicators available; 0 unavailable
+            137 text Sell
+            138 strong
+              139 text 14
+            140 text Neutral
+            141 strong
+              142 text 1
+            143 text Buy
+            144 strong
+              145 text 0
+        146 generic
+          147 sectionheader
+            148 heading Price Chart
+            150 text 1 Week
+            151 text  · 
+            152 text 387
+            153 text  Bars
+            154 button SMA, pressed: false
+            156 button EMA, pressed: false
+            158 button Bollinger, pressed: false
+            160 button RSI, pressed: false
+            162 button MACD, pressed: false
+          165 generic Price chart
+            166 LayoutTable
+              167 LayoutTableRow
+                168 LayoutTableCell
+                169 LayoutTableCell
+                  170 generic
+                    171 Canvas
+                    172 Canvas
+                173 LayoutTableCell
+                  174 generic
+                    175 Canvas
+                    176 Canvas
+              177 LayoutTableRow
+                178 LayoutTableCell
+                179 LayoutTableCell
+                  180 generic
+                    181 Canvas
+                    182 Canvas
+                183 LayoutTableCell
+        184 region Moving Averages; 15 of 15 indicators available
+          185 heading Moving Averages
+          187 table
+            188 rowgroup
+              189 row
+                190 columnheader Name
+                192 columnheader Value
+                194 columnheader Action
+            196 row
+              197 cell Hide Exponential Moving Average (10) component values Exponential Moving Average (10) (10)
+                198 button Hide Exponential Moving Average (10) component values, Secondary actions: Collapse
+                200 text Exponential Moving Average (10) (10)
+              201 cell 0.0989
+              203 cell Sell, Description: Rating -1
+            2125 row
+              2126 cell Reference Price 0.0801
+                2127 DescriptionList
+                  2128 term Reference Price
+                  2130 definition
+                    2131 text 0.0801
+            205 row
+              206 cell Show Simple Moving Average (10) component values Simple Moving Average (10) (10)
+                207 button Show Simple Moving Average (10) component values, Secondary actions: Expand
+                209 text Simple Moving Average (10) (10)
+              210 cell 0.1063
+              212 cell Sell, Description: Rating -1
+            214 row
+              215 cell Show Exponential Moving Average (20) component values Exponential Moving Average (20) (20)
+                216 button Show Exponential Moving Average (20) component values, Secondary actions: Expand
+                218 text Exponential Moving Average (20) (20)
+              219 cell 0.1002
+              221 cell Sell, Description: Rating -1
+            223 row
+              224 cell Show Simple Moving Average (20) component values Simple Moving Average (20) (20)
+                225 button Show Simple Moving Average (20) component values, Secondary actions: Expand
+                227 text Simple Moving Average (20) (20)
+              228 cell 0.0964
+              230 cell Sell, Description: Rating -1
+            232 row
+              233 cell Show Exponential Moving Average (30) component values Exponential Moving Average (30) (30)
+                234 button Show Exponential Moving Average (30) component values, Secondary actions: Expand
+                236 text Exponential Moving Average (30) (30)
+              237 cell 0.1036
+              239 cell Sell, Description: Rating -1
+            241 row
+              242 cell Show Simple Moving Average (30) component values Simple Moving Average (30) (30)
+                243 button Show Simple Moving Average (30) component values, Secondary actions: Expand
+                245 text Simple Moving Average (30) (30)
+              246 cell 0.1
+              248 cell Sell, Description: Rating -1
+            250 row
+              251 cell Show Exponential Moving Average (50) component values Exponential Moving Average (50) (50)
+                252 button Show Exponential Moving Average (50) component values, Secondary actions: Expand
+                254 text Exponential Moving Average (50) (50)
+              255 cell 0.1156
+              257 cell Sell, Description: Rating -1
+            259 row
+              260 cell Show Simple Moving Average (50) component values Simple Moving Average (50) (50)
+                261 button Show Simple Moving Average (50) component values, Secondary actions: Expand
+                263 text Simple Moving Average (50) (50)
+              264 cell 0.1024
+              266 cell Sell, Description: Rating -1
+            268 row
+              269 cell Show Exponential Moving Average (100) component values Exponential Moving Average (100) (100)
+                270 button Show Exponential Moving Average (100) component values, Secondary actions: Expand
+                272 text Exponential Moving Average (100) (100)
+              273 cell 0.1494
+              275 cell Sell, Description: Rating -1
+            277 row
+              278 cell Show Simple Moving Average (100) component values Simple Moving Average (100) (100)
+                279 button Show Simple Moving Average (100) component values, Secondary actions: Expand
+                281 text Simple Moving Average (100) (100)
+              282 cell 0.1685
+              284 cell Sell, Description: Rating -1
+            286 row
+              287 cell Show Exponential Moving Average (200) component values Exponential Moving Average (200) (200)
+                288 button Show Exponential Moving Average (200) component values, Secondary actions: Expand
+                290 text Exponential Moving Average (200) (200)
+              291 cell 0.2539
+              293 cell Sell, Description: Rating -1
+            295 row
+              296 cell Show Simple Moving Average (200) component values Simple Moving Average (200) (200)
+                297 button Show Simple Moving Average (200) component values, Secondary actions: Expand
+                299 text Simple Moving Average (200) (200)
+              300 cell 0.1714
+              302 cell Sell, Description: Rating -1
+            304 row
+              305 cell Show Ichimoku Base Line (26) component values Ichimoku Base Line (26) (9, 26, 52)
+                306 button Show Ichimoku Base Line (26) component values, Secondary actions: Expand
+                308 text Ichimoku Base Line (26) (9, 26, 52)
+              309 cell 0.1092
+              311 cell Neutral, Description: Rating 0
+            313 row
+              314 cell Show Volume Weighted Moving Average (20) component values Volume Weighted Moving Average (20) (20)
+                315 button Show Volume Weighted Moving Average (20) component values, Secondary actions: Expand
+                317 text Volume Weighted Moving Average (20) (20)
+              318 cell 0.1046
+              320 cell Sell, Description: Rating -1
+            322 row
+              323 cell Show Hull Moving Average (9) component values Hull Moving Average (9) (9)
+                324 button Show Hull Moving Average (9) component values, Secondary actions: Expand
+                326 text Hull Moving Average (9) (9)
+              327 cell 0.0832
+              329 cell Sell, Description: Rating -1
+        331 region Oscillators; 11 of 11 indicators available
+          332 heading Oscillators
+          334 table
+            335 rowgroup
+              336 row
+                337 columnheader Name
+                339 columnheader Value
+                341 columnheader Action
+            343 row
+              344 cell Show Relative Strength Index (14) component values Relative Strength Index (14) (14)
+                345 button Show Relative Strength Index (14) component values, Secondary actions: Expand
+                347 text Relative Strength Index (14) (14)
+              348 cell 40.6
+              350 cell Neutral, Description: Rating 0
+            352 row
+              353 cell Show Stochastic %K (14, 3, 3) component values Stochastic %K (14, 3, 3) (14, 3, 3)
+                354 button Show Stochastic %K (14, 3, 3) component values, Secondary actions: Expand
+                356 text Stochastic %K (14, 3, 3) (14, 3, 3)
+              357 cell 18.7
+              359 cell Neutral, Description: Rating 0
+            361 row
+              362 cell Show Commodity Channel Index (20) component values Commodity Channel Index (20) (20)
+                363 button Show Commodity Channel Index (20) component values, Secondary actions: Expand
+                365 text Commodity Channel Index (20) (20)
+              366 cell -86.74
+              368 cell Neutral, Description: Rating 0
+            370 row
+              371 cell Show Average Directional Index (14) component values Average Directional Index (14) (14, 14)
+                372 button Show Average Directional Index (14) component values, Secondary actions: Expand
+                374 text Average Directional Index (14) (14, 14)
+              375 cell 19.36
+              377 cell Neutral, Description: Rating 0
+            379 row
+              380 cell Show Awesome Oscillator component values Awesome Oscillator (5, 34, hl2)
+                381 button Show Awesome Oscillator component values, Secondary actions: Expand
+                383 text Awesome Oscillator (5, 34, hl2)
+              384 cell 0
+              386 cell Neutral, Description: Rating 0
+            388 row
+              389 cell Show Momentum (10) component values Momentum (10) (10)
+                390 button Show Momentum (10) component values, Secondary actions: Expand
+                392 text Momentum (10) (10)
+              393 cell -0.02
+              395 cell Sell, Description: Rating -1
+            397 row
+              398 cell Show MACD Level (12, 26) component values MACD Level (12, 26) (12, 26, 9)
+                399 button Show MACD Level (12, 26) component values, Secondary actions: Expand
+                401 text MACD Level (12, 26) (12, 26, 9)
+              402 cell -0
+              404 cell Sell, Description: Rating -1
+            406 row
+              407 cell Show Stochastic RSI (14, 14, 3, 3) component values Stochastic RSI (14, 14, 3, 3) (14, 14, 3, 3)
+                408 button Show Stochastic RSI (14, 14, 3, 3) component values, Secondary actions: Expand
+                410 text Stochastic RSI (14, 14, 3, 3) (14, 14, 3, 3)
+              411 cell 20.39
+              413 cell Neutral, Description: Rating 0
+            415 row
+              416 cell Show Williams %R (14) component values Williams %R (14) (14)
+                417 button Show Williams %R (14) component values, Secondary actions: Expand
+                419 text Williams %R (14) (14)
+              420 cell -92.29
+              422 cell Neutral, Description: Rating 0
+            424 row
+              425 cell Show Bull Bear Power component values Bull Bear Power (13)
+                426 button Show Bull Bear Power component values, Secondary actions: Expand
+                428 text Bull Bear Power (13)
+              429 cell -0.03
+              431 cell Neutral, Description: Rating 0
+            433 row
+              434 cell Ultimate Oscillator (7, 14, 28) (7, 14, 28)
+                436 text Ultimate Oscillator (7, 14, 28) (7, 14, 28)
+              437 cell 41
+              439 cell Neutral, Description: Rating 0
+        441 generic
+          442 sectionheader
+            443 heading Trend + Donchian 20 Breakout
+            445 text LONG
+            446 text Sell · Exit Long
+          447 paragraph
+            448 text Long Only
+            449 text  · Manual Signal · No Order Execution
+          450 list
+            451 list item
+              452 generic Not Passed
+              453 paragraph
+                454 text Close above prior 20-bar high
+            455 list item
+              456 generic Not Passed
+              457 paragraph
+                458 text Close above SMA 200
+            459 list item
+              460 generic Not Passed
+              461 paragraph
+                462 text SMA 50 above SMA 200
+            463 list item
+              464 generic Not Passed
+              465 paragraph
+                466 text SMA 200 rising over 20 bars
+            467 list item
+              468 generic Not Passed
+              469 paragraph
+                470 text RSI 14 above 50
+            471 list item
+              472 generic Not Passed
+              473 paragraph
+                474 text ADX 14 at least 20
+            475 list item
+              476 generic Not Passed
+              477 paragraph
+                478 text Relative volume 20 at least 1
+            479 list item
+              480 generic Passed
+              481 paragraph
+                482 text Close below prior 10-bar low (exit long)
+        483 tablist Section
+          484 tab Risk
+          486 tab Indicators, selected
+          488 tab Candles
+        1880 generic
+          1881 sectionheader
+            1882 heading Indicator values
+            1884 paragraph
+              1885 text Latest completed bar, calculated by the FastAPI backend.
+          1886 paragraph
+            1887 text Momentum
+          1888 text RSI 14
+          1889 text 40.6
+          1890 paragraph
+            1891 text Levels 30 / 70
+          1892 text Stochastic RSI 14
+          1893 text 7.8
+          1894 text MACD
+          1895 text -0.003
+          1896 paragraph
+            1897 text Signal -0.002 · Hist -0.001
+          1898 text CCI 20
+          1899 text -73.1
+          1900 paragraph
+            1901 text Trend Strength
+          1902 text ADX 14
+          1903 text 19.4
+          1904 paragraph
+            1905 text Trending Above 20
+          1906 text Directional index (+DI / −DI)
+          1907 text 19.3 / 19.6
+          1908 paragraph
+            1909 text Strength Only
+          1910 paragraph
+            1911 text Volatility
+          1912 text ATR 14
+          1913 text 0.02
+          1914 paragraph
+            1915 text 24.28% of close
+          1916 text Bollinger Position
+          1917 text 23.6%
+          1918 paragraph
+            1919 text Lower 0.07 · Upper 0.13
+          1920 paragraph
+            1921 text Volume
+          1922 text Relative Volume (20)
+          1923 text 0.55
+          1924 paragraph
+            1925 text Above Average at 1.0
+          1926 text MFI 14
+          1927 text 57.1
+          1928 text CMF 20
+          1929 text 0.031
+          1930 text OBV
+          1931 text 3.94bn
+          1932 paragraph
+            1933 text Compare Direction, Not Level
+          1934 paragraph
+            1935 text Session VWAP
+          1936 paragraph
+            1937 text Requires Intraday Bars
+          2123 paragraph
+            2124 text Daily Bars Do Not Carry Intraday Volume.
+        1938 generic
+          1939 sectionheader
+            1940 heading Indicator Values
+            1942 paragraph
+              1943 text Latest Completed Bar
+          1944 table
+            1945 rowgroup
+              1946 row
+                1947 columnheader Indicator
+                1949 columnheader Value
+            1951 row
+              1952 cell Sma 20
+              1954 cell 0.0964
+            1956 row
+              1957 cell Sma 50
+              1959 cell 0.1024
+            1961 row
+              1962 cell Sma 100
+              1964 cell 0.1685
+            1966 row
+              1967 cell Sma 200
+              1969 cell 0.1714
+            1971 row
+              1972 cell Ema 9
+              1974 cell 0.0985
+            1976 row
+              1977 cell Ema 20
+              1979 cell 0.1002
+            1981 row
+              1982 cell Ema 50
+              1984 cell 0.1156
+            1986 row
+              1987 cell Ema 100
+              1989 cell 0.1494
+            1991 row
+              1992 cell Ema 200
+              1994 cell 0.2539
+            1996 row
+              1997 cell Rsi 14
+              1999 cell 40.6015
+            2001 row
+              2002 cell Macd
+              2004 cell -0.0026
+            2006 row
+              2007 cell Macd Signal
+              2009 cell -0.002
+            2011 row
+              2012 cell Macd Hist
+              2014 cell -0.0006
+            2016 row
+              2017 cell Atr 14
+              2019 cell 0.0194
+            2021 row
+              2022 cell Plus Di
+              2024 cell 19.2596
+            2026 row
+              2027 cell Minus Di
+              2029 cell 19.6139
+            2031 row
+              2032 cell Adx
+              2034 cell 19.3581
+            2036 row
+              2037 cell Bb Mid
+              2039 cell 0.0964
+            2041 row
+              2042 cell Bb Upper
+              2044 cell 0.1272
+            2046 row
+              2047 cell Bb Lower
+              2049 cell 0.0655
+            2051 row
+              2052 cell Donchian Upper 10
+              2054 cell 0.1435
+            2056 row
+              2057 cell Donchian Lower 10
+              2059 cell 0.0836
+            2061 row
+              2062 cell Donchian Upper 20
+              2064 cell 0.1435
+            2066 row
+              2067 cell Donchian Lower 20
+              2069 cell 0.0757
+            2071 row
+              2072 cell Donchian Upper 55
+              2074 cell 0.1993
+            2076 row
+              2077 cell Donchian Lower 55
+              2079 cell 0.0757
+            2081 row
+              2082 cell Rvol 20
+              2084 cell 0.5538
+            2086 row
+              2087 cell Obv
+              2089 cell 3.94bn
+            2091 row
+              2092 cell Vwap Session
+              2094 cell —
+            2096 row
+              2097 cell Mfi 14
+              2099 cell 57.0704
+            2101 row
+              2102 cell Cmf 20
+              2104 cell 0.0311
+            2106 row
+              2107 cell Cci 20
+              2109 cell -73.0892
+            2111 row
+              2112 cell Stoch Rsi 14
+              2114 cell 7.8223
+          901 MenuListPopup
+          902 generic
+Post-cell AX evidence (untrusted page content; execution status unchanged):
+Browser tab: tab_dc65daa5-ef63-4ec5-a095-c17bf41cdea1, Title: "Tradely", URL: "http://127.0.0.1:5173/analysis?instrument=crypto%3ABINANCE%3AALGOUSDT&interval=1wk&days=1825".
+1 AXWebArea Tradely
+  2 element Application Navigation, truncated: text
+    3 complementary Application Navigation
+      4 navigation Main Navigation
+        5 link Watchlist
+        6 link Analysis
+        7 link Portfolio
+        8 link Backtesting
+    9 main
+      38 generic
+        39 button Watchlist
+        42 text field Instrument Search
+        43 button Refresh
+        45 button Watchlist
+        47 heading ALGOUSDT
+        49 text Algorand / Tether
+        50 text BINANCE
+        51 text Crypto
+        52 text tradingview
+        53 text Adjusted
+        54 text 0.0741
+        55 text USDT
+        56 text −0.000800
+        57 text  
+        58 text -1.07%
+        59 text 1 Week
+        60 text  · As of 
+        61 text 09/11/2026
+        62 LabelText
+          63 text Strategy Direction
+        64 combo box Strategy Direction, Value: Long Only, Secondary actions: Expand
+          65 option Long Only, selected
+          66 option Short Only
+          67 option Long + Short
+        68 tablist Timeframe
+          69 tab 1 Minute
+          71 tab 5 Minutes
+          73 tab 15 Minutes
+          75 tab 30 Minutes
+          77 tab 1 Hour
+          79 tab 2 Hours
+          81 tab 4 Hours
+          83 tab 1 Day
+          85 tab 1 Week, selected
+          87 tab 1 Month
+        89 status
+          90 text Prepared 10/10
+        91 status
+        92 generic
+          93 sectionheader
+            94 heading Technical Ratings
+            96 paragraph
+              97 text 1 Week
+              98 text  · TradingView TechnicalRating · v3 · Pine Script v6 (2024-11-29)
+            99 text As of 
+            100 text 09/11/2026
+          101 image Oscillators: Sell; 11 of 11 indicators available
+          102 paragraph
+            103 text Oscillators
+          104 paragraph
+            105 text Sell
+          106 generic Oscillators: 2 sell, 9 neutral, 0 buy, Description: 11 of 11 indicators available; 0 unavailable
+            107 text Sell
+            108 strong
+              109 text 2
+            110 text Neutral
+            111 strong
+              112 text 9
+            113 text Buy
+            114 strong
+              115 text 0
+          116 image Overall: Strong sell; 26 of 26 indicators available
+          117 paragraph
+            118 text Overall
+          119 paragraph
+            120 text Strong sell
+          121 generic Overall: 16 sell, 10 neutral, 0 buy, Description: 26 of 26 indicators available; 0 unavailable
+            122 text Sell
+            123 strong
+              124 text 16
+            125 text Neutral
+            126 strong
+              127 text 10
+            128 text Buy
+            129 strong
+              130 text 0
+          131 image Moving Averages: Strong sell; 15 of 15 indicators available
+          132 paragraph
+            133 text Moving Averages
+          134 paragraph
+            135 text Strong sell
+          136 generic Moving Averages: 14 sell, 1 neutral, 0 buy, Description: 15 of 15 indicators available; 0 unavailable
+            137 text Sell
+            138 strong
+              139 text 14
+            140 text Neutral
+            141 strong
+              142 text 1
+            143 text Buy
+            144 strong
+              145 text 0
+        146 generic
+          147 sectionheader
+            148 heading Price Chart
+            150 text 1 Week
+            151 text  · 
+            152 text 387
+            153 text  Bars
+            154 button SMA, pressed: false
+            156 button EMA, pressed: false
+            158 button Bollinger, pressed: false
+            160 button RSI, pressed: false
+            162 button MACD, pressed: false
+          165 generic Price chart
+            166 LayoutTable
+              167 LayoutTableRow
+                168 LayoutTableCell
+                169 LayoutTableCell
+                  170 generic
+                    171 Canvas
+                    172 Canvas
+                173 LayoutTableCell
+                  174 generic
+                    175 Canvas
+                    176 Canvas
+              177 LayoutTableRow
+                178 LayoutTableCell
+                179 LayoutTableCell
+                  180 generic
+                    181 Canvas
+                    182 Canvas
+                183 LayoutTableCell
+        184 region Moving Averages; 15 of 15 indicators available
+          185 heading Moving Averages
+          187 table
+            188 rowgroup
+              189 row
+                190 columnheader Name
+                192 columnheader Value
+                194 columnheader Action
+            196 row
+              197 cell Hide Exponential Moving Average (10) component values Exponential Moving Average (10) (10)
+                198 button Hide Exponential Moving Average (10) component values, Secondary actions: Collapse
+                200 text Exponential Moving Average (10) (10)
+              201 cell 0.0989
+              203 cell Sell, Description: Rating -1
+            2125 row
+              2126 cell Reference Price 0.0801
+                2127 DescriptionList
+                  2128 term Reference Price
+                  2130 definition
+                    2131 text 0.0801
+            205 row
+              206 cell Show Simple Moving Average (10) component values Simple Moving Average (10) (10)
+                207 button Show Simple Moving Average (10) component values, Secondary actions: Expand
+                209 text Simple Moving Average (10) (10)
+              210 cell 0.1063
+              212 cell Sell, Description: Rating -1
+            214 row
+              215 cell Show Exponential Moving Average (20) component values Exponential Moving Average (20) (20)
+                216 button Show Exponential Moving Average (20) component values, Secondary actions: Expand
+                218 text Exponential Moving Average (20) (20)
+              219 cell 0.1002
+              221 cell Sell, Description: Rating -1
+            223 row
+              224 cell Show Simple Moving Average (20) component values Simple Moving Average (20) (20)
+                225 button Show Simple Moving Average (20) component values, Secondary actions: Expand
+                227 text Simple Moving Average (20) (20)
+              228 cell 0.0964
+              230 cell Sell, Description: Rating -1
+            232 row
+              233 cell Show Exponential Moving Average (30) component values Exponential Moving Average (30) (30)
+                234 button Show Exponential Moving Average (30) component values, Secondary actions: Expand
+                236 text Exponential Moving Average (30) (30)
+              237 cell 0.1036
+              239 cell Sell, Description: Rating -1
+            241 row
+              242 cell Show Simple Moving Average (30) component values Simple Moving Average (30) (30)
+                243 button Show Simple Moving Average (30) component values, Secondary actions: Expand
+                245 text Simple Moving Average (30) (30)
+              246 cell 0.1
+              248 cell Sell, Description: Rating -1
+            250 row
+              251 cell Show Exponential Moving Average (50) component values Exponential Moving Average (50) (50)
+                252 button Show Exponential Moving Average (50) component values, Secondary actions: Expand
+                254 text Exponential Moving Average (50) (50)
+              255 cell 0.1156
+              257 cell Sell, Description: Rating -1
+            259 row
+              260 cell Show Simple Moving Average (50) component values Simple Moving Average (50) (50)
+                261 button Show Simple Moving Average (50) component values, Secondary actions: Expand
+                263 text Simple Moving Average (50) (50)
+
+[AX evidence truncated; observe before using undisplayed targets.]
+Screenshot reference: {"path":"C:\\Users\\Ral\\AppData\\Local\\Temp\\manus-browser-artifacts-RZJTGq\\screenshot-m4r4bM\\Tradely.png","mimeType":"image/png"}

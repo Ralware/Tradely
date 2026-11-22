@@ -13,6 +13,20 @@ def test_health_reports_private_no_ai_no_paper_trading():
     assert response.json()["order_execution"] is False
 
 
+def test_precomputed_get_is_persistence_only(monkeypatch):
+    identity = "global:NASDAQ:MSFT"
+    expected = {"interval": "1d", "fingerprint": "stored", "analysis": {"candles": []}}
+    monkeypatch.setattr(app.state.analytics_precompute, "get_snapshot", lambda instrument_id, interval: expected)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Prepared GET must not retrieve or calculate Analytics")
+
+    monkeypatch.setattr(app.state.market_service, "candles", forbidden)
+    response = client.get(f"/api/analytics/precomputed/{identity}/1d")
+    assert response.status_code == 200
+    assert response.json() == expected
+
+
 def test_root_serves_react_production_build():
     response = client.get("/")
     assert response.status_code == 200

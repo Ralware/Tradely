@@ -1,0 +1,194 @@
+In-app Browser JS state was preserved. Completed actions were not rolled back; refresh stale UI handles and continue only the remaining work.
+{"code":"BROWSER_ERROR","method":"browser_wait","callIndex":1,"nextAction":"inspect_before_retry"}
+Invalid arguments for browser_wait: validating root: validating /properties/timeoutMs: maximum: 12000/1 is greater than 10000.000000
+Invalid arguments for browser_wait: validating root: validating /properties/timeoutMs: maximum: 12000/1 is greater than 10000.000000
+Post-cell AX evidence (untrusted page content; execution status unchanged):
+Browser tab: tab_dc65daa5-ef63-4ec5-a095-c17bf41cdea1, Title: "Tradely", URL: "http://127.0.0.1:5173/analysis?instrument=crypto%3ABINANCE%3AALGOUSDT&interval=4h&days=365".
+3507 AXWebArea Tradely
+  3508 element Application Navigation, truncated: text
+    3509 complementary Application Navigation
+      3510 navigation Main Navigation
+        3511 link Watchlist
+        3512 link Analysis
+        3513 link Portfolio
+        3514 link Backtesting
+    3515 main
+      3527 generic
+        3516 button Watchlist
+        3519 text field Instrument Search
+        3520 button Refresh
+        3522 button Watchlist
+        3528 heading ALGOUSDT
+        3530 text Algorand / Tether
+        3531 text BINANCE
+        3532 text Crypto
+        3533 text tradingview
+        3534 text Adjusted
+        3535 text 0.074
+        3536 text USDT
+        3537 text −0.000900
+        3538 text  
+        3539 text -1.20%
+        3540 text 4 Hours
+        3541 text  · As of 
+        3542 text 22/11/2026
+        3543 LabelText
+          3544 text Strategy Direction
+        3545 combo box Strategy Direction, Value: Long Only, Secondary actions: Expand
+          3546 option Long Only, selected
+          3547 option Short Only
+          3548 option Long + Short
+        3549 tablist Timeframe
+          3550 tab 1 Minute
+          3552 tab 5 Minutes
+          3554 tab 15 Minutes
+          3556 tab 30 Minutes
+          3558 tab 1 Hour
+          3560 tab 2 Hours
+          3562 tab 4 Hours, selected
+          3564 tab 1 Day
+          3566 tab 1 Week
+          3568 tab 1 Month
+        3570 status
+          3571 text Prepared 10/10
+        3572 status
+        3573 generic
+          3574 sectionheader
+            3575 heading Technical Ratings
+            3577 paragraph
+              3578 text 4 Hours
+              3579 text  · TradingView TechnicalRating · v3 · Pine Script v6 (2024-11-29)
+            3580 text As of 
+            3581 text 22/11/2026
+          3582 image Oscillators: Buy; 11 of 11 indicators available
+          3583 paragraph
+            3584 text Oscillators
+          3585 paragraph
+            3586 text Buy
+          3587 generic Oscillators: 0 sell, 9 neutral, 2 buy, Description: 11 of 11 indicators available; 0 unavailable
+            3588 text Sell
+            3589 strong
+              3590 text 0
+            3591 text Neutral
+            3592 strong
+              3593 text 9
+            3594 text Buy
+            3595 strong
+              3596 text 2
+          3597 image Overall: Sell; 26 of 26 indicators available
+          3598 paragraph
+            3599 text Overall
+          3600 paragraph
+            3601 text Sell
+          3602 generic Overall: 13 sell, 10 neutral, 3 buy, Description: 26 of 26 indicators available; 0 unavailable
+            3603 text Sell
+            3604 strong
+              3605 text 13
+            3606 text Neutral
+            3607 strong
+              3608 text 10
+            3609 text Buy
+            3610 strong
+              3611 text 3
+          3612 image Moving Averages: Strong sell; 15 of 15 indicators available
+          3613 paragraph
+            3614 text Moving Averages
+          3615 paragraph
+            3616 text Strong sell
+          3617 generic Moving Averages: 13 sell, 1 neutral, 1 buy, Description: 15 of 15 indicators available; 0 unavailable
+            3618 text Sell
+            3619 strong
+              3620 text 13
+            3621 text Neutral
+            3622 strong
+              3623 text 1
+            3624 text Buy
+            3625 strong
+              3626 text 1
+        3627 generic
+          3628 sectionheader
+            3629 heading Price Chart
+            3631 text 4 Hours
+            3632 text  · 
+            3633 text 6338
+            3634 text  Bars
+            3635 button SMA, pressed: false
+            3637 button EMA, pressed: false
+            3639 button Bollinger, pressed: false
+            3641 button RSI, pressed: false
+            3643 button MACD, pressed: false
+          3646 generic Price chart
+            3647 LayoutTable
+              3648 LayoutTableRow
+                3649 LayoutTableCell
+                3650 LayoutTableCell
+                  3651 generic
+                    3652 Canvas
+                    3653 Canvas
+                3654 LayoutTableCell
+                  3655 generic
+                    3656 Canvas
+                    3657 Canvas
+              3658 LayoutTableRow
+                3659 LayoutTableCell
+                3660 LayoutTableCell
+                  3661 generic
+                    3662 Canvas
+                    3663 Canvas
+                3664 LayoutTableCell
+        3665 region Moving Averages; 15 of 15 indicators available
+          3666 heading Moving Averages
+          3668 table
+            3669 rowgroup
+              3670 row
+                3671 columnheader Name
+                3673 columnheader Value
+                3675 columnheader Action
+            3677 row
+              3678 cell Show Exponential Moving Average (10) component values Exponential Moving Average (10) (10)
+                3679 button Show Exponential Moving Average (10) component values, Secondary actions: Expand
+                3681 text Exponential Moving Average (10) (10)
+              3682 cell 0.074
+              3684 cell Sell, Description: Rating -1
+            3686 row
+              3687 cell Show Simple Moving Average (10) component values Simple Moving Average (10) (10)
+                3688 button Show Simple Moving Average (10) component values, Secondary actions: Expand
+                3690 text Simple Moving Average (10) (10)
+              3691 cell 0.0732
+              3693 cell Buy, Description: Rating +1
+            3695 row
+              3696 cell Show Exponential Moving Average (20) component values Exponential Moving Average (20) (20)
+                3697 button Show Exponential Moving Average (20) component values, Secondary actions: Expand
+                3699 text Exponential Moving Average (20) (20)
+              3700 cell 0.0749
+              3702 cell Sell, Description: Rating -1
+            3704 row
+              3705 cell Show Simple Moving Average (20) component values Simple Moving Average (20) (20)
+                3706 button Show Simple Moving Average (20) component values, Secondary actions: Expand
+                3708 text Simple Moving Average (20) (20)
+              3709 cell 0.0749
+              3711 cell Sell, Description: Rating -1
+            3713 row
+              3714 cell Show Exponential Moving Average (30) component values Exponential Moving Average (30) (30)
+                3715 button Show Exponential Moving Average (30) component values, Secondary actions: Expand
+                3717 text Exponential Moving Average (30) (30)
+              3718 cell 0.076
+              3720 cell Sell, Description: Rating -1
+            3722 row
+              3723 cell Show Simple Moving Average (30) component values Simple Moving Average (30) (30)
+                3724 button Show Simple Moving Average (30) component values, Secondary actions: Expand
+                3726 text Simple Moving Average (30) (30)
+              3727 cell 0.0762
+              3729 cell Sell, Description: Rating -1
+            3731 row
+              3732 cell Show Exponential Moving Average (50) component values Exponential Moving Average (50) (50)
+                3733 button Show Exponential Moving Average (50) component values, Secondary actions: Expand
+                3735 text Exponential Moving Average (50) (50)
+              3736 cell 0.0783
+              3738 cell Sell, Description: Rating -1
+            3740 row
+              3741 cell Show Simple Moving Average (50) component values Simple Moving Average (50) (50)
+                3742 button Show Simple Moving Average (50) component values, Secondary actions: Expand
+
+[AX evidence truncated; observe before using undisplayed targets.]
+Screenshot reference: {"path":"C:\\Users\\Ral\\AppData\\Local\\Temp\\manus-browser-artifacts-RZJTGq\\screenshot-l3i3jh\\Tradely.png","mimeType":"image/png"}

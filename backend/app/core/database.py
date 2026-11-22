@@ -20,7 +20,7 @@ from app.core.models import (
     WatchlistItem,
 )
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 _CATALOGUE_COLUMNS: dict[str, str] = {
     "display_name": "TEXT NOT NULL DEFAULT ''",
     "base_currency": "TEXT NOT NULL DEFAULT ''",
@@ -226,6 +226,55 @@ class Database:
             connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def _migrate(self, connection: sqlite3.Connection) -> None:
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS market_bars (
+                instrument_id TEXT NOT NULL, interval TEXT NOT NULL, timestamp TEXT NOT NULL,
+                open REAL NOT NULL, high REAL NOT NULL, low REAL NOT NULL, close REAL NOT NULL,
+                volume REAL NOT NULL, source TEXT NOT NULL, adjustment_status TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(instrument_id, interval, timestamp, adjustment_status, source)
+            );
+            CREATE INDEX IF NOT EXISTS idx_market_bars_range
+                ON market_bars(instrument_id, interval, timestamp);
+            CREATE TABLE IF NOT EXISTS market_analytics_snapshots (
+                snapshot_id TEXT PRIMARY KEY, instrument_id TEXT NOT NULL, interval TEXT NOT NULL,
+                ohlcv_fingerprint TEXT NOT NULL, indicator_version TEXT NOT NULL,
+                indicator_dependency_version TEXT NOT NULL, rating_version TEXT NOT NULL,
+                provider_identity TEXT NOT NULL, source_identity TEXT NOT NULL,
+                adjustment_status TEXT NOT NULL, latest_candle_at TEXT NOT NULL,
+                candle_count INTEGER NOT NULL, generated_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                schema_version INTEGER NOT NULL, status TEXT NOT NULL, payload BLOB NOT NULL,
+                payload_checksum TEXT NOT NULL,
+                UNIQUE(instrument_id, interval, ohlcv_fingerprint, schema_version)
+            );
+            CREATE INDEX IF NOT EXISTS idx_analytics_latest
+                ON market_analytics_snapshots(instrument_id, interval, status, generated_at);
+            CREATE TABLE IF NOT EXISTS strategy_snapshots (
+                strategy_snapshot_id TEXT PRIMARY KEY, market_snapshot_id TEXT NOT NULL,
+                instrument_id TEXT NOT NULL, interval TEXT NOT NULL, ohlcv_fingerprint TEXT NOT NULL,
+                strategy_version TEXT NOT NULL, strategy_configuration_hash TEXT NOT NULL,
+                direction_mode TEXT NOT NULL, position_side TEXT NOT NULL,
+                generated_at TEXT NOT NULL, status TEXT NOT NULL, payload BLOB NOT NULL,
+                payload_checksum TEXT NOT NULL,
+                UNIQUE(instrument_id, interval, ohlcv_fingerprint, strategy_version,
+                       strategy_configuration_hash, direction_mode, position_side)
+            );
+            CREATE TABLE IF NOT EXISTS analytics_jobs (
+                job_id TEXT PRIMARY KEY, instrument_id TEXT NOT NULL, interval TEXT NOT NULL,
+                job_type TEXT NOT NULL, priority INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'QUEUED', scheduled_at TEXT NOT NULL,
+                started_at TEXT, completed_at TEXT, attempts INTEGER NOT NULL DEFAULT 0,
+                max_attempts INTEGER NOT NULL DEFAULT 5, lease_until TEXT, worker_id TEXT,
+                last_error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_analytics_jobs_dispatch
+                ON analytics_jobs(status, scheduled_at, priority DESC, created_at);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_analytics_jobs_active_identity
+                ON analytics_jobs(instrument_id, interval, job_type)
+                WHERE status IN ('QUEUED','RUNNING');
+            """
+        )
         for column, definition in _CATALOGUE_COLUMNS.items():
             self._add_column(connection, "instruments", column, definition)
 

@@ -91,3 +91,581 @@
     @apply border-b-0;
   }
 }
+
+@layer components {
+  .tv-analysis-page {
+    background: #000000;
+  }
+
+  .tv-analysis-page .tv-analysis-watchlist-toggle {
+    background-color: #000000;
+    border-color: #242424;
+  }
+
+  .tv-technicals {
+    --tv-bg: #000000;
+    --tv-surface: #000000;
+    --tv-border: #242424;
+    --tv-text: #d1d4dc;
+    --tv-muted: #787b86;
+    --tv-buy: #089981;
+    --tv-buy-soft: #22ab94;
+    --tv-sell: #f23645;
+    --tv-sell-soft: #f7525f;
+    background: var(--tv-bg);
+    color: var(--tv-text);
+    display: flex;
+    flex-direction: column;
+    font-family: -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif;
+    font-feature-settings: "tnum" on, "lnum" on;
+    text-transform: none;
+  }
+
+  .tv-technicals button,
+  .tv-technicals input,
+  .tv-technicals select,
+  .tv-technicals textarea {
+    text-transform: none;
+  }
+
+  .tv-technicals input,
+  .tv-technicals select {
+    background-color: var(--tv-bg);
+    border-color: var(--tv-border);
+    color: var(--tv-text);
+  }
+
+  .tv-technicals > .tv-rating-overview {
+    order: 1;
+  }
+
+  .tv-technicals > .tv-technical-tables {
+    order: 2;
+  }
+
+  .tv-technicals > .tv-price-chart {
+    order: 3;
+  }
+
+  .tv-technicals > .tv-strategy-summary {
+    order: 4;
+  }
+
+  .tv-technicals > .tv-analysis-tabs {
+    order: 5;
+  }
+
+  .tv-technicals > .tv-tab-panel {
+    order: 6;
+  }
+
+  .tv-analysis-toolbar {
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--tv-border);
+    border-radius: 0;
+    min-height: 48px;
+    padding: 6px 0 10px;
+  }
+
+  .tv-analysis-toolbar button {
+    border-radius: 2px;
+  }
+
+  .tv-instrument-heading {
+    min-height: 66px;
+  }
+
+  .tv-instrument-heading h1 {
+    color: var(--tv-text);
+    font-size: 20px;
+    font-weight: 600;
+    line-height: 24px;
+  }
+
+  .tv-instrument-heading .num {
+    font-size: 22px;
+    line-height: 28px;
+  }
+
+  .tv-timeframe-selector button {
+    background-color: var(--tv-bg);
+    border-color: var(--tv-border);
+    border-radius: 2px;
+    font-size: 13px;
+    height: 32px;
+    padding: 0 10px;
+  }
+
+  .tv-timeframe-selector button[aria-selected="true"] {
+    background: var(--tv-surface);
+    border-color: var(--tv-border);
+    color: var(--tv-text);
+  }
+
+  .tv-timeframe-selector button,
+  .tv-analysis-toolbar button,
+  .tv-technical-expand {
+    transition:
+      background-color 160ms ease,
+      border-color 160ms ease,
+      color 160ms ease,
+      transform 160ms ease;
+  }
+
+  .tv-timeframe-selector button:hover:not([aria-selected="true"]),
+  .tv-analysis-toolbar button:not(:disabled):hover {
+    background-color: #111111;
+  }
+
+  .tv-rating-overview {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    min-width: 0;
+    animation: tv-content-reveal 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .tv-rating-overview-header {
+    align-items: baseline;
+    border-bottom: 1px solid var(--tv-border);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 20px;
+    justify-content: space-between;
+    margin-bottom: 24px;
+    padding: 0 0 10px;
+  }
+
+  .tv-rating-overview-title {
+    color: var(--tv-text);
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 24px;
+  }
+
+  .tv-rating-overview-subtitle,
+  .tv-rating-overview-asof {
+    color: var(--tv-muted);
+    font-size: 12px;
+    line-height: 18px;
+  }
+
+  .tv-rating-gauges {
+    align-items: end;
+    display: grid;
+    gap: 32px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1fr);
+    justify-items: center;
+  }
+
+  .tv-rating-gauge {
+    align-items: center;
+    display: flex;
+    flex-direction: column;
+    justify-content: end;
+    max-width: 100%;
+    width: 220px;
+  }
+
+  .tv-rating-gauge-hero {
+    width: 316px;
+  }
+
+  .tv-rating-gauge-dial {
+    line-height: 0;
+    width: 100%;
+  }
+
+  .tv-rating-gauge-svg {
+    display: block;
+    height: auto;
+    overflow: visible;
+    width: 100%;
+  }
+
+  .tv-rating-gauge-segment {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    animation: tv-gauge-reveal 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .tv-rating-gauge-segment:nth-of-type(2) {
+    animation-delay: 55ms;
+  }
+
+  .tv-rating-gauge-segment:nth-of-type(3) {
+    animation-delay: 110ms;
+  }
+
+  .tv-rating-gauge-segment:nth-of-type(4) {
+    animation-delay: 165ms;
+  }
+
+  .tv-rating-gauge-segment:nth-of-type(5) {
+    animation-delay: 220ms;
+  }
+
+  .tv-rating-needle {
+    transition: transform 650ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .tv-rating-gauge-title {
+    color: var(--tv-text);
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 24px;
+    margin-top: 20px;
+    text-align: center;
+  }
+
+  .tv-rating-gauge-action {
+    font-size: 20px;
+    font-weight: 600;
+    line-height: 24px;
+    margin-top: 4px;
+    text-align: center;
+  }
+
+  .tv-rating-action-buy,
+  .tv-technical-action-buy {
+    color: var(--tv-buy);
+  }
+
+  .tv-rating-action-sell,
+  .tv-technical-action-sell {
+    color: var(--tv-sell);
+  }
+
+  .tv-rating-action-neutral,
+  .tv-technical-action-neutral {
+    color: var(--tv-muted);
+  }
+
+  .tv-rating-counts-groups {
+    display: grid;
+    gap: 12px;
+  }
+
+  .tv-rating-group-title {
+    color: var(--tv-muted);
+    display: block;
+    font-size: 12px;
+    line-height: 18px;
+    margin-bottom: 4px;
+  }
+
+  .tv-rating-counts {
+    background: var(--tv-surface);
+    border: 1px solid var(--tv-border);
+    border-radius: 12px;
+    column-gap: 16px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(60px, max-content));
+    justify-content: center;
+    margin-top: 20px;
+    max-width: 100%;
+    padding: 4px 0;
+  }
+
+  .tv-rating-count {
+    align-items: center;
+    display: flex;
+    flex-direction: column;
+    row-gap: 2px;
+    text-align: center;
+  }
+
+  .tv-rating-count span {
+    color: var(--tv-muted);
+    font-size: 13px;
+    line-height: 20px;
+  }
+
+  .tv-rating-count strong {
+    color: var(--tv-text);
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 24px;
+  }
+
+  .tv-rating-count-sell strong {
+    color: var(--tv-sell);
+  }
+
+  .tv-rating-count-buy strong {
+    color: var(--tv-buy);
+  }
+
+  .tv-technical-tables {
+    column-gap: 64px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 40px;
+  }
+
+  .tv-technical-table {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    min-width: 0;
+    width: 100%;
+    animation: tv-content-reveal 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .tv-technical-table:nth-child(2) {
+    animation-delay: 70ms;
+  }
+
+  .tv-technical-table:nth-child(3) {
+    animation-delay: 140ms;
+  }
+
+  .tv-technical-table-title {
+    color: var(--tv-text);
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 24px;
+    margin-bottom: 10px;
+  }
+
+  .tv-technical-table table {
+    border-collapse: collapse;
+    table-layout: auto;
+    width: 100%;
+  }
+
+  .tv-technical-table th,
+  .tv-technical-table td {
+    border-top: 1px solid var(--tv-border);
+    font-size: 14px;
+    font-weight: 400;
+    height: 40px;
+    line-height: 18px;
+    padding: 10px 0;
+    text-align: right;
+    vertical-align: middle;
+  }
+
+  .tv-technical-table th {
+    color: var(--tv-muted);
+  }
+
+  .tv-technical-table td {
+    color: var(--tv-text);
+  }
+
+  .tv-technical-table th:first-child,
+  .tv-technical-table td:first-child {
+    text-align: left;
+  }
+
+  .tv-technical-table th:not(:first-child),
+  .tv-technical-table td:not(:first-child) {
+    padding-left: 20px;
+    white-space: nowrap;
+  }
+
+  .tv-technical-table th:last-child,
+  .tv-technical-table td:last-child {
+    text-align: left;
+    width: 76px;
+  }
+
+  .tv-technical-row {
+    transition: background-color 150ms ease;
+  }
+
+  .tv-technical-row:hover {
+    background: rgba(255, 255, 255, 0.045);
+  }
+
+  .tv-technical-name-cell {
+    align-items: center;
+    display: flex;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .tv-technical-name-cell > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .tv-technical-expand {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    color: var(--tv-muted);
+    cursor: pointer;
+    display: inline-flex;
+    flex: 0 0 16px;
+    font-size: 13px;
+    height: 20px;
+    justify-content: center;
+    padding: 0;
+    width: 16px;
+  }
+
+  .tv-technical-expand:hover {
+    color: var(--tv-text);
+    transform: scale(1.08);
+  }
+
+  .tv-technical-value {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tv-technical-action {
+    font-weight: 400 !important;
+  }
+
+  .tv-technical-action-unavailable {
+    color: var(--tv-muted) !important;
+  }
+
+  .tv-technical-details-row td {
+    background: var(--tv-surface);
+    height: auto;
+    padding: 8px 12px !important;
+  }
+
+  .tv-technical-details-row dl {
+    display: grid;
+    gap: 4px 24px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    animation: tv-content-reveal 220ms ease-out both;
+  }
+
+  .tv-technical-details-row dl > div {
+    align-items: baseline;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .tv-technical-details-row dt {
+    color: var(--tv-muted);
+    text-transform: capitalize;
+  }
+
+  .tv-technical-details-row dd {
+    color: var(--tv-text);
+  }
+
+  .tv-technical-empty {
+    color: var(--tv-muted) !important;
+    text-align: left !important;
+  }
+
+  .tv-price-chart,
+  .tv-technicals .tv-tab-panel > .panel-surface,
+  .tv-strategy-summary > .panel-surface {
+    background: transparent;
+    border-color: var(--tv-border);
+    border-radius: 2px;
+  }
+
+  .tv-analysis-tabs [role="tablist"] {
+    border-bottom: 1px solid var(--tv-border);
+    gap: 20px;
+  }
+
+  .tv-analysis-tabs [role="tab"] {
+    border-radius: 0;
+    padding: 8px 4px;
+  }
+
+  @keyframes tv-content-reveal {
+    from {
+      opacity: 0;
+      transform: translateY(7px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes tv-gauge-reveal {
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+
+  @media (max-width: 900px) {
+    .tv-rating-gauges {
+      gap: 24px 16px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .tv-rating-gauge-hero {
+      grid-column: 1 / -1;
+      grid-row: 1;
+    }
+
+    .tv-rating-gauge:not(.tv-rating-gauge-hero) {
+      grid-row: 2;
+    }
+
+    .tv-technical-tables {
+      column-gap: 32px;
+    }
+  }
+
+  @media (max-width: 700px) {
+    .tv-technical-tables {
+      grid-template-columns: minmax(0, 1fr);
+      row-gap: 28px;
+    }
+
+    .tv-rating-gauge,
+    .tv-rating-gauge-hero {
+      width: min(100%, 316px);
+    }
+
+    .tv-rating-overview-header {
+      margin-bottom: 20px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .tv-rating-gauges {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .tv-rating-gauge-hero,
+    .tv-rating-gauge:not(.tv-rating-gauge-hero) {
+      grid-column: auto;
+      grid-row: auto;
+    }
+
+    .tv-rating-gauges > .tv-rating-gauge-hero {
+      order: -1;
+    }
+
+    .tv-technical-table th,
+    .tv-technical-table td {
+      font-size: 13px;
+    }
+
+    .tv-technical-table th:not(:first-child),
+    .tv-technical-table td:not(:first-child) {
+      padding-left: 12px;
+    }
+
+    .tv-technical-details-row dl {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tv-technicals *,
+    .tv-technicals *::before,
+    .tv-technicals *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

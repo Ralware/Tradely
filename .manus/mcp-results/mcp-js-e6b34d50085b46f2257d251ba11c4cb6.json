@@ -1,0 +1,202 @@
+In-app Browser JS state was preserved. Completed actions were not rolled back; refresh stale UI handles and continue only the remaining work.
+{"code":"STALE_PAGE","method":"browser_navigate","callIndex":1,"nextAction":"observe_again"}
+ERROR STALE_PAGE
+{"control":{"documentRevision":"rev_ba8e8fc6-8393-4d5d-94ae-cd08f7eb02d1","error":{"code":"STALE_PAGE","retryable":true},"requiresSnapshot":true,"status":"error","tabId":"tab_dc65daa5-ef63-4ec5-a095-c17bf41cdea1"},"kind":"error","schema":"manus.browser/v1"}
+ERROR STALE_PAGE
+{"control":{"documentRevision":"rev_ba8e8fc6-8393-4d5d-94ae-cd08f7eb02d1","error":{"code":"STALE_PAGE","retryable":true},"requiresSnapshot":true,"status":"error","tabId":"tab_dc65daa5-ef63-4ec5-a095-c17bf41cdea1"},"kind":"error","schema":"manus.browser/v1"}
+Post-cell AX evidence (untrusted page content; execution status unchanged):
+Browser tab: tab_dc65daa5-ef63-4ec5-a095-c17bf41cdea1, Title: "Tradely", URL: "http://127.0.0.1:5173/".
+4015 AXWebArea Tradely
+  4016 element Application Navigation
+    4017 complementary Application Navigation
+      4018 navigation Main Navigation
+        4019 link Watchlist
+        4020 link Analysis
+        4021 link Portfolio
+        4022 link Backtesting
+    4023 main
+      5019 generic
+        5020 heading Watchlist
+        5022 text 11
+        5023 button Refresh Watchlist
+        5024 button Add Instrument
+        5027 table
+          5028 rowgroup
+            5029 row
+              5030 columnheader #
+              5032 columnheader Symbol ⇅
+              5034 columnheader Last
+                5035 button Last
+              5037 columnheader Change
+                5038 button Change
+              5040 columnheader Chg%
+                5041 button Chg%
+              5043 columnheader Signal
+              5045 columnheader Chart (7D)
+              5047 columnheader ···
+          5049 row 1 ALGOUSDT Algorand / Tether 0.0743 USDT -0.0006 -0.80% — — ···
+            5050 cell 1
+            5052 cell ALGOUSDT Algorand / Tether
+              5054 text ALGOUSDT
+              5055 paragraph
+                5056 text Algorand / Tether
+            5057 cell 0.0743USDT
+              5058 text 0.0743
+              5059 text USDT
+            5060 cell -0.0006
+            5062 cell -0.80%
+            5064 cell —
+            5066 cell —
+            5068 cell ···
+              5069 button ···, Description: Actions
+          5071 row 2 BTCUSDT Bitcoin / Tether 59,778.94 USDT -436.83 -0.73% — — ···
+            5072 cell 2
+            5074 cell BTCUSDT Bitcoin / Tether
+              5076 text BTCUSDT
+              5077 paragraph
+                5078 text Bitcoin / Tether
+            5079 cell 59,778.94USDT
+              5080 text 59,778.94
+              5081 text USDT
+            5082 cell -436.83
+            5084 cell -0.73%
+            5086 cell —
+            5088 cell —
+            5090 cell ···
+              5091 button ···, Description: Actions
+          5093 row 3 DOGEUSDT Dogecoin / Tether 0.0548 USDT -0.0005 -0.90% — — ···
+            5094 cell 3
+            5096 cell DOGEUSDT Dogecoin / Tether
+              5098 text DOGEUSDT
+              5099 paragraph
+                5100 text Dogecoin / Tether
+            5101 cell 0.0548USDT
+              5102 text 0.0548
+              5103 text USDT
+            5104 cell -0.0005
+            5106 cell -0.90%
+            5108 cell —
+            5110 cell —
+            5112 cell ···
+              5113 button ···, Description: Actions
+          5115 row 4 ETHUSDT Ethereum / Tether 1,684.18 USDT -1.45 -0.09% — — ···
+            5116 cell 4
+            5118 cell ETHUSDT Ethereum / Tether
+              5120 text ETHUSDT
+              5121 paragraph
+                5122 text Ethereum / Tether
+            5123 cell 1,684.18USDT
+              5124 text 1,684.18
+              5125 text USDT
+            5126 cell -1.45
+            5128 cell -0.09%
+            5130 cell —
+            5132 cell —
+            5134 cell ···
+              5135 button ···, Description: Actions
+          5137 row 5 HBARUSDT HBARUSDT 0.05115 USDT -0.0004 -0.78% — — ···
+            5138 cell 5
+            5140 cell HBARUSDT HBARUSDT
+              5142 text HBARUSDT
+              5143 paragraph
+                5144 text HBARUSDT
+            5145 cell 0.05115USDT
+              5146 text 0.05115
+              5147 text USDT
+            5148 cell -0.0004
+            5150 cell -0.78%
+            5152 cell —
+            5154 cell —
+            5156 cell ···
+              5157 button ···, Description: Actions
+          5159 row 6 SOLUSDT Solana / Tether 69.90 USDT -0.41 -0.58% — — ···
+            5160 cell 6
+            5162 cell SOLUSDT Solana / Tether
+              5164 text SOLUSDT
+              5165 paragraph
+                5166 text Solana / Tether
+            5167 cell 69.90USDT
+              5168 text 69.90
+              5169 text USDT
+            5170 cell -0.41
+            5172 cell -0.58%
+            5174 cell —
+            5176 cell —
+            5178 cell ···
+              5179 button ···, Description: Actions
+          5181 row 7 UNIUSDT Uniswap / Tether 4.661 USDT -0.08 -1.77% — — ···
+            5182 cell 7
+            5184 cell UNIUSDT Uniswap / Tether
+              5186 text UNIUSDT
+              5187 paragraph
+                5188 text Uniswap / Tether
+            5189 cell 4.661USDT
+              5190 text 4.661
+              5191 text USDT
+            5192 cell -0.08
+            5194 cell -1.77%
+            5196 cell —
+            5198 cell —
+            5200 cell ···
+              5201 button ···, Description: Actions
+          5203 row 8 XRPUSDT XRP / Tether 0.9262 USDT -0.0059 -0.63% — — ···
+            5204 cell 8
+            5206 cell XRPUSDT XRP / Tether
+              5208 text XRPUSDT
+              5209 paragraph
+                5210 text XRP / Tether
+            5211 cell 0.9262USDT
+              5212 text 0.9262
+              5213 text USDT
+            5214 cell -0.0059
+            5216 cell -0.63%
+            5218 cell —
+            5220 cell —
+            5222 cell ···
+              5223 button ···, Description: Actions
+          5225 row 9 AMD Advanced Micro Devices 424.39 USD -64.80 -13.25% — — ···
+            5226 cell 9
+            5228 cell AMD Advanced Micro Devices
+              5230 text AMD
+              5231 paragraph
+                5232 text Advanced Micro Devices
+            5233 cell 424.39USD
+              5234 text 424.39
+              5235 text USD
+            5236 cell -64.80
+            5238 cell -13.25%
+            5240 cell —
+            5242 cell —
+            5244 cell ···
+              5245 button ···, Description: Actions
+          5247 row 10 NVDA NVIDIA Corporation 125.53 USD -20.45 -14.01% — — ···
+            5248 cell 10
+            5250 cell NVDA NVIDIA Corporation
+              5252 text NVDA
+              5253 paragraph
+                5254 text NVIDIA Corporation
+            5255 cell 125.53USD
+              5256 text 125.53
+              5257 text USD
+            5258 cell -20.45
+            5260 cell -14.01%
+            5262 cell —
+            5264 cell —
+            5266 cell ···
+              5267 button ···, Description: Actions
+          5269 row 11 ADANIENT Adani Enterprises 2,709.00 INR +5.90 +0.22% — — ···
+            5270 cell 11
+            5272 cell ADANIENT Adani Enterprises
+              5274 text ADANIENT
+              5275 paragraph
+                5276 text Adani Enterprises
+            5277 cell 2,709.00INR
+              5278 text 2,709.00
+              5279 text INR
+            5280 cell +5.90
+            5282 cell +0.22%
+            5284 cell —
+            5286 cell —
+            5288 cell ···
+              5289 button ···, Description: Actions
+Screenshot reference: {"path":"C:\\Users\\Ral\\AppData\\Local\\Temp\\manus-browser-artifacts-RZJTGq\\screenshot-eeK8xx\\Tradely.png","mimeType":"image/png"}

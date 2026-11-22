@@ -175,6 +175,61 @@ def health() -> dict[str, Any]:
             "timestamp": datetime.now(UTC).isoformat()}
 
 
+@router.get("/analytics/precomputed/index")
+def precomputed_index(request: Request) -> dict[str, Any]:
+    """Compact manifest only; never fetches provider data or calculates analytics."""
+    return request.app.state.analytics_precompute.manifest()
+
+
+@router.get("/analytics/precomputed/{instrument_id}/{interval}")
+def precomputed_snapshot(request: Request, instrument_id: str, interval: str) -> dict[str, Any]:
+    if interval == "bundle":
+        instrument = request.app.state.db.instrument_for_id(instrument_id)
+        if instrument is None:
+            raise HTTPException(status_code=404, detail="Unknown instrument")
+        configured = instrument.get("supported_intervals") or []
+        if isinstance(configured, str):
+            try:
+                configured = json.loads(configured)
+            except ValueError:
+                configured = []
+        snapshots = {}
+        for timeframe in configured:
+            payload = request.app.state.analytics_precompute.get_snapshot(instrument_id, timeframe)
+            if payload is not None:
+                snapshots[timeframe] = payload
+        return {"instrument_id": instrument_id, "snapshots": snapshots}
+    payload = request.app.state.analytics_precompute.get_snapshot(instrument_id, interval)
+    if payload is None:
+        raise HTTPException(status_code=404, detail={"status": "MISSING", "instrument_id": instrument_id, "interval": interval})
+    return payload
+
+
+@router.post("/analytics/precompute/refresh")
+def precompute_refresh(request: Request, instrument_id: str, interval: str | None = None) -> dict[str, Any]:
+    engine = request.app.state.analytics_precompute
+    instruments = [item for item in request.app.state.db.get_watchlist() if item.get("instrument_id") == instrument_id]
+    instrument = request.app.state.db.instrument_for_id(instrument_id)
+    if instrument is None:
+        raise HTTPException(status_code=404, detail="Unknown instrument")
+    configured = instrument.get("supported_intervals") or []
+    if isinstance(configured, str):
+        try:
+            configured = json.loads(configured)
+        except ValueError:
+            configured = []
+    intervals = [interval] if interval else list(configured)
+    if not intervals or any(value not in configured for value in intervals):
+        raise HTTPException(status_code=422, detail="Unsupported timeframe")
+    jobs = [engine.enqueue(instrument_id, value, priority=100, job_type="FULL_REFRESH") for value in intervals]
+    return {"status": "QUEUED", "job_ids": jobs, "watchlisted": bool(instruments)}
+
+
+@router.get("/analytics/precompute/status")
+def precompute_status(request: Request) -> dict[str, Any]:
+    return request.app.state.analytics_precompute.status()
+
+
 @router.get("/providers/status")
 def provider_status(request: Request) -> dict[str, Any]:
     bridge: dict[str, Any] | None = None

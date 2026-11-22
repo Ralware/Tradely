@@ -1,0 +1,916 @@
+{"capture":{"captureId":"capture_57bf4186-abb7-4910-9fc9-d086e5d92337","coordinateSpace":"css-pixel","height":768,"mimeType":"image/png","mode":"viewport","width":600}}
+Browser tab: tab_4932e7ef-1a00-4977-8a82-277d43125a76, Title: "BTCUSDT 59,142.52 ▼ −1.78% Primary", URL: "http://127.0.0.1:8765/BTCUSDT%2059%2C156.34%20%E2%96%BC%20%E2%88%921.76%25%20Primary.html".
+903 AXWebArea BTCUSDT 59,142.52 ▼ −1.78% Primary
+  904 element Trading panel, truncated: text
+    905 generic
+      907 generic
+        908 generic
+        909 generic
+        910 generic
+        911 generic
+        912 generic
+          913 element
+            914 generic
+            915 progressbar
+              916 generic
+              918 generic
+              919 generic
+          920 generic
+        921 generic
+        922 generic
+        923 generic Trading panel
+      925 generic
+        926 generic
+        927 generic
+          928 button Logged in as Ralware Active layout: Primary
+          929 text 5
+        932 toolbar
+          935 generic
+            936 button BTCUSDT
+            938 button Switch data type
+        940 toolbar
+          943 generic
+            945 generic
+              946 button Cross
+              947 button Cursors, pressed: true
+            949 generic
+              950 button Trendline
+              951 button Trend tools, pressed: false
+            953 generic
+              954 button Fib retracement
+              955 button Gann and Fibonacci tools, pressed: false
+            957 generic
+              958 button XABCD pattern
+              959 button Patterns, pressed: false
+            961 generic
+              962 button Long position
+              963 button Forecasting and measurement tools, pressed: false
+            965 generic
+              966 button Brush
+              967 button Geometric shapes, pressed: false
+            969 generic
+              970 button Text
+              971 button Annotation tools, pressed: false
+            973 generic
+              974 button Icon
+              975 button Icons, pressed: false
+            976 button Measure
+            977 button Zoom in
+            980 generic
+              981 button Magnet mode snaps drawings placed near price bars to the closest OHLC value, pressed: false
+              982 button Magnets, pressed: false
+            983 button Keep drawing, pressed: false
+            985 generic
+              986 button Lock drawings and indicators, pressed: false
+              987 button Lock options, pressed: false
+            989 generic
+              990 button Hide all drawings, pressed: false
+              991 button Hide options, pressed: false
+            993 generic
+              994 button Remove objects
+              995 button Remove options
+        996 generic
+          999 region Chart #1
+            1000 generic
+            1001 generic
+              1002 toolbar
+                1003 generic
+                  1004 generic, Description: Change symbol
+                    1005 generic
+                      1006 image
+                      1007 text B
+                    1008 button Change symbol
+                      1009 text Bitcoin / TetherUS
+                  1010 generic, Description: Change interval
+                    1011 generic
+                    1012 button Change interval
+                      1013 text 4h
+                  1014 generic
+                    1015 generic
+                    1017 text Binance
+                1018 generic
+                  1019 button Flag symbol, Description: Flag symbol
+                    1021 image
+                  1022 button More options for Bitcoin / TetherUS, Description: More
+                    1023 image
+                1025 generic
+                  1026 button Market open · Data updates once per second, Description: Market open · Data updates once per second
+                  1027 text Open
+                  1028 text 1s updates
+                  1029 text Get real-time
+                1031 generic
+                  1032 generic
+                    1033 text O
+                    1034 text 59,359.99
+                  1035 generic
+                    1036 text H
+                    1037 text 59,668.02
+                  1038 generic
+                    1039 text L
+                    1040 text 58,768.51
+                  1041 generic
+                    1042 text C
+                    1043 text 59,147.78
+                  1045 text −212.20 (−0.36%)
+              1046 generic
+                1047 generic
+                  1048 text 59,142.52
+                  1049 text SELL
+                1051 text 0.01
+                1052 generic
+                  1053 text 59,142.53
+                  1054 text BUY
+              1056 button Show indicators legend, Description: Show indicators legend
+                1058 image
+                1060 text 2
+              1061 Canvas Chart for BINANCE:BTCUSDT, 4 hours
+            1062 generic
+            1063 generic
+            1064 generic
+            1066 toolbar Navigation
+              1067 button Zoom out, Description: Zoom out
+              1068 button Zoom in, Description: Zoom in
+              1069 button Scroll to the left, Description: Scroll to the left
+              1070 button Scroll to the right, Description: Scroll to the right
+              1071 button Reset chart view, Description: Reset chart view
+            1072 generic
+          1074 toolbar
+            1075 generic
+              1076 button 1 day in 1 minute intervals
+                1078 text 1D
+              1079 button 5 days in 5 minutes intervals
+                1081 text 5D
+              1082 button 1 month in 30 minutes intervals
+                1084 text 1M
+              1085 button 3 months in 1 hour intervals
+                1087 text 3M
+              1088 button 6 months in 2 hours intervals
+                1090 text 6M
+              1091 button Year to day in 1 day intervals
+                1093 text YTD
+              1094 button 1 year in 1 day intervals
+                1096 text 1Y
+              1097 button 5 years in 1 week intervals
+                1099 text 5Y
+              1100 button All data in 1 month intervals
+                1102 text All
+              1103 separator
+              1104 button Go to
+            1107 button Timezone
+              1109 text 06:46:33 UTC
+        1111 generic
+          1116 toolbar
+            1117 button Watchlist, details, and news, pressed: true
+            1118 button Alerts, pressed: false
+            1119 button Object tree and data window, pressed: false
+            1121 button AI Copilot, pressed: false
+            1122 button Screeners, pressed: false
+            1123 button Pine Screener, pressed: false
+            1124 button Pine Editor, pressed: false
+            1125 button Calendars, pressed: false
+            1126 button Community, pressed: false
+            1127 button Notifications, pressed: false
+            1128 button Chats, pressed: false
+            1129 button Products
+            1130 separator
+            1131 button Help, pressed: false
+          1132 generic
+            1133 generic
+              1135 button Watchlist
+              1137 button Add symbol
+              1138 button Advanced view
+              1139 button Settings
+              1141 generic
+                1142 button
+                1143 button Symbol
+                1145 button Last
+                1147 button Chg
+                1149 button Chg%
+                1152 generic
+                  1153 generic
+                  1155 generic
+                    1156 generic
+                    1158 group
+                      1159 generic
+                        1160 generic
+                        1161 image
+                        1162 text B
+                        1163 text BTCUSDT
+                        1164 text 59,147.7
+                        1165 text 8
+                        1166 text −1,067.99
+                        1167 text −1.77%
+                        1168 generic
+                    1170 group
+                      1171 generic
+                        1172 generic
+                        1173 image
+                        1174 text A
+                        1175 text ALGOUSDT
+                        1176 text 0.073
+                        1177 text 6
+                        1178 text −0.0013
+                        1179 text −1.74%
+                        1180 generic
+                    1182 group
+                      1183 generic
+                        1184 generic
+                        1185 image
+                        1186 text D
+                        1187 text DOGEUSDT
+                        1188 text 0.0542
+                        1189 text 0
+                        1190 text −0.00110
+                        1191 text −1.99%
+                        1192 generic
+                    1194 group
+                      1195 generic
+                        1196 generic
+                        1197 image
+                        1198 text X
+                        1199 text XRPUSDT
+                        1200 text 0.916
+                        1201 text 6
+                        1202 text −0.0155
+                        1203 text −1.66%
+                        1204 generic
+                    1206 group
+                      1207 generic
+                        1208 generic
+                        1209 image
+                        1210 text S
+                        1211 text SOLUSDT
+                        1212 text 69.1
+                        1213 text 1
+                        1214 text −1.20
+                        1215 text −1.71%
+                        1216 generic
+                    1218 group
+                      1219 generic
+                        1220 generic
+                        1221 image
+                        1222 text E
+                        1223 text ETHUSDT
+                        1224 text 1,663.0
+                        1225 text 8
+                        1226 text −22.55
+                        1227 text −1.34%
+                        1228 generic
+                    1229 generic
+            1230 generic
+              1231 image
+              1232 text B
+              1233 text BTCUSDT
+              1234 button Metrics
+              1235 generic, Description: Add note
+              1236 generic, Description: Settings
+              1238 generic
+                1239 generic
+                1240 generic
+                  1241 link Bitcoin / TetherUS
+                  1243 text BINANCE
+                  1244 generic
+                    1245 text Spot
+                    1246 generic
+                    1247 text Crypto
+                  1248 text 59,147.7
+                  1249 text 8
+                  1250 text USDT
+                  1251 text −1,067.99
+                  1252 text −1.77%
+                  1253 text Market open
+                  1254 text Volume
+                  1255 text ‪5.04 K‬
+                  1256 text Avg. volume (30D)
+                  1257 text ‪18.72 K‬
+                  1258 generic
+                    1259 text News
+                    1260 generic
+                    1261 generic Nov 22, 2026, 11:42 GMT+5:30
+                      1262 time
+                        1263 text 33 minutes ago
+                  1265 text JPMorgan Says Bitcoin Miners May Be Selling Reserves After BTC Falls $26K Below Mining Cost Estimate: Report
+                  1267 text More events
+                  1268 text Key stats
+                  1269 text Open interest
+                  1270 text ‪22.80 B‬
+                  1271 text Liquidations 24h
+                  1272 text ‪193.08 M‬
+                  1273 text Funding rate
+                  1274 text 0.0036%
+                  1276 text Performance
+                  1277 text −7.75%
+                  1278 text 1W
+                  1279 text −27.31%
+                  1280 text 1M
+                  1281 text −23.87%
+                  1282 text 3M
+                  1283 text −23.46%
+                  1284 text 6M
+                  1285 text −32.48%
+                  1286 text YTD
+                  1287 text −30.48%
+                  1288 text 1Y
+                  1290 text Seasonals
+                  1291 LayoutTable
+                    1292 LayoutTableRow
+                      1293 LayoutTableCell
+                      1294 LayoutTableCell
+                        1295 generic
+                          1296 Canvas
+                          1297 Canvas
+                      1298 LayoutTableCell
+                    1299 LayoutTableRow
+                      1300 LayoutTableCell
+                      1301 LayoutTableCell
+                        1302 generic
+                          1303 Canvas
+                          1304 Canvas
+                      1305 LayoutTableCell
+                  1306 generic
+                    1307 generic
+                    1308 text 2026
+                  1309 generic
+                    1310 generic
+                    1311 text 2025
+                  1312 generic
+                    1313 generic
+                    1314 text 2024
+                  1315 button More seasonals
+                  1317 generic
+                    1319 text Technicals
+                    1320 generic
+                      1321 image
+                      1324 image
+                    1325 text Sell
+                  1326 button More technicals
+                  1328 generic
+                    1329 text Browse community 
+                    1330 text posts
+              1331 generic
+            1332 generic
+          1335 image
+        1336 generic
+        1337 generic Trading panel
+          1338 generic
+          1339 generic
+          1340 generic
+        1342 generic
+          1343 image
+          1344 text B
+          1345 text Bitcoin / TetherUS
+          1346 text • Technicals
+          1347 button Back to chart
+          1348 generic
+            1349 generic
+            1350 generic
+              1353 tablist
+                1354 tab 1 minute
+                  1356 text 1 minute
+                1357 tab 5 minutes
+                  1359 text 5 minutes
+                1360 tab 15 minutes
+                  1362 text 15 minutes
+                1363 tab 30 minutes
+                  1365 text 30 minutes
+                1366 tab 1 hour
+                  1368 text 1 hour
+                1369 tab 2 hours
+                  1371 text 2 hours
+                1372 tab 4 hours
+                  1374 text 4 hours
+                1375 tab 1 day, selected
+                  1377 text 1 day
+                1378 tab 1 week
+                  1380 text 1 week
+                1381 tab 1 month
+                  1383 text 1 month
+              1384 generic
+                1385 image
+                1388 image
+              1390 text Oscillators
+              1391 text Neutral
+              1392 text Sell
+              1393 text 1
+              1394 text Neutral
+              1395 text 7
+              1396 text Buy
+              1397 text 3
+              1398 generic
+                1399 image
+                1402 image
+              1404 text Summary
+              1405 text Sell
+              1406 text Sell
+              1407 text 14
+              1408 text Neutral
+              1409 text 8
+              1410 text Buy
+              1411 text 4
+              1412 generic
+                1413 image
+                1416 image
+              1418 text Moving Averages
+              1419 text Strong sell
+              1420 text Sell
+              1421 text 13
+              1422 text Neutral
+              1423 text 1
+              1424 text Buy
+              1425 text 1
+              1426 link Oscillators
+              1428 table
+                1429 row
+                  1430 columnheader Name
+                  1432 columnheader Value
+                  1434 columnheader Action
+                1436 row
+                  1437 cell Relative Strength Index (14)
+                    1438 link Relative Strength Index
+                    1440 text  (14)
+                  1441 cell 21.41
+                  1443 cell Neutral
+                1445 row
+                  1446 cell Stochastic %K (14, 3, 3)
+                    1447 link Stochastic %K
+                    1449 text  (14, 3, 3)
+                  1450 cell 16.71
+                  1452 cell Neutral
+                1454 row
+                  1455 cell Commodity Channel Index (20)
+                    1456 link Commodity Channel Index
+                    1458 text  (20)
+                  1459 cell −107.62
+                  1461 cell Buy
+                1463 row
+                  1464 cell Average Directional Index (14)
+                    1465 link Average Directional Index
+                    1467 text  (14)
+                  1468 cell 49.39
+                  1470 cell Neutral
+                1472 row
+                  1473 cell Awesome Oscillator
+                    1474 link Awesome Oscillator
+                  1476 cell −13,042.10
+                  1478 cell Neutral
+                1480 row
+                  1481 cell Momentum (10)
+                    1482 link Momentum
+                    1484 text  (10)
+                  1485 cell −12,278.53
+                  1487 cell Buy
+                1489 row
+                  1490 cell MACD Level (12, 26)
+                    1491 link MACD Level
+                    1493 text  (12, 26)
+                  1494 cell −5,065.04
+                  1496 cell Sell
+                1498 row
+                  1499 cell Stochastic RSI Fast (3, 3, 14, 14)
+                    1500 link Stochastic RSI Fast
+                    1502 text  (3, 3, 14, 14)
+                  1503 cell 15.24
+                  1505 cell Buy
+                1507 row
+                  1508 cell Williams Percent Range (14)
+                    1509 link Williams Percent Range
+                    1511 text  (14)
+                  1512 cell −80.21
+                  1514 cell Neutral
+                1516 row
+                  1517 cell Bull Bear Power
+                    1518 link Bull Bear Power
+                  1520 cell −10,682.77
+                  1522 cell Neutral
+                1524 row
+                  1525 cell Ultimate Oscillator (7, 14, 28)
+                    1526 link Ultimate Oscillator
+                    1528 text  (7, 14, 28)
+                  1529 cell 47.32
+                  1531 cell Neutral
+              1533 link Moving Averages
+              1535 table
+                1536 row
+                  1537 columnheader Name
+                  1539 columnheader Value
+                  1541 columnheader Action
+                1543 row
+                  1544 cell Exponential Moving Average (10)
+                    1545 link Exponential Moving Average
+                    1547 text  (10)
+                  1548 cell 63,457.08
+                  1550 cell Sell
+                1552 row
+                  1553 cell Simple Moving Average (10)
+                    1554 link Simple Moving Average
+                    1556 text  (10)
+                  1557 cell 63,101.94
+                  1559 cell Sell
+                1561 row
+                  1562 cell Exponential Moving Average (20)
+                    1563 link Exponential Moving Average
+                    1565 text  (20)
+                  1566 cell 67,685.00
+                  1568 cell Sell
+                1570 row
+                  1571 cell Simple Moving Average (20)
+                    1572 link Simple Moving Average
+                    1574 text  (20)
+                  1575 cell 69,313.40
+                  1577 cell Sell
+                1579 row
+                  1580 cell Exponential Moving Average (30)
+                    1581 link Exponential Moving Average
+                    1583 text  (30)
+                  1584 cell 70,478.02
+                  1586 cell Sell
+                1588 row
+                  1589 cell Simple Moving Average (30)
+                    1590 link Simple Moving Average
+                    1592 text  (30)
+                  1593 cell 72,594.22
+                  1595 cell Sell
+                1597 row
+                  1598 cell Exponential Moving Average (50)
+                    1599 link Exponential Moving Average
+                    1601 text  (50)
+                  1602 cell 73,398.02
+                  1604 cell Sell
+                1606 row
+                  1607 cell Simple Moving Average (50)
+                    1608 link Simple Moving Average
+                    1610 text  (50)
+                  1611 cell 76,719.64
+                  1613 cell Sell
+                1615 row
+                  1616 cell Exponential Moving Average (100)
+                    1617 link Exponential Moving Average
+                    1619 text  (100)
+                  1620 cell 74,752.87
+                  1622 cell Sell
+                1624 row
+                  1625 cell Simple Moving Average (100)
+                    1626 link Simple Moving Average
+                    1628 text  (100)
+                  1629 cell 77,648.99
+                  1631 cell Sell
+                1633 row
+                  1634 cell Exponential Moving Average (200)
+                    1635 link Exponential Moving Average
+                    1637 text  (200)
+                  1638 cell 75,127.06
+                  1640 cell Sell
+                1642 row
+                  1643 cell Simple Moving Average (200)
+                    1644 link Simple Moving Average
+                    1646 text  (200)
+                  1647 cell 72,374.26
+                  1649 cell Sell
+                1651 row
+                  1652 cell Ichimoku Base Line (9, 26, 52, 26)
+                    1653 link Ichimoku Base Line
+                    1655 text  (9, 26, 52, 26)
+                  1656 cell 68,550.50
+                  1658 cell Neutral
+                1660 row
+                  1661 cell Volume Weighted Moving Average (20)
+                    1662 link Volume Weighted Moving Average
+                    1664 text  (20)
+                  1665 cell 67,717.78
+                  1667 cell Sell
+                1669 row
+                  1670 cell Hull Moving Average (9)
+                    1671 link Hull Moving Average
+                    1673 text  (9)
+                  1674 cell 58,460.06
+                  1676 cell Buy
+              1678 link Pivots
+              1680 generic
+                1681 generic
+                1682 table
+                  1683 row
+                    1684 columnheader Pivot
+                    1686 columnheader Classic
+                    1688 columnheader Fibonacci
+                    1690 columnheader Camarilla
+                    1692 columnheader Woodie
+                    1694 columnheader DM
+                  1696 row
+                    1697 cell R3
+                    1699 cell 102,164.04
+                    1701 cell 91,270.02
+                    1703 cell 80,577.88
+                    1705 cell 93,923.05
+                    1707 cell —
+                  1709 row
+                    1710 cell R2
+                    1712 cell 91,270.02
+                    1714 cell 87,108.50
+                    1716 cell 79,579.26
+                    1718 cell 90,571.53
+                    1720 cell —
+                  1722 row
+                    1723 cell R1
+                    1725 cell 84,426.02
+                    1727 cell 84,537.52
+                    1729 cell 78,580.64
+                    1731 cell 83,029.03
+                    1733 cell 82,401.01
+                  1735 row
+                    1736 cell P
+                    1738 cell 80,376.00
+                    1740 cell 80,376.00
+                    1742 cell 80,376.00
+                    1744 cell 79,677.51
+                    1746 cell 79,363.50
+                  1748 row
+                    1749 cell S1
+                    1751 cell 73,532.00
+                    1753 cell 76,214.48
+                    1755 cell 76,583.40
+                    1757 cell 72,135.01
+                    1759 cell 71,506.99
+                  1761 row
+                    1762 cell S2
+                    1764 cell 69,481.98
+                    1766 cell 73,643.50
+                    1768 cell 75,584.78
+                    1770 cell 68,783.49
+                    1772 cell —
+                  1774 row
+                    1775 cell S3
+                    1777 cell 58,587.96
+                    1779 cell 69,481.98
+                    1781 cell 74,586.16
+                    1783 cell 61,240.99
+                    1785 cell —
+              1787 generic
+                1789 text Disclaimer
+                1790 generic
+                  1791 text This is not investment advice and doesn't take into account your personal circumstances. It isn't a recommendation to buy, sell, or hold any asset. See the 
+                  1792 link Terms of Use
+                  1794 text  and always do your own research.
+      1795 generic
+        1796 generic
+        1797 generic
+        1798 generic
+        1799 generic
+      1801 generic
+        1803 generic
+          1805 text Bitcoin / TetherUS
+          1806 text BINANCE
+          1807 text •
+          1808 text Real-time
+          1809 text •
+          1810 text Market open
+        1811 generic
+      1812 generic
+      1816 generic
+        1818 log
+          1819 list
+        1821 log
+          1822 list
+        1824 log
+          1825 list
+        1827 log
+          1828 list
+        1830 log
+          1831 list
+        1833 log
+          1834 list
+        1836 log
+          1837 list
+        1839 log
+          1840 list
+        1842 log
+          1843 list
+        1845 log
+          1846 list
+        1848 log
+          1849 list
+        1851 log
+          1852 list
+        1854 log
+          1855 list
+        1857 log
+          1858 list
+        1860 log
+          1861 list
+        1863 log
+          1864 list
+        1866 log
+          1867 list
+        1869 log
+          1870 list
+        1872 log
+          1873 list
+        1875 log
+          1876 list
+        1878 log
+          1879 list
+Post-cell AX evidence (untrusted page content; execution status unchanged):
+Browser tab: tab_4932e7ef-1a00-4977-8a82-277d43125a76, Title: "BTCUSDT 59,142.52 ▼ −1.78% Primary", URL: "http://127.0.0.1:8765/BTCUSDT%2059%2C156.34%20%E2%96%BC%20%E2%88%921.76%25%20Primary.html".
+903 AXWebArea BTCUSDT 59,142.52 ▼ −1.78% Primary
+  904 element Trading panel, truncated: text
+    905 generic
+      907 generic
+        908 generic
+        909 generic
+        910 generic
+        911 generic
+        912 generic
+          913 element
+            914 generic
+            915 progressbar
+              916 generic
+              918 generic
+              919 generic
+          920 generic
+        921 generic
+        922 generic
+        923 generic Trading panel
+      925 generic
+        926 generic
+        927 generic
+          928 button Logged in as Ralware Active layout: Primary
+          929 text 5
+        932 toolbar
+          935 generic
+            936 button BTCUSDT
+            938 button Switch data type
+        940 toolbar
+          943 generic
+            945 generic
+              946 button Cross
+              947 button Cursors, pressed: true
+            949 generic
+              950 button Trendline
+              951 button Trend tools, pressed: false
+            953 generic
+              954 button Fib retracement
+              955 button Gann and Fibonacci tools, pressed: false
+            957 generic
+              958 button XABCD pattern
+              959 button Patterns, pressed: false
+            961 generic
+              962 button Long position
+              963 button Forecasting and measurement tools, pressed: false
+            965 generic
+              966 button Brush
+              967 button Geometric shapes, pressed: false
+            969 generic
+              970 button Text
+              971 button Annotation tools, pressed: false
+            973 generic
+              974 button Icon
+              975 button Icons, pressed: false
+            976 button Measure
+            977 button Zoom in
+            980 generic
+              981 button Magnet mode snaps drawings placed near price bars to the closest OHLC value, pressed: false
+              982 button Magnets, pressed: false
+            983 button Keep drawing, pressed: false
+            985 generic
+              986 button Lock drawings and indicators, pressed: false
+              987 button Lock options, pressed: false
+            989 generic
+              990 button Hide all drawings, pressed: false
+              991 button Hide options, pressed: false
+            993 generic
+              994 button Remove objects
+              995 button Remove options
+        996 generic
+          999 region Chart #1
+            1000 generic
+            1001 generic
+              1002 toolbar
+                1003 generic
+                  1004 generic, Description: Change symbol
+                    1005 generic
+                      1006 image
+                      1007 text B
+                    1008 button Change symbol
+                      1009 text Bitcoin / TetherUS
+                  1010 generic, Description: Change interval
+                    1011 generic
+                    1012 button Change interval
+                      1013 text 4h
+                  1014 generic
+                    1015 generic
+                    1017 text Binance
+                1018 generic
+                  1019 button Flag symbol, Description: Flag symbol
+                    1021 image
+                  1022 button More options for Bitcoin / TetherUS, Description: More
+                    1023 image
+                1025 generic
+                  1026 button Market open · Data updates once per second, Description: Market open · Data updates once per second
+                  1027 text Open
+                  1028 text 1s updates
+                  1029 text Get real-time
+                1031 generic
+                  1032 generic
+                    1033 text O
+                    1034 text 59,359.99
+                  1035 generic
+                    1036 text H
+                    1037 text 59,668.02
+                  1038 generic
+                    1039 text L
+                    1040 text 58,768.51
+                  1041 generic
+                    1042 text C
+                    1043 text 59,147.78
+                  1045 text −212.20 (−0.36%)
+              1046 generic
+                1047 generic
+                  1048 text 59,142.52
+                  1049 text SELL
+                1051 text 0.01
+                1052 generic
+                  1053 text 59,142.53
+                  1054 text BUY
+              1056 button Show indicators legend, Description: Show indicators legend
+                1058 image
+                1060 text 2
+              1061 Canvas Chart for BINANCE:BTCUSDT, 4 hours
+            1062 generic
+            1063 generic
+            1064 generic
+            1066 toolbar Navigation
+              1067 button Zoom out, Description: Zoom out
+              1068 button Zoom in, Description: Zoom in
+              1069 button Scroll to the left, Description: Scroll to the left
+              1070 button Scroll to the right, Description: Scroll to the right
+              1071 button Reset chart view, Description: Reset chart view
+            1072 generic
+          1074 toolbar
+            1075 generic
+              1076 button 1 day in 1 minute intervals
+                1078 text 1D
+              1079 button 5 days in 5 minutes intervals
+                1081 text 5D
+              1082 button 1 month in 30 minutes intervals
+                1084 text 1M
+              1085 button 3 months in 1 hour intervals
+                1087 text 3M
+              1088 button 6 months in 2 hours intervals
+                1090 text 6M
+              1091 button Year to day in 1 day intervals
+                1093 text YTD
+              1094 button 1 year in 1 day intervals
+                1096 text 1Y
+              1097 button 5 years in 1 week intervals
+                1099 text 5Y
+              1100 button All data in 1 month intervals
+                1102 text All
+              1103 separator
+              1104 button Go to
+            1107 button Timezone
+              1109 text 06:46:33 UTC
+        1111 generic
+          1116 toolbar
+            1117 button Watchlist, details, and news, pressed: true
+            1118 button Alerts, pressed: false
+            1119 button Object tree and data window, pressed: false
+            1121 button AI Copilot, pressed: false
+            1122 button Screeners, pressed: false
+            1123 button Pine Screener, pressed: false
+            1124 button Pine Editor, pressed: false
+            1125 button Calendars, pressed: false
+            1126 button Community, pressed: false
+            1127 button Notifications, pressed: false
+            1128 button Chats, pressed: false
+            1129 button Products
+            1130 separator
+            1131 button Help, pressed: false
+          1132 generic
+            1133 generic
+              1135 button Watchlist
+              1137 button Add symbol
+              1138 button Advanced view
+              1139 button Settings
+              1141 generic
+                1142 button
+                1143 button Symbol
+                1145 button Last
+                1147 button Chg
+                1149 button Chg%
+                1152 generic
+                  1153 generic
+                  1155 generic
+                    1156 generic
+                    1158 group
+                      1159 generic
+                        1160 generic
+                        1161 image
+                        1162 text B
+                        1163 text BTCUSDT
+                        1164 text 59,147.7
+                        1165 text 8
+                        1166 text −1,067.99
+                        1167 text −1.77%
+                        1168 generic
+
+[AX evidence truncated; observe before using undisplayed targets.]
+Screenshot reference: {"path":"C:\\Users\\Ral\\AppData\\Local\\Temp\\manus-browser-artifacts-RZJTGq\\screenshot-Showqq\\BTCUSDT 59,142.52 ▼ −1.78 Primary.png","mimeType":"image/png"}

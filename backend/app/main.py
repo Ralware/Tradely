@@ -13,6 +13,7 @@ from app.core.database import Database
 from app.instruments.resolver import InstrumentResolver
 from app.services.market import MarketService
 from app.services.quotes import QuoteService
+from app.services.analytics_precompute import AnalyticsPrecompute
 
 settings = get_settings()
 if settings.host not in {"127.0.0.1", "localhost", "::1"}:
@@ -21,8 +22,14 @@ if settings.host not in {"127.0.0.1", "localhost", "::1"}:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # TradingView connections are owned by the local Node.js bridge.
-    yield
+    # The durable queue survives restarts; only one bounded worker is started
+    # in this process. Expired leases are recovered when jobs are claimed.
+    app.state.analytics_precompute.enqueue_watchlist()
+    app.state.analytics_precompute.start()
+    try:
+        yield
+    finally:
+        app.state.analytics_precompute.stop()
     try:
         app.state.quote_service.shutdown()
     except Exception:
@@ -42,6 +49,7 @@ app.state.instrument_resolver = InstrumentResolver(settings, app.state.db)
 app.state.instrument_resolver.ensure_catalogue()
 app.state.market_service = MarketService(settings)
 app.state.quote_service = QuoteService(settings, app.state.market_service, app.state.db)
+app.state.analytics_precompute = AnalyticsPrecompute(app.state.db, app.state.market_service)
 app.include_router(router)
 
 FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"

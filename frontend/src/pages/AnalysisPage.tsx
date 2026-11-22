@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useSelectedInstrument } from "../contexts/SelectedInstrumentContext";
 import { AnalysisWorkspace } from "../components/analysis/AnalysisWorkspace";
 import { AnalysisWatchlist } from "../components/analysis/AnalysisWatchlist";
-import type { WatchlistItem } from "../types/api";
+import type { DirectionMode, WatchlistItem } from "../types/api";
 import { instrumentPath } from "../utils/navigation";
 import { Icon } from "../components/common/Icon";
 
@@ -11,6 +11,7 @@ export function AnalysisPage() {
   const navigate = useNavigate();
   const selected = useSelectedInstrument();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [directionMode, setDirectionMode] = useState<DirectionMode>('long_only');
 
   function handleSelectInstrument(item: WatchlistItem) {
     setDrawerOpen(false);
@@ -35,7 +36,7 @@ export function AnalysisPage() {
   }
 
   return (
-    <div className="flex h-full w-full overflow-hidden">
+    <div className="tv-analysis-page flex h-full w-full overflow-hidden">
       {/* Center Main Analysis Workspace */}
       <div className="flex-1 min-w-0 h-full overflow-y-auto px-3 py-3 lg:px-4">
         {/* Mobile/Tablet Right-Watchlist Toggle Button */}
@@ -43,14 +44,17 @@ export function AnalysisPage() {
           <button
             type="button"
             onClick={() => setDrawerOpen(true)}
-            className="flex items-center gap-1.5 rounded border border-terminal-border bg-terminal-panel px-2.5 py-1 text-2xs font-medium text-terminal-muted hover:text-white"
+            className="tv-analysis-watchlist-toggle flex items-center gap-1.5 rounded border border-terminal-border bg-terminal-panel px-2.5 py-1 text-2xs font-medium text-terminal-muted hover:text-white"
           >
             <Icon name="portfolio" size={13} />
             <span>Watchlist</span>
           </button>
         </div>
 
-        <AnalysisWorkspace />
+        <AnalysisWorkspace
+          directionMode={directionMode}
+          onDirectionModeChange={setDirectionMode}
+        />
       </div>
 
       {/* Desktop Fixed Right-Hand Watchlist Sidebar */}

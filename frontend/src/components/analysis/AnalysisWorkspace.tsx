@@ -1,10 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useApi } from '../../hooks/useApi';
 import { useSelectedInstrument } from '../../contexts/SelectedInstrumentContext';
-import { analysisService } from '../../services/analysisService';
-import type { PrefetchResult } from '../../services/analysisService';
+import { apiRequest } from '../../services/api';
+import { snapshotStore } from '../../services/snapshotStore';
 import { portfolioService } from '../../services/portfolioService';
 import type { DirectionMode, Instrument } from '../../types/api';
 import { changeDigits, cn, formatDate, formatNumber, formatPercent, formatSignedFixed, toneForNumber } from '../../utils/format';
@@ -26,7 +25,6 @@ import { CandleTable } from '../tables/CandleTable';
 import { IndicatorTable } from '../tables/IndicatorTable';
 import { TechnicalGauge } from './TechnicalGauge';
 import { TechnicalTable } from './TechnicalTable';
-import { TechnicalDistribution } from './TechnicalDistribution';
 import { TimeframeSelector } from './TimeframeSelector';
 
 function ToggleChip({
@@ -67,13 +65,18 @@ function marketLabel(market: string, assetType: string | undefined): string {
   return market === 'india' ? 'India' : 'Global';
 }
 
-export function AnalysisWorkspace() {
+export function AnalysisWorkspace({
+  directionMode: controlledDirectionMode,
+  onDirectionModeChange,
+}: {
+  directionMode?: DirectionMode;
+  onDirectionModeChange?: (mode: DirectionMode) => void;
+} = {}) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const selected = useSelectedInstrument();
 
   const { symbol, name, market, exchange, interval, days, instrumentId, capabilities } = selected;
-  const enabled = selected.enabled;
 
   const [overlays, setOverlays] = useState<OverlayToggles>({
     sma: false,
@@ -82,78 +85,41 @@ export function AnalysisWorkspace() {
   });
   const [showRsi, setShowRsi] = useState(false);
   const [showMacd, setShowMacd] = useState(false);
-  const [directionMode, setDirectionMode] = useState<DirectionMode>('long_only');
+  const [localDirectionMode, setLocalDirectionMode] = useState<DirectionMode>('long_only');
+  const directionMode = controlledDirectionMode ?? localDirectionMode;
+  const setDirectionMode = onDirectionModeChange ?? setLocalDirectionMode;
   const [tab, setTab] = useState('risk');
-  const [prefetchState, setPrefetchState] = useState<PrefetchResult>({
-    total: 0,
-    completed: 0,
-    failures: [],
-  });
-  const forceRefreshNext = useRef(false);
-  const retryController = useRef<AbortController | null>(null);
+  const [, forceSnapshotRender] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
   const [watchState, setWatchState] = useState<{
     loading: boolean;
     message: string | null;
     error: string | null;
   }>({ loading: false, message: null, error: null });
 
-  const analysis = useApi(
-    (signal) => {
-      const forceRefresh = forceRefreshNext.current;
-      forceRefreshNext.current = false;
-      return analysisService.getAnalyticsSnapshot(
-        { instrumentId, interval, days, directionMode },
-        signal,
-        { forceRefresh },
-      );
-    },
-    [instrumentId, interval, days, directionMode],
-    {
-      enabled,
-      keepPreviousData: true,
-      keepPreviousDataKey: `${instrumentId}:${interval}:${days}:${directionMode}`,
-      keepPreviousDataScopeKey: instrumentId,
-      getCachedData: () => analysisService.getCachedAnalyticsSnapshot({ instrumentId, interval, days, directionMode }),
-    },
-  );
+  useEffect(() => {
+    if (!instrumentId) return undefined;
+    const select = () => forceSnapshotRender((value) => value + 1);
+    return snapshotStore.subscribe(instrumentId, interval, select);
+  }, [instrumentId, interval]);
 
-  const snapshot = analysis.data;
-  const data = snapshot?.analysis ?? null;
+  const snapshot = instrumentId ? snapshotStore.getSnapshot(instrumentId, interval) : undefined;
+  const data = snapshot?.analysis ? {
+    ...snapshot.analysis,
+    strategy: snapshot.strategy_variants?.[`${directionMode}:NONE`]
+      ?? snapshot.strategy_variants?.[`${directionMode}:LONG`]
+      ?? snapshot.strategy_variants?.[`${directionMode}:SHORT`],
+  } : null;
   const technicals = snapshot?.technical_ratings ?? null;
   const indicatorSeries = snapshot?.indicator_series ?? null;
   const currency = selected.currency || (market === 'india' ? 'INR' : market === 'crypto' ? 'USDT' : 'USD');
   const quote = selected.quote;
   const displayedInterval = data?.interval ?? interval;
   const intraday = isIntradayInterval(displayedInterval);
-  const switchingSnapshot = analysis.isPreviousData;
-  const updating = analysis.refreshing || switchingSnapshot;
-
-  useEffect(() => {
-    if (!enabled || !instrumentId || !snapshot || snapshot.interval !== interval) {
-      return undefined;
-    }
-
-    const alternateTimeframes = selected.timeframes
-      .filter((timeframe) => timeframe.id !== interval)
-      .map((timeframe) => timeframe.id);
-    const controller = new AbortController();
-    setPrefetchState({ total: alternateTimeframes.length, completed: 0, failures: [] });
-    void analysisService.prefetchTimeframes(
-      { instrumentId, interval, days, directionMode },
-      alternateTimeframes,
-      controller.signal,
-      setPrefetchState,
-    ).then((result) => {
-      if (!controller.signal.aborted) setPrefetchState(result);
-    });
-
-    return () => controller.abort();
-  }, [snapshot?.snapshot_id, days, directionMode, enabled, instrumentId, interval, selected.timeframes]);
-
-  useEffect(() => () => {
-    retryController.current?.abort();
-    retryController.current = null;
-  }, [instrumentId, interval]);
+  const manifest = instrumentId ? snapshotStore.getManifestItem(instrumentId, interval) : undefined;
+  const updating = refreshing;
+  const missing = !snapshot;
+  const error = manifest?.last_error ?? null;
 
   const last = quote?.last ?? data?.latest.close ?? null;
   const previousClose =
@@ -178,47 +144,14 @@ export function AnalysisWorkspace() {
     setSearchParams(next, { replace: true });
   }
 
-  function refreshAll() {
+  async function refreshAll() {
     if (!instrumentId) return;
-    analysisService.invalidateInstrumentCache(instrumentId);
-    forceRefreshNext.current = true;
-    selected.reload();
-    analysis.reload();
-  }
-
-  async function retryTimeframe(intervalToRetry: string) {
-    if (!instrumentId) return;
-    const timeframe = selected.timeframes.find((item) => item.id === intervalToRetry);
-    if (!timeframe) return;
-    retryController.current?.abort();
-    const controller = new AbortController();
-    retryController.current = controller;
+    setRefreshing(true);
     try {
-      await analysisService.getAnalyticsSnapshot(
-        { instrumentId, interval: intervalToRetry, days: timeframe.days, directionMode },
-        controller.signal,
-        { prefetch: true },
-      );
-      if (!controller.signal.aborted) {
-        setPrefetchState((current) => ({
-          ...current,
-          failures: current.failures.filter((failure) => failure.interval !== intervalToRetry),
-        }));
-      }
-    } catch (caught) {
-      if (!controller.signal.aborted) {
-        setPrefetchState((current) => ({
-          ...current,
-          failures: [
-            ...current.failures.filter((failure) => failure.interval !== intervalToRetry),
-            {
-              interval: intervalToRetry,
-              error: caught instanceof Error ? caught.message : 'Timeframe preparation failed',
-            },
-          ],
-        }));
-      }
-    }
+      await apiRequest('/api/analytics/precompute/refresh', {
+        method: 'POST', query: { instrument_id: instrumentId, interval },
+      });
+    } finally { setRefreshing(false); }
   }
 
   async function addToWatchlist() {
@@ -246,8 +179,8 @@ export function AnalysisWorkspace() {
   const activeTab = tabs.some((item) => item.id === tab) ? tab : 'risk';
 
   return (
-    <div className="space-y-3">
-      <div className="panel-surface flex flex-wrap items-center justify-between gap-2 px-2 py-1.5">
+    <div className="tv-technicals space-y-3">
+      <div className="tv-analysis-toolbar panel-surface flex flex-wrap items-center justify-between gap-2 px-2 py-1.5">
         <InstrumentSearch
           className="w-56 sm:w-64"
           placeholder="Search Ticker Or Name"
@@ -260,7 +193,7 @@ export function AnalysisWorkspace() {
           {watchState.error ? (
             <span className="text-2xs text-terminal-red">{watchState.error}</span>
           ) : null}
-          <Button size="sm" icon="refresh" onClick={refreshAll} loading={analysis.loading}>
+          <Button size="sm" icon="refresh" onClick={() => void refreshAll()} loading={refreshing}>
             Refresh
           </Button>
           <Button
@@ -282,26 +215,22 @@ export function AnalysisWorkspace() {
           description="Search a ticker, crypto pair, or asset name above."
           icon="search"
         />
-      ) : analysis.loading && !data ? (
-        <LoadingPanel label={`Loading ${symbol}`} rows={10} />
-      ) : !data && analysis.error ? (
-        <ErrorState message={analysis.error} onRetry={analysis.reload} />
+      ) : missing ? (
+        <EmptyState
+          title={manifest?.status === 'FAILED' ? 'Preparation Failed' : 'Analytics Preparing'}
+          description={error ?? `The ${intervalLabel(interval)} snapshot is not available locally yet. Preparation continues in the background; opening Analytics will not trigger market-data requests.`}
+          icon="chart"
+        />
       ) : data ? (
         <>
-          {analysis.error ? (
+          {error ? (
             <Notice tone="warning">
-              {switchingSnapshot
-                ? `Could Not Load ${intervalLabel(interval)} · Still showing the last complete ${intervalLabel(displayedInterval)} snapshot. ${analysis.error}`
-                : `Could Not Refresh ${symbol} · ${analysis.error}`}
-            </Notice>
-          ) : switchingSnapshot ? (
-            <Notice tone="neutral">
-              Preparing {intervalLabel(interval)} · Keeping the complete {intervalLabel(displayedInterval)} snapshot visible until the new timeframe is ready.
+              {`Refresh issue for ${symbol}; the last complete snapshot remains available. ${error}`}
             </Notice>
           ) : null}
           {data.warnings.length > 0 ? (
             <div className="space-y-1">
-              {data.warnings.map((warning) => (
+              {data.warnings.map((warning: string) => (
                 <Notice key={warning} tone="warning">
                   {warning}
                 </Notice>
@@ -309,7 +238,7 @@ export function AnalysisWorkspace() {
             </div>
           ) : null}
 
-          <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+      <div className="tv-instrument-heading flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <h1 className="text-lg font-semibold leading-none tracking-tight text-terminal-text">
@@ -362,6 +291,7 @@ export function AnalysisWorkspace() {
               />
               <div className="flex items-end gap-2">
                 <TimeframeSelector
+                  className="tv-timeframe-selector"
                   options={selected.timeframes}
                   value={interval}
                   onChange={changeTimeframe}
@@ -369,26 +299,10 @@ export function AnalysisWorkspace() {
                 <span
                   className="self-center whitespace-nowrap text-2xs text-terminal-muted"
                   role="status"
-                  title={prefetchState.failures.map((failure) => `${failure.interval}: ${failure.error}`).join(' · ')}
+                  title={manifest?.last_error ?? ''}
                 >
-                  {switchingSnapshot
-                    ? `Loading ${intervalLabel(interval)} · showing ${intervalLabel(displayedInterval)}`
-                    : prefetchState.failures.length > 0
-                      ? `${prefetchState.failures.length} timeframe${prefetchState.failures.length === 1 ? '' : 's'} unavailable`
-                      : prefetchState.total === 0 || prefetchState.completed >= prefetchState.total
-                        ? `Prepared ${Math.min(selected.timeframes.length, prefetchState.completed + 1)}/${selected.timeframes.length}`
-                        : `Preparing ${Math.min(selected.timeframes.length, prefetchState.completed + 1)}/${selected.timeframes.length}`}
+                  {manifest?.status ?? 'MISSING'} · {manifest?.candle_count ?? 0} bars
                 </span>
-                {prefetchState.failures.map((failure) => (
-                  <button
-                    key={failure.interval}
-                    type="button"
-                    onClick={() => void retryTimeframe(failure.interval)}
-                    className="self-center text-2xs text-terminal-amber underline decoration-terminal-amber/40 underline-offset-2 hover:text-terminal-text"
-                  >
-                    Retry {failure.interval}
-                  </button>
-                ))}
                 <span
                   role="status"
                   className={cn(
@@ -406,36 +320,33 @@ export function AnalysisWorkspace() {
             </div>
           </div>
 
-          <section className="panel-surface">
-            <header className="flex flex-wrap items-center justify-between gap-2 border-b border-terminal-border px-3 py-1.5">
+          <section className="tv-rating-overview">
+            <header className="tv-rating-overview-header">
               <div>
-                <h2 className="text-xs font-semibold text-terminal-text">Technical Ratings Overview</h2>
-                <p className="mt-0.5 text-2xs text-terminal-muted">TradingView TechnicalRating v3 · Pine Script v6 · {intervalLabel(displayedInterval)}</p>
+                <h2 className="tv-rating-overview-title">Technical Ratings</h2>
+                <p className="tv-rating-overview-subtitle">
+                  {intervalLabel(displayedInterval)}
+                  {technicals ? ` · ${technicals.source_name} · ${technicals.source_version}` : ''}
+                </p>
               </div>
-              <span className="truncate text-2xs text-terminal-muted">{technicals?.source_name} · {technicals?.source_version}</span>
+              <span className="tv-rating-overview-asof">As of {formatDate(technicals?.as_of ?? data.as_of)}</span>
             </header>
-            <div className={cn('px-3 py-3 transition-opacity duration-300', updating ? 'opacity-70' : 'opacity-100')}>
+            <div className={cn('tv-rating-gauges transition-opacity duration-300', updating ? 'opacity-70' : 'opacity-100')}>
               {technicals ? (
-                <div className="grid grid-cols-1 items-end gap-4 sm:grid-cols-3">
-                  <div className="flex justify-center">
-                    <TechnicalGauge label="Oscillators" summary={technicals.summary.oscillators} />
-                  </div>
-                  <div className="flex justify-center">
-                    <TechnicalGauge label="Overall" summary={technicals.summary.overall} size="hero" />
-                  </div>
-                  <div className="flex justify-center">
-                    <TechnicalGauge label="Moving Averages" summary={technicals.summary.moving_averages} />
-                  </div>
-                </div>
-              ) : analysis.error ? (
-                <ErrorState message={analysis.error} onRetry={analysis.reload} />
+                <>
+                  <TechnicalGauge label="Oscillators" summary={technicals.summary.oscillators} />
+                  <TechnicalGauge label="Overall" summary={technicals.summary.overall} size="hero" />
+                  <TechnicalGauge label="Moving Averages" summary={technicals.summary.moving_averages} />
+                </>
+              ) : error ? (
+                <ErrorState message={error} onRetry={() => void refreshAll()} />
               ) : (
                 <LoadingPanel label="Loading TradingView Technical Rating · Pine Script v6" rows={3} />
               )}
             </div>
           </section>
 
-          <section className="panel-surface">
+          <section className="panel-surface tv-price-chart">
             <header className="flex flex-wrap items-center justify-between gap-2 border-b border-terminal-border px-3 py-1.5">
               <div className="flex items-baseline gap-2">
                 <h2 className="text-xs font-semibold text-terminal-text">Price Chart</h2>
@@ -491,14 +402,14 @@ export function AnalysisWorkspace() {
           </section>
 
           {technicals ? (
-            <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+            <div className="tv-technical-tables grid grid-cols-1 gap-3 xl:grid-cols-2">
               <TechnicalTable
-                title="Moving Average Analysis"
+                title="Moving Averages"
                 rows={technicals.moving_averages}
                 summary={technicals.summary.moving_averages}
               />
               <TechnicalTable
-                title="Oscillator Analysis"
+                title="Oscillators"
                 rows={technicals.oscillators}
                 summary={technicals.summary.oscillators}
               />
@@ -506,25 +417,28 @@ export function AnalysisWorkspace() {
           ) : null}
 
           {technicals ? (
-            <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-              <TechnicalDistribution summary={technicals.summary} />
+            <div className="tv-strategy-summary">
               <SignalCard signal={data.strategy} />
             </div>
           ) : null}
 
-          <Tabs items={tabs} active={activeTab} onChange={setTab} />
+          <div className="tv-analysis-tabs">
+            <Tabs items={tabs} active={activeTab} onChange={setTab} />
+          </div>
 
           {activeTab === 'risk' ? (
-            <RiskCalculator
-              entry={data.strategy.entry_reference ?? data.latest.close}
-              stop={data.strategy.stop_reference}
-              direction={data.strategy.direction ?? 'LONG'}
-              currency={currency}
-            />
+            <div className="tv-tab-panel">
+              <RiskCalculator
+                entry={data.strategy.entry_reference ?? data.latest.close}
+                stop={data.strategy.stop_reference}
+                direction={data.strategy.direction ?? 'LONG'}
+                currency={currency}
+              />
+            </div>
           ) : null}
 
           {activeTab === 'indicators' ? (
-            <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+            <div className="tv-tab-panel grid grid-cols-1 gap-3 xl:grid-cols-2">
               <IndicatorPanel indicators={data.indicators} close={data.latest.close} />
               <Card title="Indicator Values" subtitle="Latest Completed Bar">
                 <IndicatorTable indicators={data.indicators} />
@@ -533,12 +447,14 @@ export function AnalysisWorkspace() {
           ) : null}
 
           {activeTab === 'candles' ? (
-            <Card
-              title="Recent Candles"
-              subtitle={`Last ${Math.min(30, data.candles.length)} Bars · ${intervalLabel(displayedInterval)}`}
-            >
-              <CandleTable candles={data.candles} limit={30} />
-            </Card>
+            <div className="tv-tab-panel">
+              <Card
+                title="Recent Candles"
+                subtitle={`Last ${Math.min(30, data.candles.length)} Bars · ${intervalLabel(displayedInterval)}`}
+              >
+                <CandleTable candles={data.candles} limit={30} />
+              </Card>
+            </div>
           ) : null}
 
         </>
