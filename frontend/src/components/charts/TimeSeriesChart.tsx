@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef } from 'react';
 import type { PointerEvent } from 'react';
 import { clamp } from '../../utils/format';
 import { EmptyState } from '../common/States';
@@ -35,7 +35,10 @@ export function TimeSeriesChart({
 }: TimeSeriesChartProps) {
   const rawId = useId();
   const gradientId = `grad-${rawId.replace(/[^a-zA-Z0-9]/g, '')}`;
-  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const crosshairRef = useRef<SVGLineElement | null>(null);
+  const markerRef = useRef<SVGCircleElement | null>(null);
+  const tooltipRef = useRef<HTMLSpanElement | null>(null);
+  const frameRef = useRef<number | null>(null);
 
   const geometry = useMemo(() => {
     const valid = points.filter((point) => Number.isFinite(point.value));
@@ -76,24 +79,69 @@ export function TimeSeriesChart({
       value: max - fraction * span,
     }));
 
-    return { valid, line, area, ticks, x, y, min, max };
+    return { valid, line, area, ticks, x, y };
   }, [points, baseline]);
+
+  useEffect(() => {
+    crosshairRef.current?.setAttribute('opacity', '0');
+    markerRef.current?.setAttribute('opacity', '0');
+    if (tooltipRef.current && geometry) {
+      const last = geometry.valid[geometry.valid.length - 1];
+      tooltipRef.current.textContent = `${shortDate(last.timestamp)} · ${valueFormatter(last.value)}`;
+    }
+  }, [geometry, valueFormatter]);
+
+  useEffect(() => () => {
+    if (frameRef.current !== null) {
+      cancelAnimationFrame(frameRef.current);
+    }
+  }, []);
 
   if (!geometry) {
     return <EmptyState title="No series data" icon="chart" />;
   }
 
   const { valid, line, area, ticks, x, y } = geometry;
-  const hovered = hoverIndex === null ? null : valid[hoverIndex];
   const last = valid[valid.length - 1];
 
   function handleMove(event: PointerEvent<HTMLDivElement>) {
-    const rect = event.currentTarget.getBoundingClientRect();
-    if (rect.width === 0) {
-      return;
+    const element = event.currentTarget;
+    const clientX = event.clientX;
+    if (frameRef.current !== null) {
+      cancelAnimationFrame(frameRef.current);
     }
-    const fraction = clamp((event.clientX - rect.left) / rect.width, 0, 1);
-    setHoverIndex(Math.round(fraction * (valid.length - 1)));
+    frameRef.current = requestAnimationFrame(() => {
+      const rect = element.getBoundingClientRect();
+      const plotWidth = Math.max(1, rect.width - 56);
+      const fraction = clamp((clientX - rect.left) / plotWidth, 0, 1);
+      const index = Math.round(fraction * (valid.length - 1));
+      const point = valid[index];
+      if (!point) return;
+      const chartX = x(index);
+      const chartY = y(point.value);
+      crosshairRef.current?.setAttribute('x1', String(chartX));
+      crosshairRef.current?.setAttribute('x2', String(chartX));
+      crosshairRef.current?.setAttribute('opacity', '1');
+      markerRef.current?.setAttribute('cx', String(chartX));
+      markerRef.current?.setAttribute('cy', String(chartY));
+      markerRef.current?.setAttribute('opacity', '1');
+      if (tooltipRef.current) {
+        tooltipRef.current.textContent = `${shortDate(point.timestamp)} · ${valueFormatter(point.value)}`;
+      }
+      frameRef.current = null;
+    });
+  }
+
+  function handleLeave() {
+    if (frameRef.current !== null) {
+      cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    }
+    crosshairRef.current?.setAttribute('opacity', '0');
+    markerRef.current?.setAttribute('opacity', '0');
+    if (tooltipRef.current) {
+      tooltipRef.current.textContent = `${shortDate(last.timestamp)} · ${valueFormatter(last.value)}`;
+    }
   }
 
   return (
@@ -103,7 +151,7 @@ export function TimeSeriesChart({
       role="img"
       aria-label={ariaLabel}
       onPointerMove={handleMove}
-      onPointerLeave={() => setHoverIndex(null)}
+      onPointerLeave={handleLeave}
     >
       <div className="absolute inset-y-0 left-0 right-14">
         <svg
@@ -153,35 +201,32 @@ export function TimeSeriesChart({
             vectorEffect="non-scaling-stroke"
             strokeLinejoin="round"
           />
-
-          {hovered ? (
-            <>
-              <line
-                x1={x(hoverIndex ?? 0)}
-                x2={x(hoverIndex ?? 0)}
-                y1="0"
-                y2="100"
-                stroke="#3a3f4a"
-                strokeWidth="1"
-                strokeDasharray="3 3"
-                vectorEffect="non-scaling-stroke"
-              />
-              <circle
-                cx={x(hoverIndex ?? 0)}
-                cy={y(hovered.value)}
-                r="1.6"
-                fill={color}
-                vectorEffect="non-scaling-stroke"
-              />
-            </>
-          ) : null}
+          <line
+            ref={crosshairRef}
+            x1="0"
+            x2="0"
+            y1="0"
+            y2="100"
+            stroke="#555c66"
+            strokeWidth="1"
+            strokeDasharray="3 3"
+            vectorEffect="non-scaling-stroke"
+            opacity="0"
+          />
+          <circle
+            ref={markerRef}
+            cx="0"
+            cy="0"
+            r="1.6"
+            fill={color}
+            vectorEffect="non-scaling-stroke"
+            opacity="0"
+          />
         </svg>
 
         <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-end">
-          <span className="num rounded-sm border border-terminal-border bg-terminal-panelAlt/90 px-2 py-0.5 text-2xs text-terminal-text">
-            {hovered
-              ? `${shortDate(hovered.timestamp)} · ${valueFormatter(hovered.value)}`
-              : `${shortDate(last.timestamp)} · ${valueFormatter(last.value)}`}
+          <span ref={tooltipRef} className="num rounded-sm border border-terminal-border bg-terminal-panelAlt/95 px-2 py-0.5 text-2xs text-terminal-text">
+            {shortDate(last.timestamp)} · {valueFormatter(last.value)}
           </span>
         </div>
       </div>

@@ -27,6 +27,15 @@ export function WatchlistPage() {
   const [addingError, setAddingError] = useState<string | null>(null);
   const [watchlistSort, setWatchlistSort] = useState<WatchlistSort | null>(null);
 
+  useEffect(() => {
+    if (!addModalOpen) return undefined;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') setAddModalOpen(false);
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [addModalOpen]);
+
   const watchlistItems = useMemo(() => watchlist.data?.items ?? [], [watchlist.data]);
   const watchlistRefs = useMemo(
     () => watchlistItems.map(quoteRefFromWatchlist),
@@ -171,7 +180,8 @@ export function WatchlistPage() {
           <button
             type="button"
             onClick={handleRefreshAll}
-            title="Refresh Watchlist"
+            aria-label="Refresh watchlist data"
+            title="Refresh watchlist data"
             className="flex h-8 w-8 items-center justify-center rounded-sm border border-terminal-border bg-terminal-panel text-terminal-muted hover:bg-white/[0.05] hover:text-terminal-text transition-colors"
           >
             <Icon name="refresh" size={14} />
@@ -221,11 +231,11 @@ export function WatchlistPage() {
 
       {/* Add Instrument Modal */}
       {addModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
-          <div className="w-full max-w-md rounded-md border border-terminal-border bg-terminal-panel p-4 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-xs" onMouseDown={(event) => { if (event.target === event.currentTarget) setAddModalOpen(false); }}>
+          <div role="dialog" aria-modal="true" aria-labelledby="watchlist-dialog-title" className="w-full max-w-md rounded-sm border border-terminal-border bg-terminal-panelAlt p-4 shadow-2xl">
             <div className="mb-3 flex items-center justify-between border-b border-terminal-border pb-2.5">
               <div>
-                <h3 className="text-sm font-semibold text-terminal-text">Add to Watchlist</h3>
+                <h3 id="watchlist-dialog-title" className="text-sm font-semibold text-terminal-text">Add to Watchlist</h3>
                 <p className="text-2xs text-terminal-muted">
                   Search across Indian stocks, US equities, and crypto pairs
                 </p>

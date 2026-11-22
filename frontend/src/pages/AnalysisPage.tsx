@@ -40,7 +40,7 @@ export function AnalysisPage() {
       {/* Center Main Analysis Workspace */}
       <div className="flex-1 min-w-0 h-full overflow-y-auto px-3 py-3 lg:px-4">
         {/* Mobile/Tablet Right-Watchlist Toggle Button */}
-        <div className="mb-2 flex justify-end lg:hidden">
+        <div className="mb-2 flex justify-end xl:hidden">
           <button
             type="button"
             onClick={() => setDrawerOpen(true)}
@@ -58,7 +58,7 @@ export function AnalysisPage() {
       </div>
 
       {/* Desktop Fixed Right-Hand Watchlist Sidebar */}
-      <aside className="hidden lg:block w-72 shrink-0 h-full">
+      <aside className="hidden xl:block w-72 shrink-0 h-full border-l border-terminal-border">
         <AnalysisWatchlist
           selectedInstrumentId={selected.instrumentId}
           onSelectInstrument={handleSelectInstrument}
@@ -67,15 +67,15 @@ export function AnalysisPage() {
 
       {/* Mobile/Tablet Watchlist Slide-out Drawer */}
       {drawerOpen && (
-        <div className="fixed inset-0 z-50 flex lg:hidden">
-          <div
-            className="fixed inset-0 bg-black/70 backdrop-blur-xs transition-opacity"
-            onClick={() => setDrawerOpen(false)}
-          />
-          <div className="relative ml-auto flex h-full w-80 max-w-[85vw] flex-col bg-black shadow-2xl">
-            <AnalysisWatchlist
-              selectedInstrumentId={selected.instrumentId}
-              onSelectInstrument={handleSelectInstrument}
+          <div className="fixed inset-0 z-50 flex xl:hidden">
+            <div
+              className="fixed inset-0 bg-black/70 backdrop-blur-xs transition-opacity"
+              onClick={() => setDrawerOpen(false)}
+            />
+            <div className="tv-analysis-watchlist-drawer relative ml-auto flex h-full w-80 max-w-[85vw] flex-col bg-black shadow-2xl">
+              <AnalysisWatchlist
+                selectedInstrumentId={selected.instrumentId}
+                onSelectInstrument={handleSelectInstrument}
               onClose={() => setDrawerOpen(false)}
             />
           </div>

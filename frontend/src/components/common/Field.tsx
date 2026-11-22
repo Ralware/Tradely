@@ -8,9 +8,9 @@ import { useId } from 'react';
 import { cn } from '../../utils/format';
 
 const controlClasses =
-  'w-full rounded-sm border border-terminal-border bg-terminal-panel px-2 py-1.5 text-xs text-terminal-text ' +
-  'placeholder:text-terminal-muted/70 transition-colors hover:border-[#30353f] ' +
-  'focus:outline-none focus:ring-1 focus:ring-terminal-accent focus:border-terminal-accent disabled:opacity-60';
+  'min-h-9 w-full rounded-sm border border-terminal-border bg-terminal-panelAlt px-2.5 py-1.5 text-xs text-terminal-text ' +
+  'placeholder:text-terminal-muted/70 transition-colors duration-150 hover:border-[#30353f] ' +
+  'focus:outline-none focus:ring-1 focus:ring-terminal-accent focus:border-terminal-accent disabled:cursor-not-allowed disabled:opacity-60';
 
 interface FieldProps {
   label: string;

@@ -209,7 +209,16 @@ export function WatchlistTable({
             return (
               <tr
                 key={key}
-                className="cursor-pointer transition-colors hover:bg-white/[0.03]"
+                tabIndex={0}
+                aria-label={`Open analysis for ${item.symbol}`}
+                onKeyDown={(event) => {
+                  if (event.target !== event.currentTarget) return;
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onRowClick?.(item);
+                  }
+                }}
+                className="cursor-pointer transition-colors hover:bg-white/[0.035] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-terminal-accent"
                 onClick={() => onRowClick?.(item)}
               >
                 {/* # */}
@@ -279,6 +288,9 @@ export function WatchlistTable({
                   <button
                     type="button"
                     onClick={() => setActionMenuOpen(isMenuOpen ? null : key)}
+                    aria-label={`Actions for ${item.symbol}`}
+                    aria-haspopup="menu"
+                    aria-expanded={isMenuOpen}
                     title="Actions"
                     disabled={isRemoving}
                     className="flex h-6 w-6 items-center justify-center rounded text-terminal-muted hover:bg-white/[0.08] hover:text-white transition-colors"
@@ -299,9 +311,10 @@ export function WatchlistTable({
                         className="fixed inset-0 z-30"
                         onClick={() => setActionMenuOpen(null)}
                       />
-                      <div className="absolute right-2 top-8 z-40 w-36 rounded-sm border border-terminal-border bg-terminal-panelAlt py-1 shadow-xl">
+                      <div role="menu" className="absolute right-2 top-8 z-40 w-36 rounded-sm border border-terminal-border bg-terminal-panelAlt py-1 shadow-xl">
                         <button
                           type="button"
+                          role="menuitem"
                           onClick={() => {
                             setActionMenuOpen(null);
                             onRowClick?.(item);
@@ -312,6 +325,7 @@ export function WatchlistTable({
                         </button>
                         <button
                           type="button"
+                          role="menuitem"
                           onClick={() => {
                             setActionMenuOpen(null);
                             onRemove(item);

@@ -395,6 +395,7 @@ export function AnalysisWorkspace({
                 overlays={overlays}
                 showRsi={showRsi}
                 showMacd={showMacd}
+                timeframe={displayedInterval}
                 intraday={intraday}
                 height={360}
               />

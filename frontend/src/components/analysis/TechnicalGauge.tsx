@@ -14,11 +14,11 @@ const NEEDLE_CY = 150.5;
 const RADIUS = 151.68;
 
 const SEGMENTS = [
-  { from: 178, to: 146, color: '#f23645' },
-  { from: 142, to: 110, color: '#f7525f' },
+  { from: 178, to: 146, color: '#d9dde5' },
+  { from: 142, to: 110, color: '#f4f6fa' },
   { from: 106, to: 74, color: '#787b86' },
-  { from: 70, to: 38, color: '#22ab94' },
-  { from: 34, to: 2, color: '#089981' },
+  { from: 70, to: 38, color: '#3b82f6' },
+  { from: 34, to: 2, color: '#2563eb' },
 ] as const;
 
 function polar(angleDegrees: number, radius: number): { x: number; y: number } {

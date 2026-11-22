@@ -27,6 +27,7 @@ interface PriceChartProps {
   showRsi: boolean;
   showMacd: boolean;
   intraday?: boolean;
+  timeframe?: string;
   height?: number;
 }
 
@@ -129,6 +130,7 @@ export function PriceChart({
   showRsi,
   showMacd,
   intraday = false,
+  timeframe = '1d',
   height = 380,
 }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -137,6 +139,8 @@ export function PriceChart({
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const overlaySeriesRef = useRef<ISeriesApi<'Line'>[]>([]);
   const indicatorSeriesRef = useRef<Array<ISeriesApi<'Line'> | ISeriesApi<'Histogram'>>>([]);
+  const activeTimeframeRef = useRef<string | null>(null);
+  const timeRangeAnimationRef = useRef<number | null>(null);
 
   // The chart is created once and kept alive across data changes. Timeframe
   // switches only replace series data, so the canvas never unmounts or flashes.
@@ -199,6 +203,10 @@ export function PriceChart({
     volumeSeriesRef.current = volumeSeries;
 
     return () => {
+      if (timeRangeAnimationRef.current !== null) {
+        cancelAnimationFrame(timeRangeAnimationRef.current);
+        timeRangeAnimationRef.current = null;
+      }
       chart.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
@@ -223,10 +231,55 @@ export function PriceChart({
     if (!chart || !candleSeries || !volumeSeries || candles.length === 0) {
       return;
     }
+
+    if (timeRangeAnimationRef.current !== null) {
+      cancelAnimationFrame(timeRangeAnimationRef.current);
+      timeRangeAnimationRef.current = null;
+    }
+    const timeframeChanged =
+      activeTimeframeRef.current !== null && activeTimeframeRef.current !== timeframe;
+    activeTimeframeRef.current = timeframe;
+    const timeScale = chart.timeScale();
+    const previousRange = timeScale.getVisibleLogicalRange();
+
     candleSeries.setData(candlePoints(candles));
     volumeSeries.setData(volumePoints(candles));
-    chart.timeScale().fitContent();
-  }, [candles]);
+    timeScale.fitContent();
+
+    const targetRange = timeScale.getVisibleLogicalRange();
+    if (!timeframeChanged || !previousRange || !targetRange) {
+      return;
+    }
+
+    const targetSpan = targetRange.to - targetRange.from;
+    const visibleSpan = Math.min(previousRange.to - previousRange.from, targetSpan);
+    const startRange = {
+      from: targetRange.to - visibleSpan,
+      to: targetRange.to,
+    };
+    timeScale.setVisibleLogicalRange(startRange);
+
+    const duration = 360;
+    let animationStart: number | null = null;
+    const animateRange = (now: number) => {
+      animationStart ??= now;
+      const progress = Math.min(1, (now - animationStart) / duration);
+      const eased = progress < 0.5
+        ? 4 * progress * progress * progress
+        : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+      timeScale.setVisibleLogicalRange({
+        from: startRange.from + (targetRange.from - startRange.from) * eased,
+        to: startRange.to + (targetRange.to - startRange.to) * eased,
+      });
+
+      if (progress < 1) {
+        timeRangeAnimationRef.current = requestAnimationFrame(animateRange);
+      } else {
+        timeRangeAnimationRef.current = null;
+      }
+    };
+    timeRangeAnimationRef.current = requestAnimationFrame(animateRange);
+  }, [candles, timeframe]);
 
   useEffect(() => {
     const chart = chartRef.current;

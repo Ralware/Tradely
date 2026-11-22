@@ -13,7 +13,9 @@ export type IconName =
   | 'info'
   | 'alert'
   | 'check'
-  | 'close';
+  | 'close'
+  | 'chevronLeft'
+  | 'chevronRight';
 
 const paths: Record<IconName, string> = {
   dashboard:
@@ -31,6 +33,8 @@ const paths: Record<IconName, string> = {
   alert: 'M12 9v4m0 4h.01M10.3 3.9 2.6 17a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z',
   check: 'M5 13l4 4L19 7',
   close: 'M6 6l12 12M18 6 6 18',
+  chevronLeft: 'm15 18-6-6 6-6',
+  chevronRight: 'm9 18 6-6-6-6',
 };
 
 export function Icon({

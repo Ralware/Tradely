@@ -9,3 +9,7 @@ htmlcov/
 frontend/node_modules/.vite/
 frontend/node_modules/.vitest-cache/
 frontend/node_modules/.tmp/
+
+# Local market database, journal files, and generated backups stay on this machine.
+data/*.sqlite3*
+data/backups/*.sqlite3*

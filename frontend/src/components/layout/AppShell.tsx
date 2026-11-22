@@ -3,13 +3,10 @@ import { Sidebar } from './Sidebar';
 
 export function AppShell() {
   return (
-    <div className="flex h-screen w-screen flex-col-reverse sm:flex-row overflow-hidden bg-terminal-bg text-terminal-text">
-      {/* Compact Navigation Rail (Desktop vertical rail / Mobile bottom bar) */}
+    <div className="flex h-dvh min-h-0 w-full flex-col-reverse gap-2 overflow-hidden bg-terminal-bg p-2 text-terminal-text sm:flex-row sm:gap-3 sm:p-3">
       <Sidebar />
-
-      {/* Main Content Area */}
-      <main className="flex-1 min-w-0 h-full overflow-hidden flex flex-col">
-        <div className="flex-1 min-w-0 overflow-y-auto">
+      <main className="min-h-0 min-w-0 flex-1 overflow-hidden" id="main-content">
+        <div className="h-full min-w-0 overflow-auto overscroll-contain rounded-[24px]">
           <Outlet />
         </div>
       </main>

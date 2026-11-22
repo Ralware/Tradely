@@ -20,38 +20,30 @@ const navItems: NavItem[] = [
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <aside
-      className="flex h-12 sm:h-screen w-full sm:w-[60px] shrink-0 flex-row sm:flex-col items-center justify-around sm:justify-start border-t sm:border-t-0 sm:border-r border-terminal-border bg-black py-0 sm:py-4 select-none z-30"
-      aria-label="Application Navigation"
+      className="app-sidebar z-30 flex w-full shrink-0 flex-row items-center border border-terminal-border bg-terminal-panelAlt px-2 py-1.5 sm:h-[calc(100dvh-24px)] sm:w-[76px] sm:flex-col sm:justify-center sm:px-2.5 sm:py-4"
+      aria-label="Application navigation"
     >
-      <nav className="flex w-full sm:w-auto flex-row sm:flex-col items-center justify-around sm:justify-start gap-1 sm:gap-2" aria-label="Main Navigation">
+      <nav className="flex min-w-0 flex-1 flex-row items-center justify-around gap-1 sm:flex-col sm:items-center sm:justify-center sm:gap-3" aria-label="Main navigation">
         {navItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
             end={item.end}
             onClick={onNavigate}
+            aria-label={item.label}
             title={item.label}
-            className={({ isActive }) =>
-              cn(
-                'group relative flex h-10 w-10 items-center justify-center rounded-sm transition-colors',
-                isActive
-                  ? 'bg-black text-terminal-accent after:absolute after:bottom-0 sm:after:bottom-auto after:left-2 sm:after:left-0 sm:after:top-2 sm:after:bottom-2 after:right-2 sm:after:right-auto after:h-[2px] sm:after:h-auto sm:after:w-[3px] after:bg-terminal-accent'
-                  : 'text-terminal-muted hover:bg-white/[0.05] hover:text-white',
-              )
-            }
+            className={({ isActive }) => cn(
+              'app-sidebar-link group relative flex h-11 min-w-10 flex-1 flex-col items-center justify-center gap-1 rounded-full px-1 text-xs transition-colors duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-terminal-accent sm:h-12 sm:w-12 sm:flex-none sm:gap-0 sm:px-0',
+              isActive
+                ? 'bg-terminal-accentSoft text-terminal-text ring-1 ring-[#2a3a55]'
+                : 'text-terminal-muted hover:bg-white/[0.06] hover:text-terminal-text',
+            )}
           >
             {({ isActive }) => (
               <>
-                <Icon
-                  name={item.icon}
-                  size={19}
-                  className={cn(
-                    'transition-colors',
-                    isActive ? 'text-terminal-accent' : 'text-terminal-muted group-hover:text-white',
-                  )}
-                />
-                {/* Floating Tooltip on Desktop */}
-                <span className="pointer-events-none absolute left-full ml-2 z-50 hidden rounded bg-black border border-terminal-border px-2 py-1 text-2xs font-medium text-white shadow-lg whitespace-nowrap group-hover:block">
+                <Icon name={item.icon} size={18} className={cn('shrink-0', isActive ? 'text-terminal-accent' : 'text-current')} />
+                <span className="text-[9px] leading-none sm:hidden">{item.label}</span>
+                <span className="pointer-events-none absolute left-full z-50 ml-2 hidden whitespace-nowrap rounded-full border border-terminal-border bg-terminal-panelAlt px-3 py-1.5 text-2xs text-terminal-text opacity-0 shadow-lg transition-opacity group-hover:block group-hover:opacity-100 group-focus-visible:block group-focus-visible:opacity-100 sm:block">
                   {item.label}
                 </span>
               </>
