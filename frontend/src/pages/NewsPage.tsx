@@ -195,7 +195,7 @@ export function NewsPage() {
   }
 
   return (
-    <div className="min-h-full bg-black px-4 py-5 text-terminal-text sm:px-6 lg:px-8">
+    <div className="w-full min-w-0 bg-black px-4 py-5 text-terminal-text sm:px-6 lg:px-8">
       <header className="mb-5 border-b border-terminal-border pb-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>

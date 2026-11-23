@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import type { PositionDetailResponse, Transaction } from '../../types/api';
+import type { Position, PositionDetailResponse, Transaction } from '../../types/api';
 import {
   cn,
   formatDateTime,
@@ -134,12 +134,14 @@ export function PositionDetailPanel({
   error,
   onReload,
   onClose,
+  onClosePosition,
 }: {
   detail: PositionDetailResponse | null;
   loading: boolean;
   error: string | null;
   onReload: () => void;
   onClose: () => void;
+  onClosePosition?: (position: Position) => void;
 }) {
   if (loading && !detail) {
     return <LoadingPanel label="Loading Position Detail" rows={5} />;
@@ -202,8 +204,13 @@ export function PositionDetailPanel({
           <Button size="sm" icon="refresh" onClick={onReload}>
             Refresh
           </Button>
-          <Button size="sm" variant="ghost" onClick={onClose} aria-label="Close Position Detail">
-            Close
+          {onClosePosition ? (
+            <Button size="sm" variant="primary" onClick={() => onClosePosition(position)}>
+              Close Position
+            </Button>
+          ) : null}
+          <Button size="sm" variant="ghost" onClick={onClose} aria-label="Hide Position Details">
+            Hide Details
           </Button>
         </div>
       </header>

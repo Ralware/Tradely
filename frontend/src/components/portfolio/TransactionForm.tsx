@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useQuotes } from '../../hooks/useQuotes';
 import { portfolioService } from '../../services/portfolioService';
@@ -165,9 +165,11 @@ function PriceCard({
 export function TransactionForm({
   positions,
   onRecorded,
+  closeRequest,
 }: {
   positions: Position[];
   onRecorded: (response: AddTransactionResponse, message: string) => void;
+  closeRequest?: { position: Position; requestId: number } | null;
 }) {
   const [side, setSide] = useState<TransactionIntent>('BUY');
   const [amount, setAmount] = useState('');
@@ -180,6 +182,8 @@ export function TransactionForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [idempotencyKey, setIdempotencyKey] = useState(newIdempotencyKey);
+  const formContainerRef = useRef<HTMLDivElement>(null);
+  const appliedCloseRequestId = useRef<number | null>(null);
 
   const parsedAmount = Number(amount);
   const parsedFees = Number(fees || '0');
@@ -221,6 +225,29 @@ export function TransactionForm({
   useEffect(() => {
     setPreview(null);
   }, [intentSignature]);
+
+  useEffect(() => {
+    if (!closeRequest) return;
+    const { position } = closeRequest;
+    const isShort = position.position_side === 'SHORT' || position.quantity < 0;
+    const referencePrice = position.current_price ?? position.average_cost;
+    setResolution({
+      instrument_id: position.instrument_id,
+      symbol: position.symbol,
+      name: position.name,
+      market: position.market,
+      exchange: position.exchange,
+      currency: position.currency,
+      asset_type: position.asset_type,
+      provider: position.provider,
+      provider_symbol: position.provider_symbol,
+    });
+    setSide(isShort ? 'BUY_TO_COVER' : 'SELL');
+    setAmount(String(Math.abs(position.quantity) * referencePrice));
+    setError(null);
+    setPreview(null);
+    formContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [closeRequest]);
 
   // Server-authoritative amount-to-quantity preview. React renders this result
   // and never calculates the accounting quantity itself.
@@ -367,8 +394,25 @@ export function TransactionForm({
       : preview.max_sell_amount ?? null
     : null;
 
+  useEffect(() => {
+    if (
+      !closeRequest ||
+      !preview?.valid ||
+      maxSellAmount === null ||
+      maxSellAmount <= 0 ||
+      appliedCloseRequestId.current === closeRequest.requestId ||
+      resolution?.instrument_id !== closeRequest.position.instrument_id
+    ) return;
+    const isShort = closeRequest.position.position_side === 'SHORT' || closeRequest.position.quantity < 0;
+    const closeIntent = isShort ? 'BUY_TO_COVER' : 'SELL';
+    if (side !== closeIntent) return;
+    appliedCloseRequestId.current = closeRequest.requestId;
+    setAmount(String(maxSellAmount));
+  }, [closeRequest, maxSellAmount, preview?.valid, resolution?.instrument_id, side]);
+
   return (
-    <Card className="xl:col-span-4" title="Record Transaction" subtitle="Manual Exposure Ledger · No Execution">
+    <div ref={formContainerRef} className="xl:col-span-4">
+    <Card title="Record Transaction" subtitle="Manual Exposure Ledger · No Execution">
       <form onSubmit={recordTrade} className="space-y-2.5">
         <div className="grid gap-2 sm:grid-cols-2">
           <div className="sm:col-span-2">
@@ -465,6 +509,18 @@ export function TransactionForm({
                 className="num w-full min-w-0 bg-transparent text-2xl font-semibold text-terminal-text placeholder:text-terminal-muted/50 focus:outline-none"
               />
               <span className="text-xs font-medium text-terminal-muted">{currency}</span>
+              {side === 'SELL' || side === 'BUY_TO_COVER' ? (
+                <button
+                  type="button"
+                  disabled={maxSellAmount === null || !preview?.valid}
+                  onClick={() => { if (maxSellAmount !== null) setAmount(String(maxSellAmount)); }}
+                  className="shrink-0 rounded-full border border-terminal-border px-2 py-1 text-2xs font-medium text-terminal-accent hover:border-terminal-accent disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label={`Use maximum ${side === 'SELL' ? 'sell' : 'cover'} amount`}
+                  title="Use the server-calculated maximum close amount"
+                >
+                  Max
+                </button>
+              ) : null}
             </div>
           </Field>
         </div>
@@ -615,5 +671,6 @@ export function TransactionForm({
         </p>
       </form>
     </Card>
+    </div>
   );
 }

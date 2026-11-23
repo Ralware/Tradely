@@ -77,6 +77,8 @@ export function PortfolioPage() {
   const [deleting, setDeleting] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [closeRequest, setCloseRequest] = useState<{ position: Position; requestId: number } | null>(null);
+  const closeRequestId = useRef(0);
 
   // Refresh backend valuations when live crypto ticks arrive, at a throttled
   // rate. React never recalculates FIFO or P&L itself.
@@ -162,6 +164,12 @@ export function PortfolioPage() {
     setSelectedId(position.instrument_id);
   }
 
+  function startClosePosition(position: Position) {
+    setSelectedId(position.instrument_id);
+    closeRequestId.current += 1;
+    setCloseRequest({ position, requestId: closeRequestId.current });
+  }
+
   return (
     <div className="w-full px-4 py-4 lg:px-6">
       <PageHeader
@@ -233,11 +241,12 @@ export function PortfolioPage() {
           error={detail.error}
           onReload={detail.reload}
           onClose={() => setSelectedId(null)}
+          onClosePosition={startClosePosition}
         />
       </Card>
 
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-12">
-        <TransactionForm positions={positionRows} onRecorded={handleRecorded} />
+        <TransactionForm positions={positionRows} onRecorded={handleRecorded} closeRequest={closeRequest} />
 
         <Card
           className="xl:col-span-8"

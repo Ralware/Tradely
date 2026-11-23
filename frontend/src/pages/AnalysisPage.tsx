@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useSelectedInstrument } from "../contexts/SelectedInstrumentContext";
 import { AnalysisWorkspace } from "../components/analysis/AnalysisWorkspace";
 import { AnalysisWatchlist } from "../components/analysis/AnalysisWatchlist";
+import { StockNewsPreview } from "../components/analysis/StockNewsPreview";
 import type { DirectionMode, WatchlistItem } from "../types/api";
 import { instrumentPath } from "../utils/navigation";
 import { Icon } from "../components/common/Icon";
@@ -55,6 +56,11 @@ export function AnalysisPage() {
           directionMode={directionMode}
           onDirectionModeChange={setDirectionMode}
         />
+        {selected.instrumentId ? (
+          <div className="mt-3 w-full">
+            <StockNewsPreview instrumentId={selected.instrumentId} symbol={selected.symbol} />
+          </div>
+        ) : null}
       </div>
 
       {/* Desktop Fixed Right-Hand Watchlist Sidebar */}

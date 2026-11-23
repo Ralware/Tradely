@@ -27,7 +27,6 @@ import { IndicatorTable } from '../tables/IndicatorTable';
 import { TechnicalGauge } from './TechnicalGauge';
 import { TechnicalTable } from './TechnicalTable';
 import { TimeframeSelector } from './TimeframeSelector';
-import { StockNewsPreview } from './StockNewsPreview';
 
 function ToggleChip({
   active,
@@ -515,7 +514,6 @@ export function AnalysisWorkspace({
 
         </>
       ) : null}
-      {instrumentId ? <StockNewsPreview instrumentId={instrumentId} symbol={symbol} /> : null}
     </div>
   );
 }

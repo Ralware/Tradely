@@ -21,7 +21,7 @@ const navItems: NavItem[] = [
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <aside
-      className="app-sidebar z-30 flex w-full shrink-0 flex-row items-center border border-terminal-border bg-terminal-panelAlt px-2 py-1.5 sm:h-[calc(100dvh-24px)] sm:w-[76px] sm:flex-col sm:justify-center sm:px-2.5 sm:py-4"
+      className="app-sidebar z-30 flex w-full shrink-0 flex-row items-center border border-terminal-border bg-terminal-panelAlt px-2 py-1.5 sm:h-fit sm:w-[76px] sm:flex-col sm:self-center sm:justify-center sm:px-2.5 sm:py-4"
       aria-label="Application navigation"
     >
       <nav className="flex min-w-0 flex-1 flex-row items-center justify-around gap-1 sm:flex-col sm:items-center sm:justify-center sm:gap-3" aria-label="Main navigation">
