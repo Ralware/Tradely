@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiRequest } from './api';
 import { newsService } from './newsService';
+import { localDateToApiBound } from './newsDateRange';
 import type { NewsFeedResponse, NewsSearchResponse } from './newsService';
 
 vi.mock('./api', () => ({ apiRequest: vi.fn() }));
@@ -24,12 +25,27 @@ describe('newsService', () => {
     expect(requestMock).toHaveBeenCalledWith('/api/news/TEST', expect.objectContaining({
       query: {
         instrument_id: instrumentId, page: 1, page_size: 5,
-        q: undefined, date_from: '2025-01-01', date_to: '2025-01-31',
+        q: undefined,
+        date_from: localDateToApiBound('2025-01-01'),
+        date_to: localDateToApiBound('2025-01-31', true),
       },
       timeoutMs: 15_000,
     }));
     expect(newsService.cachedSymbol(instrumentId, 1, 5, filters)).toEqual(emptyFeed);
     expect(newsService.cachedSymbol(instrumentId, 1, 5)).toBeUndefined();
+  });
+
+  it('uses separate general-feed cache entries for different date ranges', async () => {
+    requestMock.mockResolvedValue(emptyFeed);
+    const firstRange = { page: 1, pageSize: 20, dateFrom: '2026-10-23', dateTo: '2026-11-23' };
+    const secondRange = { page: 1, pageSize: 20, dateFrom: '2026-09-23', dateTo: '2026-10-23' };
+
+    await newsService.generalFeed(firstRange);
+    await newsService.generalFeed(secondRange);
+
+    expect(requestMock).toHaveBeenCalledTimes(2);
+    expect(newsService.cachedGeneral(firstRange)).toEqual(emptyFeed);
+    expect(newsService.cachedGeneral(secondRange)).toEqual(emptyFeed);
   });
 
   it('searches supported Yahoo Finance listings through the backend service', async () => {

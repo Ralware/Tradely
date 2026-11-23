@@ -356,12 +356,12 @@ class Database:
             pattern = f"%{query}%"
             values.extend((pattern, pattern, pattern))
         if date_from:
-            sql += " AND a.published_at>=?"
+            sql += " AND julianday(a.published_at)>=julianday(?)"
             values.append(date_from)
         if date_to:
-            sql += " AND a.published_at<=?"
+            sql += " AND julianday(a.published_at)<=julianday(?)"
             values.append(date_to)
-        sql += " ORDER BY a.published_at IS NULL, a.published_at DESC, a.first_seen_at DESC LIMIT ? OFFSET ?"
+        sql += " ORDER BY julianday(a.published_at) IS NULL, julianday(a.published_at) DESC, a.first_seen_at DESC LIMIT ? OFFSET ?"
         values.extend((limit, offset))
         with self.connect() as connection:
             rows = connection.execute(sql, values).fetchall()
@@ -392,10 +392,10 @@ class Database:
             pattern = f"%{query}%"
             values.extend((pattern, pattern, pattern))
         if date_from:
-            sql += " AND a.published_at>=?"
+            sql += " AND julianday(a.published_at)>=julianday(?)"
             values.append(date_from)
         if date_to:
-            sql += " AND a.published_at<=?"
+            sql += " AND julianday(a.published_at)<=julianday(?)"
             values.append(date_to)
         with self.connect() as connection:
             row = connection.execute(sql, values).fetchone()

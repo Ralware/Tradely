@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { ApiError } from '../services/api';
 import { newsService } from '../services/newsService';
 import type { NewsArticle, NewsFeedResponse, NewsInstrumentCandidate } from '../services/newsService';
+import { getDefaultNewsDateRange, isCalendarDate, isValidNewsDateRange } from '../services/newsDateRange';
 import { Icon } from '../components/common/Icon';
 
 function timeLabel(value: string | null): string {
@@ -67,14 +68,24 @@ export function NewsPage() {
   const [suggestions, setSuggestions] = useState<NewsInstrumentCandidate[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [initialDateRange] = useState(() => {
+    const dateFrom = searchParams.get('news_date_from') ?? '';
+    const dateTo = searchParams.get('news_date_to') ?? '';
+    return isCalendarDate(dateFrom) && isCalendarDate(dateTo)
+      ? { dateFrom, dateTo }
+      : getDefaultNewsDateRange();
+  });
+  const [dateFrom, setDateFrom] = useState(initialDateRange.dateFrom);
+  const [dateTo, setDateTo] = useState(initialDateRange.dateTo);
   const [feed, setFeed] = useState<NewsFeedResponse | null>(null);
   const [articles, setArticles] = useState<NewsArticle[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [canLoadMore, setCanLoadMore] = useState(false);
+  const dateRangeError = !isValidNewsDateRange(dateFrom, dateTo)
+    ? 'Start date must be on or before the end date.'
+    : null;
 
   useEffect(() => {
     const value = searchText.trim();
@@ -101,10 +112,16 @@ export function NewsPage() {
   }, [searchText]);
 
   useEffect(() => {
-    const controller = new AbortController();
     let active = true;
     const pageSize = 20;
     setError(null);
+    if (dateRangeError) {
+      setFeed(null);
+      setArticles([]);
+      setCanLoadMore(false);
+      setLoading(false);
+      return () => { active = false; };
+    }
     const cached = selectedId && selectedSymbol
       ? newsService.cachedSymbol(selectedId, page, pageSize, { dateFrom, dateTo })
       : !selectedId ? newsService.cachedGeneral({ page, pageSize, dateFrom, dateTo }) : undefined;
@@ -119,8 +136,8 @@ export function NewsPage() {
       setLoading(false);
     }
     const request = selectedId && selectedSymbol
-      ? newsService.symbolFeed(selectedId, selectedSymbol, { page, pageSize, dateFrom, dateTo, signal: controller.signal })
-      : newsService.generalFeed({ page, pageSize, dateFrom, dateTo, signal: controller.signal });
+      ? newsService.symbolFeed(selectedId, selectedSymbol, { page, pageSize, dateFrom, dateTo })
+      : newsService.generalFeed({ page, pageSize, dateFrom, dateTo });
     void request.then((result) => {
       if (!active) return;
       setFeed(result);
@@ -128,11 +145,11 @@ export function NewsPage() {
       setCanLoadMore(page * pageSize < result.count);
       setError(null);
     }).catch((caught: unknown) => {
-      if (!active || controller.signal.aborted) return;
+      if (!active) return;
       setError(caught instanceof ApiError ? caught.message : caught instanceof Error ? caught.message : 'News could not be loaded.');
     }).finally(() => { if (active) setLoading(false); });
-    return () => { active = false; controller.abort(); };
-  }, [selectedId, selectedSymbol, dateFrom, dateTo, page]);
+    return () => { active = false; };
+  }, [selectedId, selectedSymbol, dateFrom, dateTo, dateRangeError, page]);
 
   const selectedInstrument = feed?.instrument;
   const heading = useMemo(() => selectedInstrument?.name || selectedSymbol || 'Market feed', [selectedInstrument?.name, selectedSymbol]);
@@ -163,6 +180,18 @@ export function NewsPage() {
     setSearchText('');
     setSuggestions([]);
     setSearchError(null);
+  }
+
+  function updateDateRange(field: 'news_date_from' | 'news_date_to', value: string) {
+    setPage(1);
+    if (field === 'news_date_from') setDateFrom(value);
+    else setDateTo(value);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (value) next.set(field, value);
+      else next.delete(field);
+      return next;
+    });
   }
 
   return (
@@ -202,8 +231,8 @@ export function NewsPage() {
             {searchText.trim() && !searching && !searchError && suggestions.length === 0 ? <p role="status" className="mt-1 px-3 text-[10px] text-terminal-muted">No matching Yahoo Finance listings are supported by Tradely.</p> : null}
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <label className="flex h-10 items-center gap-2 rounded-full border border-terminal-border bg-[#050505] px-3 text-[10px] text-terminal-muted">From<input aria-label="Filter from date" type="date" value={dateFrom} onChange={(event) => { setPage(1); setDateFrom(event.target.value); }} className="max-w-[126px] bg-transparent text-[10px] text-terminal-text outline-none" /></label>
-            <label className="flex h-10 items-center gap-2 rounded-full border border-terminal-border bg-[#050505] px-3 text-[10px] text-terminal-muted">To<input aria-label="Filter to date" type="date" value={dateTo} onChange={(event) => { setPage(1); setDateTo(event.target.value); }} className="max-w-[126px] bg-transparent text-[10px] text-terminal-text outline-none" /></label>
+            <label className="flex h-10 items-center gap-2 rounded-full border border-terminal-border bg-[#050505] px-3 text-[10px] text-terminal-muted">From<input aria-label="Filter from date" type="date" value={dateFrom} onChange={(event) => updateDateRange('news_date_from', event.target.value)} className="max-w-[126px] bg-transparent text-[10px] text-terminal-text outline-none" /></label>
+            <label className="flex h-10 items-center gap-2 rounded-full border border-terminal-border bg-[#050505] px-3 text-[10px] text-terminal-muted">To<input aria-label="Filter to date" type="date" value={dateTo} onChange={(event) => updateDateRange('news_date_to', event.target.value)} className="max-w-[126px] bg-transparent text-[10px] text-terminal-text outline-none" /></label>
           </div>
         </div>
       </header>
@@ -218,7 +247,9 @@ export function NewsPage() {
       )}
 
       <section className="rounded-2xl border border-terminal-border bg-[#030303] px-3 sm:px-5" aria-label="Yahoo Finance news articles">
-        {loading && articles.length === 0 ? (
+        {dateRangeError ? (
+          <div role="alert" className="py-12 text-center text-sm text-amber-300">{dateRangeError}</div>
+        ) : loading && articles.length === 0 ? (
           <div aria-label="Loading news" className="space-y-3 py-4">{[1, 2, 3, 4].map((item) => <div key={item} className="flex gap-3 border-b border-terminal-borderSoft pb-3"><div className="skeleton-block h-[72px] w-[104px] rounded-lg" /><div className="flex-1 space-y-2 py-1"><div className="skeleton-block h-2 w-1/4" /><div className="skeleton-block h-4 w-4/5" /><div className="skeleton-block h-3 w-2/3" /></div></div>)}</div>
         ) : error && articles.length === 0 ? (
           <div role="alert" className="py-12 text-center"><p className="text-sm font-medium text-white">News could not be loaded</p><p className="mt-1 text-xs text-terminal-muted">{error}</p><button type="button" onClick={() => { setPage(1); setFeed(null); }} className="mt-3 rounded-full border border-terminal-border px-3 py-1.5 text-xs text-terminal-text hover:border-terminal-accent">Retry</button></div>

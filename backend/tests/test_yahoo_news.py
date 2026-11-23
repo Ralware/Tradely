@@ -122,3 +122,32 @@ def test_news_cache_persistence_date_and_text_filters(tmp_path: Path):
     assert db.count_news(instrument_id="global:NASDAQ:AAPL", query="earnings") == 1
     assert db.count_news(instrument_id="global:NASDAQ:AAPL", query="Apple", date_to="2024-01-01T00:00:00+00:00") == 0
     assert db.news_cache_state("global:NASDAQ:AAPL")["status"] == "ok"
+
+
+def test_news_date_filter_is_inclusive_timezone_aware_and_skips_invalid_timestamps(tmp_path: Path):
+    db = Database(tmp_path / "news-range-test.sqlite3")
+    timestamps = [
+        ("before", "2026-10-22T18:29:59+00:00"),
+        ("start", "2026-10-23T00:00:00+05:30"),
+        ("end", "2026-11-23T23:59:59+05:30"),
+        ("after", "2026-11-24T00:00:00+05:30"),
+        ("invalid", "not-a-timestamp"),
+        ("missing", None),
+    ]
+    articles = [{
+        "yahoo_id": identity, "title": identity, "summary": None, "publisher": "Wire",
+        "published_at": published_at, "article_url": f"https://news.example/{identity}",
+        "canonical_url": f"https://news.example/{identity}", "thumbnail_url": None,
+        "related_symbols": ["AAPL"], "source": "Yahoo Finance Search",
+    } for identity, published_at in timestamps]
+    db.save_news_refresh(
+        instrument_id="global:NASDAQ:AAPL", symbol="AAPL", articles=articles,
+        attempted_at="2026-11-24T00:00:00+00:00", expires_at="2026-11-24T00:05:00+00:00",
+    )
+
+    start_utc = "2026-10-22T18:30:00+00:00"
+    end_utc = "2026-11-23T18:29:59.999999+00:00"
+    rows = db.list_news(instrument_id="global:NASDAQ:AAPL", date_from=start_utc, date_to=end_utc)
+
+    assert [row["title"] for row in rows] == ["end", "start"]
+    assert db.count_news(instrument_id="global:NASDAQ:AAPL", date_from=start_utc, date_to=end_utc) == 2

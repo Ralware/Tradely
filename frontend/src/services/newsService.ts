@@ -1,5 +1,6 @@
 import { apiRequest } from './api';
 import type { Instrument } from '../types/api';
+import { localDateToApiBound } from './newsDateRange';
 
 export interface NewsArticle {
   id: string;
@@ -89,8 +90,11 @@ export const newsService = {
     const existing = inFlight.get(key);
     if (existing) return existing;
     const request = apiRequest<NewsFeedResponse>(`/api/news/${encodeURIComponent(symbol)}`, {
-      query: { instrument_id: instrumentId, page, page_size: pageSize, q: options.q, date_from: options.dateFrom, date_to: options.dateTo },
-      signal: options.signal,
+      query: {
+        instrument_id: instrumentId, page, page_size: pageSize, q: options.q,
+        date_from: options.dateFrom ? localDateToApiBound(options.dateFrom) : undefined,
+        date_to: options.dateTo ? localDateToApiBound(options.dateTo, true) : undefined,
+      },
       timeoutMs: 15_000,
     }).then((value) => cached(feedCache, key, value)).finally(() => inFlight.delete(key));
     inFlight.set(key, request);
@@ -115,11 +119,10 @@ export const newsService = {
         page: params.page ?? 1,
         page_size: params.pageSize ?? 20,
         q: params.q,
-        date_from: params.dateFrom,
-        date_to: params.dateTo,
+        date_from: params.dateFrom ? localDateToApiBound(params.dateFrom) : undefined,
+        date_to: params.dateTo ? localDateToApiBound(params.dateTo, true) : undefined,
         sort: 'newest',
       },
-      signal: params.signal,
       timeoutMs: 15_000,
     }).then((value) => cached(feedCache, key, value)).finally(() => inFlight.delete(key));
     inFlight.set(key, request);
@@ -143,9 +146,13 @@ export const newsService = {
 };
 
 function generalKey(params: { page?: number; pageSize?: number; q?: string; dateFrom?: string; dateTo?: string }): string {
-  return `general:${params.page ?? 1}:${params.pageSize ?? 20}:${params.q ?? ''}:${params.dateFrom ?? ''}:${params.dateTo ?? ''}`;
+  const startBound = params.dateFrom ? localDateToApiBound(params.dateFrom) ?? '' : '';
+  const endBound = params.dateTo ? localDateToApiBound(params.dateTo, true) ?? '' : '';
+  return `general:${params.page ?? 1}:${params.pageSize ?? 20}:${params.q ?? ''}:${params.dateFrom ?? ''}:${params.dateTo ?? ''}:${startBound}:${endBound}`;
 }
 
 function symbolKey(instrumentId: string, page: number, pageSize: number, filters: { q?: string; dateFrom?: string; dateTo?: string }): string {
-  return `symbol:${instrumentId}:${page}:${pageSize}:${filters.q ?? ''}:${filters.dateFrom ?? ''}:${filters.dateTo ?? ''}`;
+  const startBound = filters.dateFrom ? localDateToApiBound(filters.dateFrom) ?? '' : '';
+  const endBound = filters.dateTo ? localDateToApiBound(filters.dateTo, true) ?? '' : '';
+  return `symbol:${instrumentId}:${page}:${pageSize}:${filters.q ?? ''}:${filters.dateFrom ?? ''}:${filters.dateTo ?? ''}:${startBound}:${endBound}`;
 }

@@ -225,6 +225,26 @@ def test_news_api_feed_filters_and_status_use_canonical_instrument(monkeypatch):
     assert status.json()["provider"] == "Yahoo Finance"
 
 
+def test_general_news_api_normalizes_timezone_aware_date_bounds(monkeypatch):
+    received = {}
+
+    def capture_feed(**kwargs):
+        received.update(kwargs)
+        return {"items": [], "count": 0, "page": 1, "page_size": 20}
+
+    monkeypatch.setattr(app.state.news_service, "general_feed", capture_feed)
+    response = client.get("/api/news", params={
+        "date_from": "2026-10-23T00:00:00+05:30",
+        "date_to": "2026-11-23T23:59:59.999999+05:30",
+    })
+
+    assert response.status_code == 200
+    assert received["date_from"] == "2026-10-22T18:30:00+00:00"
+    assert received["date_to"] == "2026-11-23T18:29:59.999999+00:00"
+    invalid = client.get("/api/news", params={"date_from": "not-a-date"})
+    assert invalid.status_code == 422
+
+
 def test_news_instrument_search_and_manual_refresh_are_yahoo_service_backed(monkeypatch):
     monkeypatch.setattr(app.state.news_service, "search_instruments", lambda query: {
         "query": query,
