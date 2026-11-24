@@ -174,7 +174,6 @@ export function PortfolioPage() {
     <div className="w-full px-4 py-4 lg:px-6">
       <PageHeader
         title="Portfolio"
-        subtitle=""
         actions={
           <Button size="sm" icon="refresh" onClick={reloadPortfolio}>
             Refresh
@@ -196,7 +195,6 @@ export function PortfolioPage() {
       <Card
         className="mb-3"
         title="Portfolio Summary"
-        subtitle=""
         actions={
           <span className="text-2xs text-terminal-muted">
             {positionRows.length} Open ·{" "}
@@ -214,7 +212,6 @@ export function PortfolioPage() {
       <Card
         className="mb-3"
         title="Open Positions"
-        subtitle=""
         actions={
           <span className="text-2xs text-terminal-muted">
             {positions.data ? `${positionRows.length} Positions` : "Loading"}
@@ -234,7 +231,7 @@ export function PortfolioPage() {
         )}
       </Card>
 
-      <Card className="mb-3" title="Position Details" subtitle="">
+      <Card className="mb-3" title="Position Details">
         <PositionDetailPanel
           detail={detail.data}
           loading={detail.loading}
@@ -251,7 +248,6 @@ export function PortfolioPage() {
         <Card
           className="xl:col-span-8"
           title="Transaction Ledger"
-          subtitle=""
           actions={
             <span className="text-2xs text-terminal-muted">
               {transactions.data

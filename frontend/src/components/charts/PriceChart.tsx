@@ -415,7 +415,7 @@ export function PriceChart({
     <div className="relative" style={{ height }}>
       <div ref={containerRef} className="h-full w-full" aria-label="Price chart" />
       {candles.length === 0 ? (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/80">
+        <div className="absolute inset-0 flex items-center justify-center bg-terminal-bg/80">
           <EmptyState title="No candles available" icon="chart" />
         </div>
       ) : null}

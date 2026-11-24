@@ -115,7 +115,7 @@ function PriceCard({
   const currency = quote?.currency ?? '';
   const unavailable = !quote || price === null;
   return (
-    <div className="rounded-sm border border-terminal-border bg-terminal-panelAlt px-2.5 py-2">
+    <div className="rounded-md border border-terminal-border bg-terminal-panelAlt px-2.5 py-2">
       <div className="flex items-center justify-between gap-2">
         <p className="text-2xs font-medium text-terminal-muted">
           {historical ? 'Historical Reference Price' : 'Current Market Price'}
@@ -469,7 +469,7 @@ export function TransactionForm({
 
         <div
           className={cn(
-            'rounded-sm border bg-black px-3 py-2 transition-colors',
+            'rounded-md border bg-terminal-bg px-3 py-2 transition-colors',
             preview && !preview.valid ? 'border-[#3f2528]' : 'border-terminal-border',
           )}
         >
@@ -514,7 +514,7 @@ export function TransactionForm({
                   type="button"
                   disabled={maxSellAmount === null || !preview?.valid}
                   onClick={() => { if (maxSellAmount !== null) setAmount(String(maxSellAmount)); }}
-                  className="shrink-0 rounded-full border border-terminal-border px-2 py-1 text-2xs font-medium text-terminal-accent hover:border-terminal-accent disabled:cursor-not-allowed disabled:opacity-40"
+                  className="shrink-0 rounded border border-terminal-border px-2 py-1 text-2xs font-medium text-terminal-accent hover:border-terminal-accent disabled:cursor-not-allowed disabled:opacity-40"
                   aria-label={`Use maximum ${side === 'SELL' ? 'sell' : 'cover'} amount`}
                   title="Use the server-calculated maximum close amount"
                 >
@@ -532,7 +532,7 @@ export function TransactionForm({
           fallbackError={preview?.valid ? null : preview?.error ?? null}
         />
 
-        <div className="space-y-1 rounded-sm border border-terminal-borderSoft px-2.5 py-2">
+        <div className="space-y-1 rounded-md border border-terminal-borderSoft px-2.5 py-2">
           <MetricRow
             label="Estimated Quantity"
             value={

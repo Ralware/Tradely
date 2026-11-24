@@ -11,6 +11,7 @@ import { nextWatchlistSort, watchlistItemKey } from '../utils/watchlistSort';
 import type { WatchlistSort } from '../utils/watchlistSort';
 import { Button } from '../components/common/Button';
 import { Icon } from '../components/common/Icon';
+import { PageHeader } from '../components/common/PageHeader';
 import { ErrorState, LoadingPanel, Notice } from '../components/common/States';
 import { WatchlistTable } from '../components/tables/WatchlistTable';
 import { InstrumentSearch } from '../components/instruments/InstrumentSearch';
@@ -167,40 +168,40 @@ export function WatchlistPage() {
 
   return (
     <div className="w-full px-4 py-4 lg:px-6">
-      {/* Page Header */}
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-terminal-border pb-3">
-        <div className="flex items-center gap-2.5">
-          <h1 className="text-xl font-bold tracking-tight text-white">Watchlist</h1>
-          <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded bg-black px-1.5 text-xs font-semibold text-terminal-muted">
-            {watchlistItems.length}
+      <PageHeader
+        title="Watchlist"
+        subtitle="Live quotes, rule-based signals and a 7-day trend for every tracked instrument."
+        meta={
+          <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded border border-terminal-border bg-terminal-panelAlt px-1.5 text-2xs font-semibold text-terminal-muted">
+            {watchlistItems.length} {watchlistItems.length === 1 ? 'instrument' : 'instruments'}
           </span>
-        </div>
+        }
+        actions={
+          <>
+            <button
+              type="button"
+              onClick={handleRefreshAll}
+              aria-label="Refresh watchlist data"
+              title="Refresh watchlist data"
+              className="flex h-7 w-7 items-center justify-center rounded-md border border-terminal-border bg-terminal-panel text-terminal-muted transition-colors hover:bg-white/[0.05] hover:text-terminal-text"
+            >
+              <Icon name="refresh" size={14} />
+            </button>
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleRefreshAll}
-            aria-label="Refresh watchlist data"
-            title="Refresh watchlist data"
-            className="flex h-8 w-8 items-center justify-center rounded-sm border border-terminal-border bg-terminal-panel text-terminal-muted hover:bg-white/[0.05] hover:text-terminal-text transition-colors"
-          >
-            <Icon name="refresh" size={14} />
-          </button>
-
-          <Button
-            size="sm"
-            variant="secondary"
-            icon="plus"
-            onClick={() => {
-              setAddingError(null);
-              setAddModalOpen(true);
-            }}
-            className="border-terminal-border bg-terminal-panel hover:bg-white/[0.05]"
-          >
-            Add Instrument
-          </Button>
-        </div>
-      </div>
+            <Button
+              size="sm"
+              variant="secondary"
+              icon="plus"
+              onClick={() => {
+                setAddingError(null);
+                setAddModalOpen(true);
+              }}
+            >
+              Add Instrument
+            </Button>
+          </>
+        }
+      />
 
       {actionError ? (
         <Notice tone="negative" className="mb-3">
@@ -209,7 +210,7 @@ export function WatchlistPage() {
       ) : null}
 
       {/* Full-width unified Watchlist table */}
-      <div className="w-full rounded-sm border border-terminal-border bg-terminal-panel">
+      <div className="panel-surface w-full overflow-hidden">
         {watchlist.loading && !watchlist.data ? (
           <LoadingPanel label="Loading Watchlist" rows={8} />
         ) : watchlist.error ? (
@@ -231,22 +232,34 @@ export function WatchlistPage() {
 
       {/* Add Instrument Modal */}
       {addModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-xs" onMouseDown={(event) => { if (event.target === event.currentTarget) setAddModalOpen(false); }}>
-          <div role="dialog" aria-modal="true" aria-labelledby="watchlist-dialog-title" className="w-full max-w-md rounded-sm border border-terminal-border bg-terminal-panelAlt p-4 shadow-2xl">
-            <div className="mb-3 flex items-center justify-between border-b border-terminal-border pb-2.5">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-terminal-bg/80 p-4 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setAddModalOpen(false);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="watchlist-dialog-title"
+            className="w-full max-w-md rounded-xl border border-terminal-border bg-terminal-panel p-4 shadow-2xl"
+          >
+            <div className="mb-3 flex items-start justify-between gap-3 border-b border-terminal-border pb-2.5">
               <div>
-                <h3 id="watchlist-dialog-title" className="text-sm font-semibold text-terminal-text">Add to Watchlist</h3>
-                <p className="text-2xs text-terminal-muted">
+                <h3 id="watchlist-dialog-title" className="text-sm font-semibold text-terminal-text">
+                  Add to Watchlist
+                </h3>
+                <p className="mt-0.5 text-2xs text-terminal-muted">
                   Search across Indian stocks, US equities, and crypto pairs
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setAddModalOpen(false)}
-                className="text-terminal-muted hover:text-terminal-text"
+                className="-mr-1 -mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-terminal-muted transition-colors hover:bg-white/[0.06] hover:text-terminal-text"
                 aria-label="Close"
               >
-                ✕
+                <Icon name="close" size={14} />
               </button>
             </div>
 

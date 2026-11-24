@@ -230,7 +230,7 @@ export function IndicatorPanel({
           </div>
         </div>
 
-        <div className="rounded-sm border border-terminal-borderSoft bg-terminal-panelAlt px-2.5 py-1.5">
+        <div className="rounded-md border border-terminal-borderSoft bg-terminal-panelAlt px-2.5 py-1.5">
           <p className="text-2xs font-medium text-terminal-muted">
             Session VWAP
           </p>

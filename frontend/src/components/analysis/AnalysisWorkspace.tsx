@@ -14,6 +14,7 @@ import { Badge } from '../common/Badge';
 import { Button } from '../common/Button';
 import { Card } from '../common/Card';
 import { Select } from '../common/Field';
+import { Icon } from '../common/Icon';
 import { EmptyState, ErrorState, LoadingPanel, Notice } from '../common/States';
 import { Tabs } from '../common/Tabs';
 import { PriceChart } from '../charts/PriceChart';
@@ -43,7 +44,7 @@ function ToggleChip({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        'rounded-sm border px-1.5 py-0.5 text-2xs font-medium transition-colors',
+        'rounded border px-1.5 py-0.5 text-2xs font-medium transition-colors',
         active
           ? 'border-terminal-accent/60 bg-terminal-accentSoft text-terminal-accent'
           : 'border-terminal-border text-terminal-muted hover:text-terminal-text',
@@ -364,10 +365,7 @@ export function AnalysisWorkspace({
                     updating ? 'opacity-100' : 'opacity-0',
                   )}
                 >
-                  <span
-                    className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent"
-                    aria-hidden="true"
-                  />
+                  <Icon name="refresh" size={12} className="animate-spin" />
                   {updating ? <span className="sr-only">Updating</span> : null}
                 </span>
               </div>

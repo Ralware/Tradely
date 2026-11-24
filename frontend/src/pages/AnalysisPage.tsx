@@ -39,15 +39,15 @@ export function AnalysisPage() {
   return (
     <div className="tv-analysis-page flex h-full w-full overflow-hidden">
       {/* Center Main Analysis Workspace */}
-      <div className="flex-1 min-w-0 h-full overflow-y-auto px-3 py-3 lg:px-4">
+      <div className="h-full min-w-0 flex-1 overflow-y-auto px-3 py-3 lg:px-4">
         {/* Mobile/Tablet Right-Watchlist Toggle Button */}
         <div className="mb-2 flex justify-end xl:hidden">
           <button
             type="button"
             onClick={() => setDrawerOpen(true)}
-            className="tv-analysis-watchlist-toggle flex items-center gap-1.5 rounded border border-terminal-border bg-terminal-panel px-2.5 py-1 text-2xs font-medium text-terminal-muted hover:text-white"
+            className="tv-analysis-watchlist-toggle inline-flex items-center gap-1.5 rounded-md border border-terminal-border bg-terminal-panel px-2.5 py-1.5 text-2xs font-medium text-terminal-muted transition-colors hover:text-terminal-text"
           >
-            <Icon name="portfolio" size={13} />
+            <Icon name="list" size={13} />
             <span>Watchlist</span>
           </button>
         </div>
@@ -64,7 +64,7 @@ export function AnalysisPage() {
       </div>
 
       {/* Desktop Fixed Right-Hand Watchlist Sidebar */}
-      <aside className="hidden xl:block w-72 shrink-0 h-full border-l border-terminal-border">
+      <aside className="hidden h-full w-72 shrink-0 border-l border-terminal-border bg-terminal-panel xl:block">
         <AnalysisWatchlist
           selectedInstrumentId={selected.instrumentId}
           onSelectInstrument={handleSelectInstrument}
@@ -72,21 +72,21 @@ export function AnalysisPage() {
       </aside>
 
       {/* Mobile/Tablet Watchlist Slide-out Drawer */}
-      {drawerOpen && (
-          <div className="fixed inset-0 z-50 flex xl:hidden">
-            <div
-              className="fixed inset-0 bg-black/70 backdrop-blur-xs transition-opacity"
-              onClick={() => setDrawerOpen(false)}
-            />
-            <div className="tv-analysis-watchlist-drawer relative ml-auto flex h-full w-80 max-w-[85vw] flex-col bg-black shadow-2xl">
-              <AnalysisWatchlist
-                selectedInstrumentId={selected.instrumentId}
-                onSelectInstrument={handleSelectInstrument}
+      {drawerOpen ? (
+        <div className="fixed inset-0 z-50 flex xl:hidden">
+          <div
+            className="fixed inset-0 bg-terminal-bg/70 backdrop-blur-sm transition-opacity"
+            onClick={() => setDrawerOpen(false)}
+          />
+          <div className="tv-analysis-watchlist-drawer relative ml-auto flex h-full w-80 max-w-[85vw] flex-col overflow-hidden rounded-l-xl border-l border-terminal-border bg-terminal-panel shadow-2xl">
+            <AnalysisWatchlist
+              selectedInstrumentId={selected.instrumentId}
+              onSelectInstrument={handleSelectInstrument}
               onClose={() => setDrawerOpen(false)}
             />
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

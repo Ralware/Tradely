@@ -74,11 +74,19 @@
   }
 
   .panel-surface {
-    @apply rounded-sm border border-terminal-border bg-terminal-panel;
+    @apply rounded-lg border border-terminal-border bg-terminal-panel;
   }
 
   .skeleton-block {
-    @apply animate-pulse rounded-sm bg-terminal-borderSoft;
+    @apply animate-pulse rounded bg-terminal-borderSoft;
+  }
+
+  /* Native selects are appearance-none, so draw the disclosure caret ourselves. */
+  .select-caret {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b919b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    background-size: 12px 12px;
   }
 
   .data-table {
@@ -111,29 +119,29 @@
 
 @layer components {
   .tv-analysis-page {
-    background: #000000;
+    background: #08090b;
   }
 
   .tv-analysis-page .tv-analysis-watchlist-toggle {
-    background-color: #000000;
-    border-color: #242424;
+    background-color: #0d0f13;
+    border-color: #24272e;
   }
 
   .tv-technicals {
-    --tv-bg: #000000;
-    --tv-surface: #000000;
-    --tv-border: #202328;
-    --tv-text: #e4e6e9;
-    --tv-muted: #858b94;
-    --tv-buy: #3b82f6;
-    --tv-buy-soft: #60a5fa;
-    --tv-sell: #f4f6fa;
-    --tv-sell-soft: #d9dde5;
+    --tv-bg: #08090b;
+    --tv-surface: #0d0f13;
+    --tv-border: #24272e;
+    --tv-text: #e6e8eb;
+    --tv-muted: #8b919b;
+    --tv-buy: #4a8ff7;
+    --tv-buy-soft: #7fb0fb;
+    --tv-sell: #e6e8eb;
+    --tv-sell-soft: #b9bec7;
     background: var(--tv-bg);
     color: var(--tv-text);
     display: flex;
     flex-direction: column;
-    font-family: -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, sans-serif;
     font-feature-settings: "tnum" on, "lnum" on;
     text-transform: none;
   }
@@ -178,20 +186,20 @@
 
   .tv-analysis-toolbar {
     align-items: center;
-    background: #070707;
+    background: #0d0f13;
     border: 1px solid var(--tv-border);
-    border-radius: 9999px;
-    min-height: 52px;
-    padding: 7px 10px;
+    border-radius: 10px;
+    min-height: 48px;
+    padding: 6px 10px;
   }
 
   .tv-analysis-toolbar input {
-    background: #000000;
-    border-color: #292d35;
-    border-radius: 9999px;
-    height: 36px;
+    background: #08090b;
+    border-color: #2b2f37;
+    border-radius: 6px;
+    height: 32px;
     padding-left: 30px;
-    padding-right: 14px;
+    padding-right: 12px;
     transition: border-color 160ms ease, box-shadow 160ms ease;
   }
 
@@ -201,10 +209,10 @@
   }
 
   .tv-analysis-toolbar > div > button {
-    border-radius: 9999px;
-    height: 34px;
-    padding-left: 14px;
-    padding-right: 14px;
+    border-radius: 6px;
+    height: 32px;
+    padding-left: 12px;
+    padding-right: 12px;
   }
 
   .tv-instrument-heading {
@@ -233,8 +241,8 @@
   }
 
   .tv-timeframe-selector button[aria-selected="true"] {
-    background: var(--tv-surface);
-    border-color: var(--tv-border);
+    background: #171b22;
+    border-color: #3a4150;
     color: var(--tv-text);
   }
 
@@ -669,7 +677,7 @@
     }
 
     .tv-analysis-toolbar {
-      border-radius: 20px;
+      border-radius: 10px;
     }
 
     .tv-rating-gauge-hero,
@@ -709,74 +717,15 @@
   }
 }
 
-/* Keep every shared app surface true black, including stale generated utilities. */
+/* App frame: one scroll surface and no page-level scrollbars. */
 html,
 body,
 #root {
   height: 100%;
+}
+
+body,
+#root {
   overflow: hidden;
-  background-color: #000000;
-}
-
-.bg-terminal-bg,
-.bg-terminal-panel,
-.bg-terminal-panelAlt,
-[class*="bg-terminal-panel"],
-.panel-surface {
-  background-color: #000000;
-}
-
-/* App-wide rounded language: pill controls, rounded surfaces, and a pill navigation rail. */
-#root button,
-#root input,
-#root select,
-#root textarea,
-#root [role="button"] {
-  border-radius: 9999px !important;
-}
-
-#root [class*="rounded-"] {
-  border-radius: 20px !important;
-}
-
-#root .rounded-full,
-#root .app-sidebar,
-#root .app-sidebar-link,
-#root .tv-analysis-toolbar,
-#root .tv-timeframe-selector button,
-#root .tv-analysis-tabs [role="tab"] {
-  border-radius: 9999px !important;
-}
-
-#root .panel-surface,
-#root .tv-rating-overview,
-#root .tv-rating-counts,
-#root .tv-price-chart,
-#root .tv-technical-table,
-#root .tv-tab-panel {
-  border-radius: 22px !important;
-}
-
-#root .tv-analysis-page > aside {
-  align-self: stretch;
-  background: #050505;
-  border: 1px solid #202328;
-  border-radius: 22px;
-  height: auto;
-  margin: 10px 10px 10px 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-#root .tv-analysis-watchlist-drawer {
-  background: #050505;
-  border: 1px solid #202328;
-  border-radius: 24px 0 0 24px !important;
-  overflow: hidden;
-}
-
-@media (max-width: 480px) {
-  #root .tv-analysis-toolbar {
-    border-radius: 22px !important;
-  }
+  background-color: theme("colors.terminal.bg");
 }

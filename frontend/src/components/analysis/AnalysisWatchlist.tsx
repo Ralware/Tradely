@@ -84,12 +84,12 @@ export function AnalysisWatchlist({
   }
 
   return (
-    <div className="flex h-full flex-col border-l border-terminal-border bg-black text-terminal-text select-none">
+    <div className="flex h-full flex-col bg-terminal-panel text-terminal-text select-none">
       {/* Header */}
       <div className="flex h-11 shrink-0 items-center justify-between border-b border-terminal-border px-3">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-white tracking-wide">Watchlist</span>
-          <span className="inline-flex h-4 min-w-[16px] items-center justify-center rounded bg-black px-1 text-2xs font-semibold text-terminal-muted">
+          <span className="text-xs font-semibold tracking-wide text-terminal-text">Watchlist</span>
+          <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded border border-terminal-border bg-terminal-panelAlt px-1 text-2xs font-semibold text-terminal-muted">
             {items.length}
           </span>
         </div>
@@ -102,7 +102,7 @@ export function AnalysisWatchlist({
               refresh();
             }}
             title="Refresh Watchlist"
-            className="flex h-6 w-6 items-center justify-center rounded text-terminal-muted hover:bg-white/[0.05] hover:text-white transition-colors"
+            className="flex h-6 w-6 items-center justify-center rounded text-terminal-muted transition-colors hover:bg-white/[0.05] hover:text-terminal-text"
           >
             <Icon name="refresh" size={12} />
           </button>
@@ -111,39 +111,39 @@ export function AnalysisWatchlist({
             onClick={() => setAddOpen(!addOpen)}
             title="Add Instrument"
             className={cn(
-              'flex h-6 w-6 items-center justify-center rounded text-terminal-muted hover:bg-white/[0.05] hover:text-white transition-colors',
-              addOpen && 'bg-black text-white',
+              'flex h-6 w-6 items-center justify-center rounded text-terminal-muted transition-colors hover:bg-white/[0.05] hover:text-terminal-text',
+              addOpen && 'bg-terminal-accentSoft text-terminal-accent',
             )}
           >
             <Icon name="plus" size={13} />
           </button>
-          {onClose && (
+          {onClose ? (
             <button
               type="button"
               onClick={onClose}
               title="Close Drawer"
-              className="flex h-6 w-6 items-center justify-center rounded text-terminal-muted hover:bg-white/[0.05] hover:text-white transition-colors xl:hidden"
+              className="flex h-6 w-6 items-center justify-center rounded text-terminal-muted transition-colors hover:bg-white/[0.05] hover:text-terminal-text"
             >
               <Icon name="close" size={13} />
             </button>
-          )}
+          ) : null}
         </div>
       </div>
 
       {/* Add Instrument Inline Search */}
-      {addOpen && (
-        <div className="border-b border-terminal-border bg-black p-2">
+      {addOpen ? (
+        <div className="border-b border-terminal-border bg-terminal-panel p-2">
           <InstrumentSearch
             autoFocus
             clearOnSelect
             placeholder="Add ticker or pair..."
-            onSelect={(inst) => void handleAdd(inst)}
+            onSelect={(instrument) => void handleAdd(instrument)}
             inputClassName="h-7 text-2xs"
             disabled={adding}
           />
-          {error && <p className="mt-1 text-2xs text-terminal-red">{error}</p>}
+          {error ? <p className="mt-1 text-2xs text-terminal-red">{error}</p> : null}
         </div>
-      )}
+      ) : null}
 
       {/* Watchlist Items */}
       <div className="flex-1 overflow-y-auto divide-y divide-terminal-borderSoft">
@@ -171,9 +171,9 @@ export function AnalysisWatchlist({
                 key={key}
                 onClick={() => onSelectInstrument(item)}
                 className={cn(
-                  'group flex cursor-pointer items-center justify-between px-3 py-2 transition-colors',
+                  'group flex cursor-pointer items-center justify-between py-2 pl-2.5 pr-3 transition-colors',
                   isSelected
-                    ? 'border-l-2 border-terminal-accent bg-black'
+                    ? 'border-l-2 border-terminal-accent bg-terminal-accentSoft'
                     : 'border-l-2 border-transparent hover:bg-white/[0.03]',
                 )}
               >
@@ -209,7 +209,8 @@ export function AnalysisWatchlist({
                     type="button"
                     onClick={(e) => void handleRemove(e, item)}
                     title="Remove from Watchlist"
-                    className="opacity-0 group-hover:opacity-100 flex h-5 w-5 items-center justify-center rounded text-terminal-muted hover:bg-white/[0.1] hover:text-terminal-red transition-all"
+                    aria-label={`Remove ${item.symbol} from watchlist`}
+                    className="flex h-5 w-5 items-center justify-center rounded text-terminal-muted opacity-0 transition-all hover:bg-white/[0.1] hover:text-terminal-red group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
                   >
                     <Icon name="close" size={11} />
                   </button>

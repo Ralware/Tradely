@@ -170,14 +170,14 @@ export function InstrumentSearch({
         autoFocus={autoFocus}
         disabled={disabled}
         className={cn(
-          'h-7 w-full rounded-sm border border-terminal-border bg-terminal-panelAlt pl-7 pr-2 text-xs text-terminal-text',
+          'h-7 w-full rounded-md border border-terminal-border bg-terminal-panelAlt pl-7 pr-2 text-xs text-terminal-text',
           'placeholder:text-terminal-muted/70 focus:border-terminal-accent focus:outline-none',
           inputClassName,
         )}
       />
 
       {showDropdown ? (
-        <div className="absolute left-0 right-0 top-[calc(100%+3px)] z-50 max-h-72 overflow-y-auto rounded-sm border border-terminal-border bg-terminal-panel shadow-xl">
+        <div className="absolute left-0 right-0 top-[calc(100%+3px)] z-50 max-h-72 overflow-y-auto rounded-md border border-terminal-border bg-terminal-panel shadow-xl">
           {search.loading ? (
             <p className="px-2 py-1.5 text-2xs text-terminal-muted">Recognizing Instrument…</p>
           ) : search.error ? (
@@ -250,7 +250,7 @@ function CandidateRow({
       onClick={onChoose}
       className={cn(
         'flex w-full items-center justify-between gap-2 px-2 py-1 text-left hover:bg-white/[0.05] disabled:opacity-60',
-        primary && 'bg-black',
+        primary && 'bg-terminal-panelAlt',
       )}
     >
       <span className="min-w-0">

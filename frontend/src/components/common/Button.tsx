@@ -22,11 +22,11 @@ const variants: Record<Variant, string> = {
   ghost:
     'bg-transparent text-terminal-muted border border-transparent hover:text-terminal-text hover:bg-white/[0.05] disabled:opacity-60',
   danger:
-    'bg-transparent text-terminal-red border border-[#3f2528] hover:bg-black hover:border-[#5a3136] disabled:opacity-60',
+    'bg-transparent text-terminal-red border border-[#3f2528] hover:bg-[#1b1113] hover:border-[#5a3136] disabled:opacity-60',
 };
 
 const sizes: Record<Size, string> = {
-  sm: 'h-7 px-2 text-2xs gap-1',
+  sm: 'h-7 px-2.5 text-2xs gap-1',
   md: 'h-8 px-3 text-xs gap-1.5',
 };
 
@@ -45,7 +45,7 @@ export function Button({
       type="button"
       disabled={disabled || loading}
       className={cn(
-        'inline-flex items-center justify-center rounded-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-terminal-accent disabled:cursor-not-allowed',
+        'inline-flex items-center justify-center whitespace-nowrap rounded-md font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-terminal-accent disabled:cursor-not-allowed',
         variants[variant],
         sizes[size],
         className,
@@ -53,10 +53,7 @@ export function Button({
       {...rest}
     >
       {loading ? (
-        <span
-          className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent"
-          aria-hidden="true"
-        />
+        <Icon name="refresh" size={size === 'sm' ? 12 : 14} className="animate-spin" />
       ) : icon ? (
         <Icon name={icon} size={size === 'sm' ? 12 : 14} />
       ) : null}

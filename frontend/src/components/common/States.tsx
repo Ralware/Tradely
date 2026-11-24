@@ -5,15 +5,7 @@ import { Icon } from './Icon';
 import type { IconName } from './Icon';
 
 export function Spinner({ className }: { className?: string }) {
-  return (
-    <span
-      className={cn(
-        'inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/20 border-t-terminal-accent',
-        className,
-      )}
-      aria-hidden="true"
-    />
-  );
+  return <Icon name="refresh" size={14} className={cn('animate-spin text-terminal-accent', className)} />;
 }
 
 export function LoadingPanel({
@@ -60,7 +52,7 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        'flex flex-col items-center justify-center gap-1.5 rounded-sm border border-dashed border-terminal-border px-3 py-6 text-center',
+        'flex flex-col items-center justify-center gap-1.5 rounded-md border border-dashed border-terminal-border px-3 py-6 text-center',
         className,
       )}
     >
@@ -91,7 +83,7 @@ export function ErrorState({
     <div
       role="alert"
       className={cn(
-        'flex flex-col gap-2 rounded-sm border border-[#3f2528] bg-black px-3 py-2',
+        'flex flex-col gap-2 rounded-md border border-[#3f2528] bg-[#150f11] px-3 py-2',
         className,
       )}
     >
@@ -125,14 +117,14 @@ export function Notice({
   className?: string;
 }) {
   const tones = {
-    neutral: 'border-terminal-border bg-black text-terminal-muted',
-    warning: 'border-[#4d3d1f] bg-black text-[#dcc18d]',
-    negative: 'border-[#3f2528] bg-black text-[#d9a9a9]',
-    positive: 'border-[#1f4d43] bg-black text-[#8fd6c2]',
+    neutral: 'border-terminal-border bg-terminal-panel text-terminal-muted',
+    warning: 'border-[#4d3d1f] bg-[#14110b] text-[#dcc18d]',
+    negative: 'border-[#3f2528] bg-[#150f11] text-[#d9a9a9]',
+    positive: 'border-[#1f4d43] bg-[#0c1512] text-[#8fd6c2]',
   } as const;
 
   return (
-    <div className={cn('rounded-sm border px-2.5 py-1.5 text-2xs leading-relaxed', tones[tone], className)}>
+    <div className={cn('rounded-md border px-2.5 py-1.5 text-2xs leading-relaxed', tones[tone], className)}>
       {children}
     </div>
   );

@@ -225,7 +225,7 @@ export function TimeSeriesChart({
         </svg>
 
         <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-end">
-          <span ref={tooltipRef} className="num rounded-sm border border-terminal-border bg-terminal-panelAlt/95 px-2 py-0.5 text-2xs text-terminal-text">
+          <span ref={tooltipRef} className="num rounded border border-terminal-border bg-terminal-panelAlt/95 px-2 py-0.5 text-2xs text-terminal-text">
             {shortDate(last.timestamp)} · {valueFormatter(last.value)}
           </span>
         </div>

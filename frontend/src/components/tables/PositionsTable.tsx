@@ -90,7 +90,7 @@ export function PositionsTable({
                 aria-selected={selected}
                 className={cn(
                   "cursor-pointer border-b border-terminal-borderSoft last:border-0 focus:outline-none",
-                  selected ? "bg-black" : "hover:bg-white/[0.03]",
+                  selected ? "bg-terminal-accentSoft" : "hover:bg-white/[0.03]",
                 )}
                 title={position.valuation_error ?? position.name}
               >

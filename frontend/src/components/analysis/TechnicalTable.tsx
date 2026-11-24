@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { TechnicalCounts, TechnicalRow } from '../../types/api';
 import { cn, formatNumber } from '../../utils/format';
+import { Icon } from '../common/Icon';
 
 function actionTone(row: TechnicalRow): string {
   if (row.action === 'Buy') return 'tv-technical-action-buy';
@@ -106,7 +107,9 @@ function FragmentRow({
                 aria-label={`${isOpen ? 'Hide' : 'Show'} ${row.name} component values`}
                 onClick={onToggle}
               >
-                <span aria-hidden="true">{isOpen ? '−' : '+'}</span>
+                <span aria-hidden="true">
+                  <Icon name={isOpen ? 'minus' : 'plus'} size={13} />
+                </span>
               </button>
             ) : null}
             <span title={name}>{name}</span>

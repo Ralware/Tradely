@@ -5,13 +5,13 @@ export default {
     extend: {
       colors: {
         terminal: {
-          bg: '#000000',
-          panel: '#000000',
-          panelAlt: '#000000',
-          border: '#202328',
-          borderSoft: '#15171a',
-          text: '#e4e6e9',
-          muted: '#858b94',
+          bg: '#08090b',
+          panel: '#0d0f13',
+          panelAlt: '#13161c',
+          border: '#24272e',
+          borderSoft: '#191c22',
+          text: '#e6e8eb',
+          muted: '#8b919b',
           accent: '#2f6feb',
           accentSoft: 'rgba(47,111,235,0.12)',
           green: '#24a889',

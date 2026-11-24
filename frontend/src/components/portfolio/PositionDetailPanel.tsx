@@ -61,7 +61,7 @@ function HistoryTable({
     <div className="min-w-0">
       <p className="mb-1 text-2xs font-medium tracking-wide text-terminal-muted">{title}</p>
       {rows.length === 0 ? (
-        <p className="rounded-sm border border-dashed border-terminal-border px-2 py-3 text-center text-2xs text-terminal-muted">
+        <p className="rounded-md border border-dashed border-terminal-border px-2 py-3 text-center text-2xs text-terminal-muted">
           {empty}
         </p>
       ) : (
