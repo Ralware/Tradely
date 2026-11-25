@@ -1,14 +1,12 @@
 import { Outlet } from 'react-router-dom';
-import { Sidebar } from './Sidebar';
+import { TopNav } from './TopNav';
 
 export function AppShell() {
   return (
-    <div className="flex h-dvh min-h-0 w-full flex-col-reverse gap-2 overflow-hidden bg-terminal-bg p-2 text-terminal-text sm:flex-row sm:gap-3 sm:p-3">
-      <Sidebar />
-      <main className="min-h-0 min-w-0 flex-1 overflow-hidden" id="main-content">
-        <div className="h-full min-w-0 overflow-auto overscroll-contain rounded-xl border border-terminal-border bg-terminal-bg">
-          <Outlet />
-        </div>
+    <div className="flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-terminal-bg text-terminal-text">
+      <TopNav />
+      <main className="app-main min-h-0 min-w-0 flex-1 overflow-hidden" id="main-content">
+        <Outlet />
       </main>
     </div>
   );

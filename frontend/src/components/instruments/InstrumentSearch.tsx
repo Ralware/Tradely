@@ -191,7 +191,7 @@ export function InstrumentSearch({
           id={listboxId}
           role="listbox"
           aria-label="Instrument search results"
-          className="absolute left-0 right-0 top-[calc(100%+3px)] z-50 max-h-72 overflow-y-auto rounded-md border border-terminal-border bg-terminal-panel shadow-xl"
+          className="absolute left-0 right-0 top-[calc(100%+3px)] z-50 max-h-72 overflow-y-auto rounded border border-terminal-border bg-terminal-panel"
         >
           {search.loading ? (
             <p className="px-2 py-1.5 text-2xs text-terminal-muted">Recognizing Instrument…</p>
@@ -277,8 +277,8 @@ function CandidateRow({
       onMouseDown={(event) => event.preventDefault()}
       onClick={onChoose}
       className={cn(
-        'flex w-full items-center justify-between gap-2 px-2 py-1 text-left hover:bg-white/[0.05] disabled:opacity-60',
-        (primary || active) && 'bg-white/[0.04]',
+        'flex w-full items-center justify-between gap-2 px-2 py-1 text-left hover:bg-terminal-hover disabled:opacity-60',
+        (primary || active) && 'bg-terminal-surface-2',
       )}
     >
       <span className="min-w-0">

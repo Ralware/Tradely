@@ -47,7 +47,7 @@ export function CandleTable({
           {rows.map((candle) => (
             <tr
               key={candle.timestamp}
-              className="border-b border-terminal-borderSoft last:border-0 hover:bg-white/[0.02]"
+              className="border-b border-terminal-borderSoft last:border-0 hover:bg-terminal-hover"
             >
               <td className="num py-1.5 pr-3 text-terminal-muted">
                 {formatDateTime(candle.timestamp)}

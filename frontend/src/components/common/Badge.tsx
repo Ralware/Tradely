@@ -5,11 +5,11 @@ export type BadgeTone = 'neutral' | 'positive' | 'negative' | 'warning' | 'accen
 
 const tones: Record<BadgeTone, string> = {
   neutral: 'border-terminal-border text-terminal-muted',
-  positive: 'border-[#254a8f] text-terminal-green',
-  negative: 'border-[#4d2424] text-terminal-red',
-  warning: 'border-[#4d3d1f] text-terminal-amber',
-  accent: 'border-[#254a8f] text-terminal-accent',
-  violet: 'border-[#3f3560] text-terminal-violet',
+  positive: 'border-[#12382C] text-terminal-green',
+  negative: 'border-[#3A1C20] text-terminal-red',
+  warning: 'border-[#3A3018] text-terminal-amber',
+  accent: 'border-[#163A66] text-terminal-accent',
+  violet: 'border-[#2E2848] text-terminal-violet',
 };
 
 interface BadgeProps {

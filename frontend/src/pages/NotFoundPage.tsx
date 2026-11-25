@@ -4,7 +4,7 @@ import { PageHeader } from "../components/common/PageHeader";
 
 export function NotFoundPage() {
   return (
-    <div className="w-full px-4 py-4 lg:px-6">
+    <div className="app-page">
       <PageHeader title="Page Not Found" subtitle="This route does not exist" />
       <div className="panel-surface flex flex-col items-start gap-3 p-4">
         <p className="text-xs text-terminal-muted">

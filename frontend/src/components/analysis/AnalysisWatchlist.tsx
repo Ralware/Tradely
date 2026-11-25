@@ -103,7 +103,7 @@ export function AnalysisWatchlist({
               refresh();
             }}
             title="Refresh Watchlist"
-            className="flex h-6 w-6 items-center justify-center rounded text-terminal-muted transition-colors hover:bg-white/[0.05] hover:text-terminal-text"
+            className="flex h-6 w-6 items-center justify-center rounded text-terminal-muted transition-colors hover:bg-terminal-hover hover:text-terminal-text"
           >
             <Icon name="refresh" size={12} />
           </button>
@@ -112,7 +112,7 @@ export function AnalysisWatchlist({
             onClick={() => setAddOpen(!addOpen)}
             title="Add Instrument"
             className={cn(
-              'flex h-6 w-6 items-center justify-center rounded text-terminal-muted transition-colors hover:bg-white/[0.05] hover:text-terminal-text',
+              'flex h-6 w-6 items-center justify-center rounded text-terminal-muted transition-colors hover:bg-terminal-hover hover:text-terminal-text',
               addOpen && 'bg-terminal-accentSoft text-terminal-accent',
             )}
           >
@@ -123,7 +123,7 @@ export function AnalysisWatchlist({
               type="button"
               onClick={onClose}
               title="Close Drawer"
-              className="flex h-6 w-6 items-center justify-center rounded text-terminal-muted transition-colors hover:bg-white/[0.05] hover:text-terminal-text"
+              className="flex h-6 w-6 items-center justify-center rounded text-terminal-muted transition-colors hover:bg-terminal-hover hover:text-terminal-text"
             >
               <Icon name="close" size={13} />
             </button>
@@ -191,7 +191,7 @@ export function AnalysisWatchlist({
                   'group flex cursor-pointer items-center justify-between py-2 pl-2.5 pr-3 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-terminal-accent',
                   isSelected
                     ? 'border-l-2 border-terminal-accent bg-terminal-accentSoft'
-                    : 'border-l-2 border-transparent hover:bg-white/[0.03]',
+                    : 'border-l-2 border-transparent hover:bg-terminal-hover',
                 )}
               >
                 <div className="min-w-0 pr-2">
@@ -227,7 +227,7 @@ export function AnalysisWatchlist({
                     onClick={(e) => void handleRemove(e, item)}
                     title="Remove from Watchlist"
                     aria-label={`Remove ${item.symbol} from watchlist`}
-                    className="flex h-5 w-5 items-center justify-center rounded text-terminal-muted opacity-0 transition-all hover:bg-white/[0.1] hover:text-terminal-red group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 max-sm:opacity-100"
+                    className="flex h-5 w-5 items-center justify-center rounded text-terminal-muted opacity-0 transition-all hover:bg-terminal-hover hover:text-terminal-red group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 max-sm:opacity-100"
                   >
                     <Icon name="close" size={11} />
                   </button>

@@ -77,7 +77,7 @@ function ArticleRow({ article }: { article: NewsArticle }) {
           target="_blank"
           rel="noopener noreferrer"
           aria-label={`Open original article: ${article.title}`}
-          className="mt-0.5 hidden h-8 w-8 shrink-0 items-center justify-center rounded-md text-terminal-muted transition-colors hover:bg-white/[0.05] hover:text-terminal-accent sm:flex"
+          className="mt-0.5 hidden h-8 w-8 shrink-0 items-center justify-center rounded-md text-terminal-muted transition-colors hover:bg-terminal-hover hover:text-terminal-accent sm:flex"
         >
           <Icon name="external" size={14} />
         </a>
@@ -226,7 +226,7 @@ export function NewsPage() {
   }
 
   return (
-    <div className="w-full min-w-0 px-4 py-4 lg:px-6 text-terminal-text">
+    <div className="app-page min-w-0 text-terminal-text">
       <header className="mb-4 border-b border-terminal-border pb-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="min-w-0">
@@ -279,7 +279,7 @@ export function NewsPage() {
                   type="button"
                   onClick={clearSearch}
                   aria-label="Clear search"
-                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-terminal-muted transition-colors hover:bg-white/[0.06] hover:text-terminal-text"
+                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-terminal-muted transition-colors hover:bg-terminal-hover hover:text-terminal-text"
                 >
                   <Icon name="close" size={13} />
                 </button>
@@ -298,7 +298,7 @@ export function NewsPage() {
                     role="option"
                     aria-selected={false}
                     onClick={() => selectInstrument(candidate)}
-                    className="flex w-full items-center justify-between gap-3 rounded px-2.5 py-2 text-left transition-colors hover:bg-white/[0.05]"
+                    className="flex w-full items-center justify-between gap-3 rounded px-2.5 py-2 text-left transition-colors hover:bg-terminal-hover"
                   >
                     <span className="min-w-0">
                       <span className="block truncate text-xs font-semibold text-terminal-text">{candidate.name}</span>

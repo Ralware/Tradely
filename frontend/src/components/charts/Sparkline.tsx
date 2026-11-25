@@ -1,4 +1,4 @@
-import { useId, useMemo } from 'react';
+import { useMemo } from 'react';
 import { cn } from '../../utils/format';
 
 export function Sparkline({
@@ -10,7 +10,6 @@ export function Sparkline({
   className?: string;
   height?: number;
 }) {
-  const gradientId = useId();
   const path = useMemo(() => {
     const finite = values.filter((value) => Number.isFinite(value));
     if (finite.length < 2) {
@@ -28,8 +27,7 @@ export function Sparkline({
     });
     const rising = finite[finite.length - 1] >= finite[0];
     const line = `M ${points.join(' L ')}`;
-    const area = `M 0,${height} L ${points.join(' L ')} L ${width},${height} Z`;
-    return { line, area, rising };
+    return { line, rising };
   }, [values, height]);
 
   if (!path) {
@@ -53,13 +51,6 @@ export function Sparkline({
       style={{ height }}
       aria-hidden="true"
     >
-      <defs>
-        <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.25" />
-          <stop offset="100%" stopColor={color} stopOpacity="0.0" />
-        </linearGradient>
-      </defs>
-      <path d={path.area} fill={`url(#${gradientId})`} />
       <path
         d={path.line}
         fill="none"

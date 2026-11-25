@@ -69,7 +69,7 @@ export function StockNewsPreview({ instrumentId, symbol }: { instrumentId: strin
               target="_blank"
               rel="noopener noreferrer"
               aria-label={`Open: ${article.title}`}
-              className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded text-terminal-muted transition-colors hover:bg-white/[0.06] hover:text-terminal-accent"
+              className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded text-terminal-muted transition-colors hover:bg-terminal-hover hover:text-terminal-accent"
             >
               <Icon name="external" size={13} />
             </a>

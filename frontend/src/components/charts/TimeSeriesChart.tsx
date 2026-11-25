@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import type { PointerEvent } from 'react';
 import { clamp } from '../../utils/format';
 import { EmptyState } from '../common/States';
@@ -33,8 +33,6 @@ export function TimeSeriesChart({
   valueFormatter = (value) => value.toFixed(2),
   ariaLabel = 'Time series chart',
 }: TimeSeriesChartProps) {
-  const rawId = useId();
-  const gradientId = `grad-${rawId.replace(/[^a-zA-Z0-9]/g, '')}`;
   const crosshairRef = useRef<SVGLineElement | null>(null);
   const markerRef = useRef<SVGCircleElement | null>(null);
   const tooltipRef = useRef<HTMLSpanElement | null>(null);
@@ -69,17 +67,12 @@ export function TimeSeriesChart({
       .map((point, index) => `${index === 0 ? 'M' : 'L'}${x(index).toFixed(3)},${y(point.value).toFixed(3)}`)
       .join(' ');
 
-    const closeY = baseline === undefined ? 100 : y(baseline);
-    const area = `M${x(0).toFixed(3)},${closeY.toFixed(3)} ${line.replace(/^M/, 'L')} L${x(
-      valid.length - 1,
-    ).toFixed(3)},${closeY.toFixed(3)} Z`;
-
     const ticks = [0, 0.25, 0.5, 0.75, 1].map((fraction) => ({
       position: fraction * 100,
       value: max - fraction * span,
     }));
 
-    return { valid, line, area, ticks, x, y };
+    return { valid, line, ticks, x, y };
   }, [points, baseline]);
 
   useEffect(() => {
@@ -101,7 +94,7 @@ export function TimeSeriesChart({
     return <EmptyState title="No series data" icon="chart" />;
   }
 
-  const { valid, line, area, ticks, x, y } = geometry;
+  const { valid, line, ticks, x, y } = geometry;
   const last = valid[valid.length - 1];
 
   function handleMove(event: PointerEvent<HTMLDivElement>) {
@@ -159,13 +152,6 @@ export function TimeSeriesChart({
           preserveAspectRatio="none"
           className="h-full w-full overflow-visible"
         >
-          <defs>
-            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={color} stopOpacity="0.32" />
-              <stop offset="100%" stopColor={color} stopOpacity="0" />
-            </linearGradient>
-          </defs>
-
           {ticks.map((tick) => (
             <line
               key={tick.position}
@@ -192,7 +178,6 @@ export function TimeSeriesChart({
             />
           ) : null}
 
-          <path d={area} fill={`url(#${gradientId})`} />
           <path
             d={line}
             fill="none"

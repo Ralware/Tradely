@@ -118,7 +118,7 @@ export function WatchlistPage() {
   }
 
   return (
-    <div className="w-full px-4 py-4 lg:px-6">
+    <div className="app-page">
       <PageHeader
         title="Watchlist"
         subtitle="Live quotes and a 24-hour trend for every tracked instrument."
@@ -134,7 +134,7 @@ export function WatchlistPage() {
               onClick={handleRefreshAll}
               aria-label="Refresh watchlist data"
               title="Refresh watchlist data"
-              className="flex h-7 w-7 items-center justify-center rounded-md border border-terminal-border bg-terminal-panel text-terminal-muted transition-colors hover:bg-white/[0.05] hover:text-terminal-text"
+              className="flex h-7 w-7 items-center justify-center rounded-md border border-terminal-border bg-terminal-panel text-terminal-muted transition-colors hover:bg-terminal-hover hover:text-terminal-text"
             >
               <Icon name="refresh" size={14} />
             </button>
@@ -192,7 +192,7 @@ export function WatchlistPage() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="watchlist-dialog-title"
-            className="w-full max-w-md rounded-xl border border-terminal-border bg-terminal-panel p-4 shadow-2xl"
+            className="w-full max-w-md rounded border border-terminal-border bg-terminal-panel p-4"
           >
             <div className="mb-3 flex items-start justify-between gap-3 border-b border-terminal-border pb-2.5">
               <div>
@@ -206,7 +206,7 @@ export function WatchlistPage() {
               <button
                 type="button"
                 onClick={() => setAddModalOpen(false)}
-                className="-mr-1 -mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-terminal-muted transition-colors hover:bg-white/[0.06] hover:text-terminal-text"
+                className="-mr-1 -mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-terminal-muted transition-colors hover:bg-terminal-hover hover:text-terminal-text"
                 aria-label="Close"
               >
                 <Icon name="close" size={14} />

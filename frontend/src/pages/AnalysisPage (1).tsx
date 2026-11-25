@@ -65,7 +65,7 @@ export function AnalysisPage() {
       {drawerOpen && (
         <div className="fixed inset-0 z-50 flex lg:hidden">
           <div
-            className="fixed inset-0 bg-black/70 backdrop-blur-xs transition-opacity"
+            className="fixed inset-0 bg-terminal-bg transition-opacity"
             onClick={() => setDrawerOpen(false)}
           />
           <div className="relative ml-auto flex h-full w-80 max-w-[85vw] flex-col bg-black shadow-2xl">

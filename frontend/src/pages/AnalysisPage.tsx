@@ -51,7 +51,7 @@ export function AnalysisPage() {
   return (
     <div className="tv-analysis-page flex h-full w-full overflow-hidden">
       {/* Center Main Analysis Workspace */}
-      <div className="h-full min-w-0 flex-1 overflow-y-auto px-3 py-3 lg:px-4">
+      <div className="tv-analysis-main h-full min-w-0 flex-1 overflow-y-auto px-3 py-3 lg:px-4">
         {/* Mobile/Tablet Right-Watchlist Toggle Button */}
         <div className="mb-2 flex justify-end xl:hidden">
           <button
@@ -79,7 +79,7 @@ export function AnalysisPage() {
       </div>
 
       {/* Desktop Fixed Right-Hand Watchlist Sidebar */}
-      <aside className="hidden h-full w-72 shrink-0 border-l border-terminal-border bg-terminal-panel xl:block">
+      <aside className="tv-watchlist-panel hidden h-[calc(100%-16px)] w-72 shrink-0 overflow-hidden xl:my-2 xl:mr-2 xl:flex xl:flex-col">
         <AnalysisWatchlist
           selectedInstrumentId={selected.instrumentId}
           onSelectInstrument={handleSelectInstrument}
@@ -90,10 +90,10 @@ export function AnalysisPage() {
       {drawerOpen ? (
         <div className="fixed inset-0 z-50 flex xl:hidden">
           <div
-            className="fixed inset-0 bg-terminal-bg/70 backdrop-blur-sm transition-opacity"
+            className="fixed inset-0 bg-black"
             onClick={() => setDrawerOpen(false)}
           />
-          <div className="tv-analysis-watchlist-drawer relative ml-auto flex h-full w-80 max-w-[85vw] flex-col overflow-hidden rounded-l-xl border-l border-terminal-border bg-terminal-panel shadow-2xl">
+          <div className="tv-analysis-watchlist-drawer relative ml-auto flex h-full w-80 max-w-[85vw] flex-col overflow-hidden border-l border-terminal-border bg-terminal-panel">
             <AnalysisWatchlist
               selectedInstrumentId={selected.instrumentId}
               onSelectInstrument={handleSelectInstrument}

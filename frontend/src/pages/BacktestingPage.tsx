@@ -226,7 +226,7 @@ export function BacktestingPage() {
         JSON.stringify(comparisons[1].execution_assumptions));
 
   return (
-    <div className="w-full px-4 py-4 lg:px-6">
+    <div className="app-page">
       <PageHeader title="Backtesting" subtitle="Trend breakout · Daily bars · Costs included" />
 
       <Card
@@ -328,7 +328,7 @@ export function BacktestingPage() {
           <details
             open={editorOpen}
             onToggle={(event) => setEditorOpen(event.currentTarget.open)}
-            className="group rounded-md border border-terminal-border bg-white/[0.03]"
+            className="group rounded-md border border-terminal-border bg-terminal-surface-2"
           >
             <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-2.5 py-2 text-xs font-semibold text-terminal-text [&::-webkit-details-marker]:hidden">
               <span>
@@ -554,7 +554,7 @@ export function BacktestingPage() {
               {STRATEGY_FIELDS.map((field) => (
                 <div
                   key={field.key}
-                  className="flex items-baseline justify-between gap-2 rounded border border-terminal-borderSoft bg-white/[0.03] px-2 py-1"
+                  className="flex items-baseline justify-between gap-2 rounded border border-terminal-borderSoft bg-terminal-surface-2 px-2 py-1"
                 >
                   <span className="truncate text-terminal-muted">{field.label}</span>
                   <strong className="shrink-0 font-semibold text-terminal-text">

@@ -187,7 +187,7 @@ export function PortfolioPage() {
   }
 
   return (
-    <div className="w-full px-4 py-4 lg:px-6">
+    <div className="app-page">
       <PageHeader
         title="Portfolio"
         actions={

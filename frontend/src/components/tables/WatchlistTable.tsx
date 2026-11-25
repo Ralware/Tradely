@@ -227,7 +227,7 @@ export function WatchlistTable({
                       onRowClick?.(item);
                     }
                   }}
-                  className="cursor-pointer transition-colors hover:bg-white/[0.035] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-terminal-accent"
+                  className="cursor-pointer transition-colors hover:bg-terminal-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-terminal-accent"
                   onClick={() => onRowClick?.(item)}
                 >
                   <td className="num py-3 pl-3 pr-2 text-left font-mono text-2xs text-terminal-muted">
@@ -285,7 +285,7 @@ export function WatchlistTable({
                       aria-haspopup="menu"
                       aria-expanded={menu?.key === key}
                       disabled={isRemoving}
-                      className="inline-flex h-6 w-6 items-center justify-center rounded text-terminal-muted transition-colors hover:bg-white/[0.08] hover:text-terminal-text"
+                      className="inline-flex h-6 w-6 items-center justify-center rounded text-terminal-muted transition-colors hover:bg-terminal-hover hover:text-terminal-text"
                     >
                       {isRemoving ? (
                         <span className="animate-pulse text-2xs">…</span>
@@ -320,7 +320,7 @@ export function WatchlistTable({
                 setMenu(null);
                 onRowClick?.(menuRow.item);
               }}
-              className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs text-terminal-text transition-colors hover:bg-white/[0.06]"
+              className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs text-terminal-text transition-colors hover:bg-terminal-hover"
             >
               <Icon name="chart" size={12} />
               View Analysis
@@ -332,7 +332,7 @@ export function WatchlistTable({
                 setMenu(null);
                 onRemove(menuRow.item);
               }}
-              className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs text-terminal-red transition-colors hover:bg-white/[0.06]"
+              className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs text-terminal-red transition-colors hover:bg-terminal-hover"
             >
               <Icon name="trash" size={12} />
               Remove

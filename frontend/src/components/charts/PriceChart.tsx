@@ -41,14 +41,14 @@ interface PriceChartProps {
 const CHART_COLORS = {
   background: '#000000',
   surface: '#000000',
-  border: '#1d1d1d',
-  grid: '#111111',
+  border: '#1C1C1C',
+  grid: '#141414',
   text: '#929292',
-  accent: '#268bff',
-  candleUp: '#268bff',
-  candleDown: '#f2f2f2',
+  accent: '#1685FF',
+  candleUp: '#1685FF',
+  candleDown: '#F5F5F5',
   candleNeutral: '#929292',
-  sell: '#f04444',
+  sell: '#F04452',
 } as const;
 
 const overlayGroups: Array<{
@@ -58,8 +58,8 @@ const overlayGroups: Array<{
   {
     key: 'sma',
     lines: [
-      { field: 'sma_20', title: 'SMA 20', color: '#9ecbff' },
-      { field: 'sma_50', title: 'SMA 50', color: '#268bff' },
+      { field: 'sma_20', title: 'SMA 20', color: '#8EBEF5' },
+      { field: 'sma_50', title: 'SMA 50', color: '#1685FF' },
       { field: 'sma_100', title: 'SMA 100', color: '#929292' },
       { field: 'sma_200', title: 'SMA 200', color: '#b9a8ff' },
     ],
@@ -67,8 +67,8 @@ const overlayGroups: Array<{
   {
     key: 'ema',
     lines: [
-      { field: 'ema_20', title: 'EMA 20', color: '#6db2ff' },
-      { field: 'ema_50', title: 'EMA 50', color: '#268bff' },
+      { field: 'ema_20', title: 'EMA 20', color: '#6DB2FF' },
+      { field: 'ema_50', title: 'EMA 50', color: '#1685FF' },
       { field: 'ema_100', title: 'EMA 100', color: '#f2c76e' },
       { field: 'ema_200', title: 'EMA 200', color: '#ff9dcc' },
     ],

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useSelectedInstrument } from '../../contexts/SelectedInstrumentContext';
 import { apiRequest } from '../../services/api';
 import { analyticsViewStore } from '../../services/analyticsViewStore';
@@ -8,11 +8,10 @@ import { snapshotStore } from '../../services/snapshotStore';
 import { invalidateSnapshotValidation, isCompleteSnapshot, loadAnalyticsSnapshot } from '../../services/analyticsSnapshotLoader';
 import { portfolioService } from '../../services/portfolioService';
 import { suppressStaleStrategy } from '../../services/staleStrategy';
-import type { DirectionMode, Instrument } from '../../types/api';
+import type { DirectionMode } from '../../types/api';
 import { changeDigits, cn, formatDate, formatNumber, formatPercent, formatSignedFixed, toneForNumber } from '../../utils/format';
 import { pricePrecisionFor, minMoveFromMetadata } from '../../utils/precision';
 import { defaultDaysFor, intervalLabel, isIntradayInterval } from '../../utils/timeframes';
-import { instrumentPath } from '../../utils/navigation';
 import { Button } from '../common/Button';
 import { Card } from '../common/Card';
 import { Icon } from '../common/Icon';
@@ -21,7 +20,6 @@ import { Tabs } from '../common/Tabs';
 import { PriceChart } from '../charts/PriceChart';
 import type { OverlayToggles } from '../charts/PriceChart';
 import { IndicatorPanel } from '../charts/IndicatorPanel';
-import { InstrumentSearch } from '../instruments/InstrumentSearch';
 import { SignalCard } from '../signals/SignalCard';
 import { RiskCalculator } from '../signals/RiskCalculator';
 import { CandleTable } from '../tables/CandleTable';
@@ -63,7 +61,6 @@ export function AnalysisWorkspace({
   directionMode?: DirectionMode;
   onDirectionModeChange?: (mode: DirectionMode) => void;
 } = {}) {
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const selected = useSelectedInstrument();
 
@@ -222,11 +219,6 @@ export function AnalysisWorkspace({
     (change !== null && previousClose ? (change / previousClose) * 100 : null);
   const changeTone = toneForNumber(change);
 
-  function selectInstrument(instrument: Instrument) {
-    setWatchState({ loading: false, message: null, error: null });
-    navigate(instrumentPath(instrument, { interval, days }));
-  }
-
   function changeTimeframe(nextInterval: string) {
     const next = new URLSearchParams(searchParams);
     next.set('interval', nextInterval);
@@ -280,12 +272,7 @@ export function AnalysisWorkspace({
 
   return (
     <div className="tv-technicals space-y-3">
-      <div className="tv-analysis-toolbar panel-surface flex flex-wrap items-center justify-between gap-2 px-2 py-1.5">
-        <InstrumentSearch
-          className="w-56 sm:w-64"
-          placeholder="Search Ticker Or Name"
-          onSelect={selectInstrument}
-        />
+      <div className="tv-analysis-toolbar panel-surface flex flex-wrap items-center justify-end gap-2 px-2 py-1.5">
         <div className="flex flex-wrap items-center gap-1.5">
           {watchState.message ? (
             <span role="status" className="text-2xs text-terminal-green">{watchState.message}</span>
@@ -320,7 +307,7 @@ export function AnalysisWorkspace({
       {!instrumentId ? (
         <EmptyState
           title="No Instrument Selected"
-          description="Search a ticker, crypto pair, or asset name above."
+          description="Search a ticker, crypto pair, or asset name in the top bar."
           icon="search"
         />
       ) : missing ? (
@@ -490,7 +477,7 @@ export function AnalysisWorkspace({
                 pricePrecision={pricePrecision}
                 priceMinMove={priceMinMove}
                 intraday={intraday}
-                height={360}
+                height={480}
               />
             </div>
           </section>
