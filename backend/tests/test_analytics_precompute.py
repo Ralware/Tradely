@@ -5,6 +5,7 @@ import pytest
 import numpy as np
 import pandas as pd
 
+from app.core.config import Settings
 from app.core.database import Database
 from app.core.models import WatchlistItem
 from app.services.analytics_precompute import AnalyticsPrecompute, _decode, _encode
@@ -57,6 +58,65 @@ def test_active_jobs_deduplicate_across_job_types(tmp_path):
         assert connection.execute("SELECT COUNT(*) FROM analytics_jobs").fetchone()[0] == 1
 
 
+def test_explicit_refresh_promotes_an_active_prefetch_without_duplicating_it(tmp_path):
+    engine = AnalyticsPrecompute(Database(tmp_path / "promote.sqlite3"), NoMarketCalls())
+    first = engine.enqueue("global:NASDAQ:MSFT", "1d", job_type="WATCHLIST_PREFETCH")
+    second = engine.enqueue("global:NASDAQ:MSFT", "1d", priority=100, job_type="FULL_REFRESH")
+    assert first == second
+    with engine.db.connect() as connection:
+        row = connection.execute(
+            "SELECT job_type,priority FROM analytics_jobs WHERE job_id=?", (first,)
+        ).fetchone()
+        assert connection.execute("SELECT COUNT(*) FROM analytics_jobs").fetchone()[0] == 1
+    assert row["job_type"] == "FULL_REFRESH"
+    assert row["priority"] == 100
+
+
+def test_explicit_refresh_still_runs_when_an_ordinary_job_is_already_running(tmp_path):
+    engine = AnalyticsPrecompute(Database(tmp_path / "running-promote.sqlite3"), NoMarketCalls())
+    engine.enqueue("global:NASDAQ:MSFT", "1d", job_type="WATCHLIST_PREFETCH")
+    claimed = engine._claim("worker-0")
+    assert claimed is not None and claimed["job_type"] == "WATCHLIST_PREFETCH"
+
+    refresh_id = engine.enqueue(
+        "global:NASDAQ:MSFT", "1d", priority=100, job_type="FULL_REFRESH"
+    )
+
+    with engine.db.connect() as connection:
+        rows = connection.execute(
+            "SELECT job_id,job_type,status FROM analytics_jobs ORDER BY created_at"
+        ).fetchall()
+    assert [row["status"] for row in rows] == ["RUNNING", "QUEUED"]
+    assert rows[1]["job_id"] == refresh_id
+    assert rows[1]["job_type"] == "FULL_REFRESH"
+
+
+def test_two_workers_cannot_claim_the_same_identity(tmp_path):
+    engine = AnalyticsPrecompute(Database(tmp_path / "claims.sqlite3"), NoMarketCalls())
+    engine.enqueue("global:NASDAQ:MSFT", "1d")
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        claims = list(pool.map(lambda index: engine._claim(f"worker-{index}"), range(2)))
+    assert sum(claim is not None for claim in claims) == 1
+
+
+def test_worker_pool_starts_configured_concurrency_and_stops_cleanly(tmp_path):
+    market = FrameMarket(_valid_frame())
+    market.settings = Settings(
+        _env_file=None,
+        analytics_worker_concurrency=2,
+        analytics_worker_poll_seconds=0.05,
+    )
+    engine = AnalyticsPrecompute(Database(tmp_path / "workers.sqlite3"), market)
+    engine.start()
+    try:
+        assert len(engine._threads) == 2
+        assert engine.status()["worker_concurrency"] == 2
+        assert engine.status()["scheduler_running"] is True
+    finally:
+        engine.stop()
+    assert engine.status()["scheduler_running"] is False
+
+
 def test_expired_worker_lease_is_reclaimed(tmp_path):
     engine = AnalyticsPrecompute(Database(tmp_path / "lease.sqlite3"), NoMarketCalls())
     job_id = engine.enqueue("global:NASDAQ:MSFT", "1d")
@@ -105,6 +165,41 @@ def test_worker_publishes_coherent_market_and_strategy_variants(tmp_path):
         assert connection.execute("SELECT COUNT(*) FROM market_bars").fetchone()[0] == 260
         assert connection.execute("SELECT COUNT(*) FROM strategy_snapshots WHERE status='READY'").fetchone()[0] == 9
         assert connection.execute("SELECT COUNT(*) FROM market_analytics_snapshots WHERE status='READY'").fetchone()[0] == 1
+
+
+def test_background_refresh_reuses_cached_history_but_full_refresh_bypasses_it(tmp_path):
+    db = Database(tmp_path / "refresh-modes.sqlite3")
+    instrument = db.resolve_instrument("MSFT", "global", exchange="NASDAQ")
+    db.add_watchlist(WatchlistItem(instrument_id=instrument.instrument_id))
+    market = FrameMarket(_valid_frame())
+    engine = AnalyticsPrecompute(db, market)
+
+    engine.enqueue(instrument.instrument_id, "1d", job_type="WATCHLIST_REFRESH")
+    assert engine.run_one() is True
+    assert market.kwargs["bypass_cache"] is False
+
+    engine.enqueue(instrument.instrument_id, "1d", priority=100, job_type="FULL_REFRESH")
+    assert engine.run_one() is True
+    assert market.kwargs["bypass_cache"] is True
+    assert market.calls == 2
+
+
+def test_prepared_signal_reuses_the_published_strategy_without_recalculation(tmp_path):
+    db = Database(tmp_path / "prepared-signal.sqlite3")
+    instrument = db.resolve_instrument("MSFT", "global", exchange="NASDAQ")
+    market = FrameMarket(_valid_frame())
+    engine = AnalyticsPrecompute(db, market)
+    engine._compute_and_publish(instrument.instrument_id, "1d")
+    calls_after_compute = market.calls
+
+    prepared = engine.get_prepared_daily_signal(instrument.instrument_id, "1d")
+
+    assert prepared is not None
+    assert prepared["fingerprint"]
+    assert prepared["latest_close"] is not None
+    assert prepared["adjustment_status"] == "adjusted"
+    assert isinstance(prepared["strategy"], dict)
+    assert market.calls == calls_after_compute
 
 
 def _valid_frame(periods=260):

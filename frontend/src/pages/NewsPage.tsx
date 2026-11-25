@@ -113,6 +113,7 @@ export function NewsPage() {
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [canLoadMore, setCanLoadMore] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
   const dateRangeError = !isValidNewsDateRange(dateFrom, dateTo)
     ? 'Start date must be on or before the end date.'
     : null;
@@ -179,7 +180,7 @@ export function NewsPage() {
       setError(caught instanceof ApiError ? caught.message : caught instanceof Error ? caught.message : 'News could not be loaded.');
     }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [selectedId, selectedSymbol, dateFrom, dateTo, dateRangeError, page]);
+  }, [selectedId, selectedSymbol, dateFrom, dateTo, dateRangeError, page, reloadToken]);
 
   const selectedInstrument = feed?.instrument;
   const heading = useMemo(() => selectedInstrument?.name || selectedSymbol || 'Market feed', [selectedInstrument?.name, selectedSymbol]);
@@ -258,9 +259,17 @@ export function NewsPage() {
                 id="news-instrument-search"
                 value={searchText}
                 onChange={(event) => setSearchText(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    setSuggestions([]);
+                    setSearchError(null);
+                  }
+                }}
                 placeholder="Search ticker or company · AAPL, RELIANCE.NS, BTC-USD"
                 autoComplete="off"
                 className="min-w-0 flex-1 bg-transparent text-xs text-terminal-text outline-none placeholder:text-terminal-muted/70"
+                role="combobox"
+                aria-autocomplete="list"
                 aria-expanded={suggestions.length > 0}
                 aria-controls="news-search-results"
               />
@@ -385,7 +394,7 @@ export function NewsPage() {
               size="sm"
               variant="secondary"
               icon="refresh"
-              onClick={() => { setPage(1); setFeed(null); }}
+              onClick={() => { setPage(1); setFeed(null); setReloadToken((value) => value + 1); }}
             >
               Retry
             </Button>
@@ -402,7 +411,7 @@ export function NewsPage() {
                 size="sm"
                 variant="secondary"
                 icon="refresh"
-                onClick={() => { setPage(1); setFeed(null); }}
+                onClick={() => { setPage(1); setFeed(null); setReloadToken((value) => value + 1); }}
               >
                 Retry
               </Button>

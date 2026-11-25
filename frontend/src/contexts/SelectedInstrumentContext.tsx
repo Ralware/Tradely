@@ -9,6 +9,7 @@ import {
 import type { ReactNode } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { useQuotes } from "../hooks/useQuotes";
+import { analyticsViewStore } from "../services/analyticsViewStore";
 import { instrumentService } from "../services/instrumentService";
 import { portfolioService } from "../services/portfolioService";
 import type { Instrument, InstrumentCapabilities, Market } from "../types/api";
@@ -173,6 +174,10 @@ export function SelectedInstrumentProvider({
     error: null,
   });
   const selectionRequestRef = useRef(0);
+  // The last successfully resolved instrument survives navigation. Sidebar
+  // links point at bare `/analysis`, so without this the context would forget
+  // the user's instrument and fall back to the first watchlist row.
+  const lastResolvedRef = useRef<Instrument | null>(null);
 
   useEffect(() => {
     const requestId = ++selectionRequestRef.current;
@@ -181,59 +186,106 @@ export function SelectedInstrumentProvider({
       Boolean(canonicalParts) ||
       Boolean(rawInstrument && rawInstrument.includes(":"));
 
-    if (!rawInstrument && !rawSymbol && location.pathname === "/analysis") {
-      setSelection({
-        instrument: null,
-        status: "loading",
-        message: null,
-        loading: true,
-        error: null,
-      });
-      let active = true;
-      portfolioService
-        .getWatchlist()
-        .then((res) => {
-          if (!active || requestId !== selectionRequestRef.current) return;
-          const first = res.items?.[0];
-          if (!first) {
-            setSelection({
-              instrument: null,
-              status: "loading",
-              message: null,
-              loading: false,
-              error: null,
-            });
-            return;
-          }
-          const targetId =
-            first.instrument_id ??
-            instrumentIdFromLegacy(first.symbol, first.market, first.exchange);
-          setParams(
-            (current) => {
-              const next = new URLSearchParams(current);
-              next.set("instrument", targetId);
-              return next;
-            },
-            { replace: true },
-          );
-        })
-        .catch(() => {
-          if (active && requestId === selectionRequestRef.current) {
-            setSelection({
-              instrument: null,
-              status: "error",
-              message: "Unable to load your watchlist.",
-              loading: false,
-              error: "Unable to load your watchlist.",
-            });
-          }
-        });
-      return () => {
-        active = false;
-      };
-    }
-
     if (!requestedInstrumentId && !legacyQuery) {
+      const persisted = analyticsViewStore.get();
+      const restoreParams = (id: string) => {
+        setParams(
+          (current) => {
+            const next = new URLSearchParams(current);
+            next.set("instrument", id);
+            if (persisted.interval) next.set("interval", persisted.interval);
+            if (persisted.days) next.set("days", String(persisted.days));
+            return next;
+          },
+          { replace: true },
+        );
+      };
+
+      const previous = lastResolvedRef.current;
+      if (previous) {
+        setSelection({
+          instrument: previous,
+          status: "resolved",
+          message: null,
+          loading: false,
+          error: null,
+        });
+        // Restore the canonical query string only on Analytics; other routes
+        // keep their own URLs untouched while the sidebar keeps its context.
+        if (location.pathname === "/analysis" && rawInstrument !== previous.instrument_id) {
+          restoreParams(previous.instrument_id);
+        }
+        return undefined;
+      }
+
+      if (location.pathname === "/analysis") {
+        const storedId = persisted.instrumentId;
+        if (storedId) {
+          // A full reload loses the in-memory last selection; the persisted
+          // view store restores the same instrument before falling back to the
+          // first watchlist row.
+          setSelection({
+            instrument: null,
+            status: "loading",
+            message: null,
+            loading: true,
+            error: null,
+          });
+          restoreParams(storedId);
+          return undefined;
+        }
+
+        setSelection({
+          instrument: null,
+          status: "loading",
+          message: null,
+          loading: true,
+          error: null,
+        });
+        let active = true;
+        portfolioService
+          .getWatchlist()
+          .then((res) => {
+            if (!active || requestId !== selectionRequestRef.current) return;
+            const first = res.items?.[0];
+            if (!first) {
+              setSelection({
+                instrument: null,
+                status: "loading",
+                message: null,
+                loading: false,
+                error: null,
+              });
+              return;
+            }
+            const targetId =
+              first.instrument_id ??
+              instrumentIdFromLegacy(first.symbol, first.market, first.exchange);
+            setParams(
+              (current) => {
+                const next = new URLSearchParams(current);
+                next.set("instrument", targetId);
+                return next;
+              },
+              { replace: true },
+            );
+          })
+          .catch(() => {
+            if (active && requestId === selectionRequestRef.current) {
+              setSelection({
+                instrument: null,
+                status: "error",
+                message: "Unable to load your watchlist.",
+                loading: false,
+                error: "Unable to load your watchlist.",
+              });
+            }
+          });
+        return () => {
+          active = false;
+        };
+      }
+
       setSelection({
         instrument: null,
         status: "loading",
@@ -263,6 +315,7 @@ export function SelectedInstrumentProvider({
             return;
           if (res.status === "resolved" && res.instrument) {
             const canonicalId = res.instrument.instrument_id;
+            lastResolvedRef.current = res.instrument;
             if (rawInstrument !== canonicalId || hasLegacyParams) {
               setParams(
                 (current) => {
@@ -390,6 +443,7 @@ export function SelectedInstrumentProvider({
       .then((instrument) => {
         if (requestId !== selectionRequestRef.current) return;
         const canonicalId = instrument.instrument_id;
+        lastResolvedRef.current = instrument;
         if (rawInstrument !== canonicalId || hasLegacyParams) {
           setParams(
             (current) => {
@@ -496,12 +550,27 @@ export function SelectedInstrumentProvider({
     return timeframesFor(market);
   }, [capabilities, market]);
 
-  const requestedInterval = params.get("interval") ?? "1d";
+  // A bare route (sidebar navigation drops the query string) restores the
+  // persisted timeframe during render, before the workspace mounts. Otherwise
+  // the workspace's child effect would overwrite the persisted 4h selection
+  // with the default 1d before this provider could restore it.
+  const bareRoute =
+    !params.has("instrument")
+    && !params.has("symbol")
+    && !params.has("interval")
+    && !params.has("days");
+  const persistedView = bareRoute ? analyticsViewStore.get() : null;
+  const requestedInterval = params.get("interval") ?? persistedView?.interval ?? "1d";
   const interval = normalizeIntervalForIntervals(
     timeframes.map((option) => option.id),
     requestedInterval,
   );
-  const days = asDays(params.get("days"), interval);
+  const daysParam = params.get("days");
+  const days = daysParam !== null
+    ? asDays(daysParam, interval)
+    : persistedView && persistedView.interval === interval
+      ? persistedView.days
+      : defaultDaysFor(interval);
 
   const refs = useMemo(
     () =>

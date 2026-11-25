@@ -78,13 +78,45 @@ class AnalyticsPrecompute:
         self.db = db
         self.market_service = market_service
         self.worker_id = f"analytics-{uuid.uuid4().hex[:12]}"
+        settings = getattr(market_service, "settings", None)
+        self.worker_concurrency = max(
+            1, int(getattr(settings, "analytics_worker_concurrency", 1))
+        )
+        self.lease_seconds = max(
+            30, int(getattr(settings, "analytics_worker_lease_seconds", 300))
+        )
+        self.poll_seconds = max(
+            0.1, float(getattr(settings, "analytics_worker_poll_seconds", 2.0))
+        )
+        self._worker_ids = [
+            self.worker_id if index == 0 else f"{self.worker_id}-{index}"
+            for index in range(self.worker_concurrency)
+        ]
         self._stop = threading.Event()
+        self._threads: list[threading.Thread] = []
+        # Retained for callers/tests that only need the primary worker handle.
         self._thread: threading.Thread | None = None
         self._active = 0
+        self._active_lock = threading.Lock()
         self._last_error: str | None = None
         self._provider_requests = 0
         self._load_locks: dict[tuple[str, str], tuple[threading.Lock, int]] = {}
         self._load_locks_guard = threading.Lock()
+        self._metrics_lock = threading.Lock()
+        self._metrics: dict[str, float] = {
+            "enqueued": 0,
+            "deduplicated": 0,
+            "claimed": 0,
+            "completed": 0,
+            "failed": 0,
+            "cancelled": 0,
+            "queue_wait_seconds": 0.0,
+            "compute_seconds": 0.0,
+        }
+
+    def _record(self, name: str, amount: float = 1.0) -> None:
+        with self._metrics_lock:
+            self._metrics[name] = self._metrics.get(name, 0.0) + amount
 
     @contextmanager
     def _snapshot_load_lock(self, identity: tuple[str, str]) -> Iterator[None]:
@@ -111,12 +143,53 @@ class AnalyticsPrecompute:
         with self.db.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             active = conn.execute(
-                "SELECT job_id FROM analytics_jobs WHERE instrument_id=? AND interval=? "
+                "SELECT job_id,job_type,status FROM analytics_jobs "
+                "WHERE instrument_id=? AND interval=? "
                 "AND status IN ('QUEUED','RUNNING') ORDER BY created_at LIMIT 1",
                 (instrument_id, interval),
             ).fetchone()
             if active:
+                # Explicit refresh must not be swallowed by an ordinary queued
+                # prefetch. Promote the existing queued job instead of creating
+                # a duplicate, so request deduplication is preserved while the
+                # eventual computation still performs a full provider refresh.
+                if job_type == "FULL_REFRESH" and active["job_type"] != "FULL_REFRESH":
+                    if active["status"] == "QUEUED":
+                        try:
+                            conn.execute(
+                                "UPDATE analytics_jobs SET job_type='FULL_REFRESH',"
+                                "priority=MAX(priority,?),updated_at=? WHERE job_id=?",
+                                (priority, now, active["job_id"]),
+                            )
+                        except sqlite3.IntegrityError:
+                            # Another full-refresh row already holds the
+                            # identity; fall through to the lookup below.
+                            pass
+                        conn.commit()
+                        self._record("deduplicated")
+                        return str(active["job_id"])
+                    # The ordinary job is already running. Queue a distinct
+                    # full refresh so the explicit request is still honoured
+                    # once the in-flight computation finishes; the unique
+                    # partial index permits one active row per job type.
+                    conn.execute(
+                        """INSERT OR IGNORE INTO analytics_jobs
+                           (job_id,instrument_id,interval,job_type,priority,status,
+                            scheduled_at,created_at,updated_at)
+                           VALUES(?,?,?,?,?,'QUEUED',?,?,?)""",
+                        (job_id, instrument_id, interval, job_type, priority, now, now, now),
+                    )
+                    row = conn.execute(
+                        "SELECT job_id FROM analytics_jobs WHERE instrument_id=? "
+                        "AND interval=? AND job_type='FULL_REFRESH' "
+                        "AND status IN ('QUEUED','RUNNING') ORDER BY created_at LIMIT 1",
+                        (instrument_id, interval),
+                    ).fetchone()
+                    conn.commit()
+                    self._record("enqueued")
+                    return str(row["job_id"] if row else active["job_id"])
                 conn.commit()
+                self._record("deduplicated")
                 return str(active["job_id"])
             conn.execute(
                 """INSERT OR IGNORE INTO analytics_jobs
@@ -129,6 +202,7 @@ class AnalyticsPrecompute:
                 "AND job_type=? AND status IN ('QUEUED','RUNNING') ORDER BY created_at LIMIT 1",
                 (instrument_id, interval, job_type),
             ).fetchone()
+        self._record("enqueued")
         return str(row["job_id"] if row else job_id)
 
     def enqueue_watchlist(self) -> int:
@@ -182,11 +256,14 @@ class AnalyticsPrecompute:
             )
         return cursor.rowcount
 
-    def _claim(self) -> sqlite3.Row | None:
+    def _claim(self, worker_id: str | None = None) -> sqlite3.Row | None:
+        worker_id = worker_id or self.worker_id
         now = datetime.now(UTC)
-        lease = (now + timedelta(minutes=5)).isoformat()
+        lease = (now + timedelta(seconds=self.lease_seconds)).isoformat()
         with self.db.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            # Recover leases from crashed processes. A live worker renews its
+            # lease while computing, so only genuinely expired work is requeued.
             conn.execute(
                 """UPDATE analytics_jobs SET status='QUEUED',worker_id=NULL,lease_until=NULL,
                    updated_at=? WHERE status='RUNNING' AND lease_until < ?""",
@@ -199,42 +276,98 @@ class AnalyticsPrecompute:
             if row is None:
                 conn.commit()
                 return None
-            conn.execute(
+            updated = conn.execute(
                 """UPDATE analytics_jobs SET status='RUNNING',worker_id=?,started_at=?,
-                   lease_until=?,attempts=attempts+1,updated_at=? WHERE job_id=? AND status='QUEUED'""",
-                (self.worker_id, now.isoformat(), lease, now.isoformat(), row["job_id"]),
+                   lease_until=?,attempts=attempts+1,updated_at=?
+                   WHERE job_id=? AND status='QUEUED'""",
+                (worker_id, now.isoformat(), lease, now.isoformat(), row["job_id"]),
             )
             conn.commit()
+            if updated.rowcount != 1:
+                # Another worker won the claim between SELECT and UPDATE.
+                return None
+            self._record("claimed")
+            try:
+                scheduled = datetime.fromisoformat(str(row["scheduled_at"]))
+                if scheduled.tzinfo is None:
+                    scheduled = scheduled.replace(tzinfo=UTC)
+                self._record(
+                    "queue_wait_seconds",
+                    max(0.0, (now - scheduled).total_seconds()),
+                )
+            except (TypeError, ValueError):
+                pass
             return row
 
-    def run_one(self) -> bool:
-        job = self._claim()
+    def _renew_lease(self, job_id: str, worker_id: str) -> None:
+        with self.db.connect() as conn:
+            conn.execute(
+                "UPDATE analytics_jobs SET lease_until=?,updated_at=? "
+                "WHERE job_id=? AND status='RUNNING' AND worker_id=?",
+                (
+                    (datetime.now(UTC) + timedelta(seconds=self.lease_seconds)).isoformat(),
+                    _now(),
+                    job_id,
+                    worker_id,
+                ),
+            )
+
+    def _lease_heartbeat(self, job_id: str, worker_id: str) -> threading.Event:
+        stop = threading.Event()
+        interval = max(5.0, self.lease_seconds / 3.0)
+
+        def beat() -> None:
+            while not stop.wait(interval):
+                try:
+                    self._renew_lease(job_id, worker_id)
+                except Exception:  # lease renewal must not crash the worker
+                    logger.debug("[QUEUE] lease renewal failed job=%s", job_id)
+
+        threading.Thread(target=beat, daemon=True, name="analytics-lease").start()
+        return stop
+
+    def run_one(self, worker_id: str | None = None) -> bool:
+        worker_id = worker_id or self.worker_id
+        job = self._claim(worker_id)
         if job is None:
             return False
-        self._active += 1
+        with self._active_lock:
+            self._active += 1
+        job_id = str(job["job_id"])
+        job_type = str(job["job_type"])
+        heartbeat = self._lease_heartbeat(job_id, worker_id)
+        started = time.perf_counter()
         try:
-            if str(job["job_type"]) in {"INITIAL_COMPUTATION", "WATCHLIST_PREFETCH", "WATCHLIST_REFRESH"}:
+            if job_type in {"INITIAL_COMPUTATION", "WATCHLIST_PREFETCH", "WATCHLIST_REFRESH"}:
                 watched = any(item.get("instrument_id") == job["instrument_id"] for item in self.db.get_watchlist())
                 if not watched:
                     with self.db.connect() as conn:
                         conn.execute(
                             "UPDATE analytics_jobs SET status='CANCELLED',lease_until=NULL,updated_at=? WHERE job_id=?",
-                            (_now(), job["job_id"]),
+                            (_now(), job_id),
                         )
+                    self._record("cancelled")
                     return True
             identity = (str(job["instrument_id"]), str(job["interval"]))
             with self._snapshot_load_lock(identity):
                 existing = self.get_snapshot(*identity)
-                if (str(job["job_type"]) in {"INITIAL_COMPUTATION", "WATCHLIST_PREFETCH", "WATCHLIST_REFRESH"}
+                if (job_type in {"INITIAL_COMPUTATION", "WATCHLIST_PREFETCH", "WATCHLIST_REFRESH"}
                         and existing is not None and not self._snapshot_is_stale(existing)):
                     logger.info("[PREFETCH] skipped valid dataset instrument=%s interval=%s", *identity)
                 else:
-                    self._compute_and_publish(*identity)
+                    # Normal background refresh reuses the cached historical
+                    # frame and only merges the newest tail. Only an explicit
+                    # FULL_REFRESH job bypasses the provider cache.
+                    self._compute_and_publish(
+                        *identity,
+                        bypass_cache=job_type == "FULL_REFRESH",
+                    )
             with self.db.connect() as conn:
                 conn.execute(
                     "UPDATE analytics_jobs SET status='COMPLETED',completed_at=?,lease_until=NULL,updated_at=? WHERE job_id=?",
-                    (_now(), _now(), job["job_id"]),
+                    (_now(), _now(), job_id),
                 )
+            self._record("completed")
             self._last_error = None
         except Exception as exc:
             self._last_error = str(exc)
@@ -246,14 +379,18 @@ class AnalyticsPrecompute:
                     """UPDATE analytics_jobs SET status=?,last_error=?,lease_until=NULL,
                        scheduled_at=?,updated_at=? WHERE job_id=?""",
                     ("QUEUED" if retry else "FAILED",
-                     str(exc)[:2000], (datetime.now(UTC)+timedelta(seconds=delay)).isoformat(), _now(), job["job_id"]),
+                     str(exc)[:2000], (datetime.now(UTC)+timedelta(seconds=delay)).isoformat(), _now(), job_id),
                 )
-            logger.exception("analytics job failed id=%s instrument=%s interval=%s", job["job_id"], job["instrument_id"], job["interval"])
+            self._record("failed")
+            logger.exception("analytics job failed id=%s instrument=%s interval=%s", job_id, job["instrument_id"], job["interval"])
         finally:
-            self._active -= 1
+            heartbeat.set()
+            self._record("compute_seconds", time.perf_counter() - started)
+            with self._active_lock:
+                self._active -= 1
         return True
 
-    def _compute_and_publish(self, instrument_id: str, interval: str, *, bypass_cache: bool = True) -> None:
+    def _compute_and_publish(self, instrument_id: str, interval: str, *, bypass_cache: bool = False) -> None:
         instrument = self.db.instrument_for_id(instrument_id)
         if not instrument:
             raise ValueError(f"Unknown instrument: {instrument_id}")
@@ -373,6 +510,7 @@ class AnalyticsPrecompute:
         }
         blob, checksum = _encode(payload)
         identity = hashlib.sha256(f"{instrument_id}|{interval}|{fingerprint}|{SCHEMA_VERSION}".encode()).hexdigest()[:32]
+        write_started = time.perf_counter()
         with self.db.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             # Bar upserts and snapshot publication share one short transaction.
@@ -408,39 +546,147 @@ class AnalyticsPrecompute:
                      "default-v1",direction,position,now,"READY",strategy_blob,strategy_checksum),
                 )
             conn.commit()
+        self._record("snapshot_writes")
+        self._record("snapshot_write_seconds", time.perf_counter() - write_started)
+
+    def get_prepared_daily_signal(
+        self, instrument_id: str, interval: str = "1d"
+    ) -> dict[str, Any] | None:
+        """Return the prepared daily strategy without recomputing indicators.
+
+        The scanner only needs the default long-only signal plus a little
+        metadata. Reading the small strategy payload (instead of decompressing
+        the complete historical analysis bundle) keeps watchlist scans cheap
+        while still reusing the exact same calculation the Analytics page uses.
+        """
+        with self.db.connect() as conn:
+            snapshot = conn.execute(
+                """SELECT snapshot_id,ohlcv_fingerprint,latest_candle_at,candle_count,
+                          generated_at,adjustment_status,source_identity
+                   FROM market_analytics_snapshots
+                   WHERE instrument_id=? AND interval=? AND status='READY'
+                     AND schema_version=? AND indicator_version=?
+                     AND indicator_dependency_version=? AND rating_version=?
+                   ORDER BY generated_at DESC LIMIT 1""",
+                (
+                    instrument_id,
+                    interval,
+                    SCHEMA_VERSION,
+                    INDICATOR_VERSION,
+                    RATING_DEPENDENCY,
+                    RATING_VERSION,
+                ),
+            ).fetchone()
+            if snapshot is None:
+                return None
+            variant = conn.execute(
+                """SELECT payload,payload_checksum FROM strategy_snapshots
+                   WHERE market_snapshot_id=? AND instrument_id=? AND interval=?
+                     AND ohlcv_fingerprint=? AND strategy_version=?
+                     AND strategy_configuration_hash='default-v1'
+                     AND direction_mode='long_only' AND position_side='NONE'
+                     AND status='READY' LIMIT 1""",
+                (
+                    snapshot["snapshot_id"],
+                    instrument_id,
+                    interval,
+                    snapshot["ohlcv_fingerprint"],
+                    STRATEGY_VERSION,
+                ),
+            ).fetchone()
+            if variant is None:
+                return None
+            latest_bar = conn.execute(
+                """SELECT close FROM market_bars
+                   WHERE instrument_id=? AND interval=?
+                   ORDER BY timestamp DESC LIMIT 1""",
+                (instrument_id, interval),
+            ).fetchone()
+        try:
+            strategy = _decode(variant["payload"], variant["payload_checksum"])
+        except (ValueError, OSError, TypeError, json.JSONDecodeError):
+            logger.exception(
+                "[CACHE] invalid prepared strategy skipped instrument=%s interval=%s",
+                instrument_id,
+                interval,
+            )
+            return None
+        instrument = self.db.instrument_for_id(instrument_id) or {}
+        market = str(instrument.get("market") or "")
+        adjustment_status = str(snapshot["adjustment_status"])
+        stale = self._candle_timestamp_is_stale(
+            snapshot["latest_candle_at"], market, interval
+        )
+        return {
+            "instrument_id": instrument_id,
+            "interval": interval,
+            "fingerprint": snapshot["ohlcv_fingerprint"],
+            "snapshot_id": snapshot["snapshot_id"],
+            "generated_at": snapshot["generated_at"],
+            "latest_candle_at": snapshot["latest_candle_at"],
+            "candle_count": int(snapshot["candle_count"]),
+            "source": snapshot["source_identity"],
+            "latest_close": (
+                float(latest_bar["close"]) if latest_bar is not None else None
+            ),
+            "adjustment_status": adjustment_status,
+            "is_adjusted": (
+                True if adjustment_status == "adjusted"
+                else False if adjustment_status == "unadjusted"
+                else None
+            ),
+            "is_stale": stale,
+            "strategy": strategy,
+        }
+
+    @staticmethod
+    def _candle_timestamp_is_stale(
+        timestamp: Any, market: str, interval: str
+    ) -> bool:
+        try:
+            value = pd.to_datetime(timestamp, utc=True)
+            probe = pd.DataFrame({"close": [0.0]}, index=pd.DatetimeIndex([value]))
+            return _stale(probe, market, interval)
+        except (TypeError, ValueError):
+            return True
 
     def get_snapshot(self, instrument_id: str, interval: str) -> dict[str, Any] | None:
-        with self.db.connect() as conn:
-            rows = conn.execute(
-                """SELECT * FROM market_analytics_snapshots WHERE instrument_id=? AND interval=?
-                   AND status='READY' ORDER BY generated_at DESC""", (instrument_id, interval)
-            )
-            for row in rows:
-                variants = conn.execute(
-                    "SELECT * FROM strategy_snapshots WHERE market_snapshot_id=? AND status='READY'",
-                    (row["snapshot_id"],),
-                ).fetchall()
-                if any(variant["strategy_version"] != STRATEGY_VERSION
-                       or variant["strategy_configuration_hash"] != "default-v1"
-                       or variant["ohlcv_fingerprint"] != row["ohlcv_fingerprint"]
-                       for variant in variants):
-                    logger.warning("[CACHE] strategy version mismatch instrument=%s interval=%s",
-                                   instrument_id, interval)
-                    continue
-                try:
-                    payload = _decode(row["payload"], row["payload_checksum"])
-                    variants = {
-                        f"{variant['direction_mode']}:{variant['position_side']}":
-                        _decode(variant["payload"], variant["payload_checksum"])
-                        for variant in variants
-                    }
-                    payload["strategy_variants"] = variants
-                    if self._snapshot_complete(payload, instrument_id, interval, row):
-                        return payload
-                    logger.warning("[CACHE] incomplete snapshot skipped instrument=%s interval=%s", instrument_id, interval)
-                except (ValueError, OSError, TypeError, KeyError, json.JSONDecodeError):
-                    logger.exception("[CACHE] invalid snapshot skipped instrument=%s interval=%s", instrument_id, interval)
-        return None
+        started = time.perf_counter()
+        try:
+            with self.db.connect() as conn:
+                rows = conn.execute(
+                    """SELECT * FROM market_analytics_snapshots WHERE instrument_id=? AND interval=?
+                       AND status='READY' ORDER BY generated_at DESC""", (instrument_id, interval)
+                )
+                for row in rows:
+                    variants = conn.execute(
+                        "SELECT * FROM strategy_snapshots WHERE market_snapshot_id=? AND status='READY'",
+                        (row["snapshot_id"],),
+                    ).fetchall()
+                    if any(variant["strategy_version"] != STRATEGY_VERSION
+                           or variant["strategy_configuration_hash"] != "default-v1"
+                           or variant["ohlcv_fingerprint"] != row["ohlcv_fingerprint"]
+                           for variant in variants):
+                        logger.warning("[CACHE] strategy version mismatch instrument=%s interval=%s",
+                                       instrument_id, interval)
+                        continue
+                    try:
+                        payload = _decode(row["payload"], row["payload_checksum"])
+                        variants = {
+                            f"{variant['direction_mode']}:{variant['position_side']}":
+                            _decode(variant["payload"], variant["payload_checksum"])
+                            for variant in variants
+                        }
+                        payload["strategy_variants"] = variants
+                        if self._snapshot_complete(payload, instrument_id, interval, row):
+                            return payload
+                        logger.warning("[CACHE] incomplete snapshot skipped instrument=%s interval=%s", instrument_id, interval)
+                    except (ValueError, OSError, TypeError, KeyError, json.JSONDecodeError):
+                        logger.exception("[CACHE] invalid snapshot skipped instrument=%s interval=%s", instrument_id, interval)
+            return None
+        finally:
+            self._record("snapshot_reads")
+            self._record("snapshot_read_seconds", time.perf_counter() - started)
 
     @staticmethod
     def _snapshot_complete(payload: dict[str, Any], instrument_id: str, interval: str,
@@ -561,88 +807,237 @@ class AnalyticsPrecompute:
         except (KeyError, TypeError, ValueError):
             return True
 
-    def manifest(self) -> dict[str, Any]:
+    def manifest(
+        self, *, limit: int | None = None, offset: int = 0
+    ) -> dict[str, Any]:
         """Return a cheap index without decoding historical analytics BLOBs.
 
         Individual snapshot requests still verify payload checksums and completeness;
         this application-wide manifest needs only indexed metadata to decide what to hydrate.
+        The queries are batched by watchlist identity instead of running two
+        statements per instrument/timeframe, which keeps manifest latency flat as
+        the watchlist grows.
         """
-        result = []
+        started = time.perf_counter()
         watchlist = self.db.get_watchlist()
-        with self.db.connect() as conn:
-            for instrument in watchlist:
-                instrument_id = instrument.get("instrument_id")
-                if not instrument_id:
+        identities: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for instrument in watchlist:
+            instrument_id = instrument.get("instrument_id")
+            if not instrument_id:
+                continue
+            configured = instrument.get("supported_intervals")
+            if isinstance(configured, str):
+                try:
+                    configured = json.loads(configured)
+                except ValueError:
+                    configured = []
+            for interval in configured or ("1d", "1wk", "1mo"):
+                if interval not in HISTORY_DAYS:
                     continue
-                registry_entry = self.db.instrument_for_id(str(instrument_id)) or instrument
-                configured = registry_entry.get("supported_intervals")
-                if isinstance(configured, str):
-                    try: configured = json.loads(configured)
-                    except ValueError: configured = []
-                for interval in configured or ("1d", "1wk", "1mo"):
-                    if interval not in HISTORY_DAYS: continue
-                    snapshot = conn.execute(
-                        """SELECT snapshot_id,ohlcv_fingerprint,latest_candle_at,candle_count,
-                                  generated_at,schema_version,indicator_version,
-                                  indicator_dependency_version,rating_version,adjustment_status
-                           FROM market_analytics_snapshots WHERE instrument_id=? AND interval=?
-                             AND status='READY' ORDER BY generated_at DESC LIMIT 1""",
-                        (instrument_id, interval),
-                    ).fetchone()
-                    job = conn.execute(
-                        "SELECT status,last_error FROM analytics_jobs WHERE instrument_id=? AND interval=? ORDER BY created_at DESC LIMIT 1",
-                        (instrument_id, interval),
-                    ).fetchone()
-                    if snapshot:
-                        strategy_count = conn.execute(
-                            """SELECT COUNT(*) FROM strategy_snapshots
-                               WHERE market_snapshot_id=? AND status='READY'
-                                 AND strategy_version=? AND strategy_configuration_hash='default-v1'
-                                 AND ohlcv_fingerprint=?""",
-                            (snapshot["snapshot_id"], STRATEGY_VERSION, snapshot["ohlcv_fingerprint"]),
-                        ).fetchone()[0]
-                        metadata_matches = (
-                            snapshot["schema_version"] == SCHEMA_VERSION
-                            and snapshot["indicator_version"] == INDICATOR_VERSION
-                            and snapshot["indicator_dependency_version"] == RATING_DEPENDENCY
-                            and snapshot["rating_version"] == RATING_VERSION
-                            and snapshot["adjustment_status"] in {"adjusted", "unadjusted", "unknown"}
-                        )
-                        if not metadata_matches or strategy_count != len(DIRECTIONS) * len(POSITIONS):
-                            snapshot = None
-                    job_status = str(job["status"]) if job else "MISSING"
-                    if not snapshot and job_status not in {"QUEUED", "RUNNING", "FAILED"}:
-                        job_status = "MISSING"
-                    result.append({"instrument_id":instrument_id,"interval":interval,
-                        "status":"READY" if snapshot else job_status,
-                        "snapshot_id":snapshot["snapshot_id"] if snapshot else None,
-                        "fingerprint":snapshot["ohlcv_fingerprint"] if snapshot else None,
-                        "latest_candle_at":snapshot["latest_candle_at"] if snapshot else None,
-                        "candle_count":snapshot["candle_count"] if snapshot else 0,
-                        "generated_at":snapshot["generated_at"] if snapshot else None,
-                        "last_error":job["last_error"] if job else None})
-        return {"items":result,"as_of":_now()}
+                identity = (str(instrument_id), str(interval))
+                if identity not in seen:
+                    seen.add(identity)
+                    identities.append(identity)
+        if not identities:
+            self._record("manifest_calls")
+            self._record("manifest_seconds", time.perf_counter() - started)
+            return {"items": [], "as_of": _now(), "total": 0, "offset": offset, "limit": limit}
+
+        instrument_ids = sorted({identity[0] for identity in identities})
+        intervals = sorted({identity[1] for identity in identities})
+        instrument_placeholders = ",".join("?" for _ in instrument_ids)
+        interval_placeholders = ",".join("?" for _ in intervals)
+        parameters = (*instrument_ids, *intervals)
+
+        with self.db.connect() as conn:
+            snapshot_rows = conn.execute(
+                f"""SELECT * FROM (
+                        SELECT snapshot_id,instrument_id,interval,ohlcv_fingerprint,
+                               latest_candle_at,candle_count,generated_at,schema_version,
+                               indicator_version,indicator_dependency_version,rating_version,
+                               adjustment_status,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY instrument_id,interval
+                                   ORDER BY generated_at DESC
+                               ) AS row_number
+                        FROM market_analytics_snapshots
+                        WHERE status='READY'
+                          AND instrument_id IN ({instrument_placeholders})
+                          AND interval IN ({interval_placeholders})
+                    ) WHERE row_number=1""",
+                parameters,
+            ).fetchall()
+            job_rows = conn.execute(
+                f"""SELECT * FROM (
+                        SELECT instrument_id,interval,status,last_error,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY instrument_id,interval
+                                   ORDER BY created_at DESC
+                               ) AS row_number
+                        FROM analytics_jobs
+                        WHERE instrument_id IN ({instrument_placeholders})
+                          AND interval IN ({interval_placeholders})
+                    ) WHERE row_number=1""",
+                parameters,
+            ).fetchall()
+            snapshots = {
+                (str(row["instrument_id"]), str(row["interval"])): row
+                for row in snapshot_rows
+            }
+            jobs = {
+                (str(row["instrument_id"]), str(row["interval"])): row
+                for row in job_rows
+            }
+            snapshot_ids = [row["snapshot_id"] for row in snapshot_rows]
+            strategy_counts: dict[tuple[str, str], int] = {}
+            if snapshot_ids:
+                id_placeholders = ",".join("?" for _ in snapshot_ids)
+                count_rows = conn.execute(
+                    f"""SELECT market_snapshot_id,ohlcv_fingerprint,COUNT(*) AS count
+                        FROM strategy_snapshots
+                        WHERE status='READY' AND strategy_version=?
+                          AND strategy_configuration_hash='default-v1'
+                          AND market_snapshot_id IN ({id_placeholders})
+                        GROUP BY market_snapshot_id,ohlcv_fingerprint""",
+                    (STRATEGY_VERSION, *snapshot_ids),
+                ).fetchall()
+                strategy_counts = {
+                    (str(row["market_snapshot_id"]), str(row["ohlcv_fingerprint"])): int(row["count"])
+                    for row in count_rows
+                }
+
+        result = []
+        expected_strategy_count = len(DIRECTIONS) * len(POSITIONS)
+        for identity in identities:
+            instrument_id, interval = identity
+            snapshot = snapshots.get(identity)
+            job = jobs.get(identity)
+            if snapshot:
+                strategy_count = strategy_counts.get(
+                    (str(snapshot["snapshot_id"]), str(snapshot["ohlcv_fingerprint"])),
+                    0,
+                )
+                metadata_matches = (
+                    snapshot["schema_version"] == SCHEMA_VERSION
+                    and snapshot["indicator_version"] == INDICATOR_VERSION
+                    and snapshot["indicator_dependency_version"] == RATING_DEPENDENCY
+                    and snapshot["rating_version"] == RATING_VERSION
+                    and snapshot["adjustment_status"] in {"adjusted", "unadjusted", "unknown"}
+                )
+                if not metadata_matches or strategy_count != expected_strategy_count:
+                    snapshot = None
+            job_status = str(job["status"]) if job else "MISSING"
+            if not snapshot and job_status not in {"QUEUED", "RUNNING", "FAILED"}:
+                job_status = "MISSING"
+            result.append({
+                "instrument_id": instrument_id,
+                "interval": interval,
+                "status": "READY" if snapshot else job_status,
+                "snapshot_id": snapshot["snapshot_id"] if snapshot else None,
+                "fingerprint": snapshot["ohlcv_fingerprint"] if snapshot else None,
+                "latest_candle_at": snapshot["latest_candle_at"] if snapshot else None,
+                "candle_count": snapshot["candle_count"] if snapshot else 0,
+                "generated_at": snapshot["generated_at"] if snapshot else None,
+                "last_error": job["last_error"] if job else None,
+            })
+        total = len(result)
+        start = max(0, offset)
+        result = result[start:]
+        if limit is not None:
+            result = result[: max(0, limit)]
+        self._record("manifest_calls")
+        self._record("manifest_seconds", time.perf_counter() - started)
+        return {
+            "items": result,
+            "as_of": _now(),
+            "total": total,
+            "offset": start,
+            "limit": limit,
+        }
 
     def status(self) -> dict[str, Any]:
         with self.db.connect() as conn:
-            counts = {row["status"]:row["count"] for row in conn.execute("SELECT status,COUNT(*) AS count FROM analytics_jobs GROUP BY status")}
-        return {"worker_id":self.worker_id,"running_workers":self._active,"jobs":counts,
-                "last_error":self._last_error,"provider_requests":self._provider_requests,
-                "scheduler_running":bool(self._thread and self._thread.is_alive())}
+            counts = {row["status"]: row["count"] for row in conn.execute(
+                "SELECT status,COUNT(*) AS count FROM analytics_jobs GROUP BY status"
+            )}
+        with self._metrics_lock:
+            metrics = dict(self._metrics)
+            metrics["average_queue_wait_seconds"] = (
+                metrics["queue_wait_seconds"] / metrics["claimed"]
+                if metrics["claimed"] else 0.0
+            )
+            metrics["average_compute_seconds"] = (
+                metrics["compute_seconds"] / (metrics["completed"] + metrics["failed"])
+                if (metrics["completed"] + metrics["failed"]) else 0.0
+            )
+            metrics["average_manifest_seconds"] = (
+                metrics.get("manifest_seconds", 0.0) / metrics["manifest_calls"]
+                if metrics.get("manifest_calls") else 0.0
+            )
+            metrics["average_snapshot_read_seconds"] = (
+                metrics.get("snapshot_read_seconds", 0.0) / metrics["snapshot_reads"]
+                if metrics.get("snapshot_reads") else 0.0
+            )
+            metrics["average_snapshot_write_seconds"] = (
+                metrics.get("snapshot_write_seconds", 0.0) / metrics["snapshot_writes"]
+                if metrics.get("snapshot_writes") else 0.0
+            )
+        market_metrics = None
+        try:
+            market_metrics = self.market_service.metrics()
+        except Exception:
+            market_metrics = None
+        with self._active_lock:
+            active = self._active
+        return {
+            "worker_id": self.worker_id,
+            "worker_concurrency": self.worker_concurrency,
+            "running_workers": active,
+            "jobs": counts,
+            "last_error": self._last_error,
+            "provider_requests": self._provider_requests,
+            "scheduler_running": any(thread.is_alive() for thread in self._threads),
+            "metrics": metrics,
+            "market": market_metrics,
+        }
 
-    def start(self, *, poll_seconds: float = 2.0) -> None:
-        if self._thread and self._thread.is_alive(): return
+    def start(self, *, poll_seconds: float | None = None) -> None:
+        if any(thread.is_alive() for thread in self._threads):
+            return
         self._stop.clear()
-        self._thread = threading.Thread(target=self._serve, args=(poll_seconds,), daemon=True, name="analytics-worker")
-        self._thread.start()
+        poll = max(
+            0.1,
+            float(poll_seconds if poll_seconds is not None else self.poll_seconds),
+        )
+        self._threads = [
+            threading.Thread(
+                target=self._serve,
+                args=(poll, worker_id),
+                daemon=True,
+                name=f"analytics-worker-{index}",
+            )
+            for index, worker_id in enumerate(self._worker_ids)
+        ]
+        self._thread = self._threads[0]
+        for thread in self._threads:
+            thread.start()
 
-    def _serve(self, poll_seconds: float) -> None:
+    def _serve(self, poll_seconds: float, worker_id: str) -> None:
         while not self._stop.is_set():
-            if not self.run_one(): self._stop.wait(poll_seconds)
+            if not self.run_one(worker_id):
+                self._stop.wait(poll_seconds)
 
     def stop(self, timeout: float = 15.0) -> None:
         self._stop.set()
-        if self._thread: self._thread.join(timeout)
+        for thread in self._threads:
+            thread.join(timeout)
+        self._threads.clear()
+        self._thread = None
+        placeholders = ",".join("?" for _ in self._worker_ids)
         with self.db.connect() as conn:
-            conn.execute("UPDATE analytics_jobs SET status='QUEUED',worker_id=NULL,lease_until=NULL,updated_at=? WHERE status='RUNNING' AND worker_id=?",
-                         (_now(), self.worker_id))
+            conn.execute(
+                "UPDATE analytics_jobs SET status='QUEUED',worker_id=NULL,lease_until=NULL,"
+                f"updated_at=? WHERE status='RUNNING' AND worker_id IN ({placeholders})",
+                (_now(), *self._worker_ids),
+            )

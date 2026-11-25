@@ -66,36 +66,36 @@ export function PositionChart({
     const chart: IChartApi = createChart(element, {
       autoSize: true,
       layout: {
-        background: { type: ColorType.Solid, color: '#0d0f13' },
-        textColor: '#8b919b',
+        background: { type: ColorType.Solid, color: '#000000' },
+        textColor: '#929292',
         fontSize: 11,
         fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
         attributionLogo: false,
       },
       grid: {
-        vertLines: { color: '#1a1d22' },
-        horzLines: { color: '#1a1d22' },
+        vertLines: { color: '#111111' },
+        horzLines: { color: '#111111' },
       },
-      rightPriceScale: { borderColor: '#24272e', scaleMargins: { top: 0.1, bottom: 0.1 } },
+      rightPriceScale: { borderColor: '#1d1d1d', scaleMargins: { top: 0.1, bottom: 0.1 } },
       timeScale: {
-        borderColor: '#24272e',
+        borderColor: '#1d1d1d',
         timeVisible: false,
         secondsVisible: false,
         rightOffset: 4,
       },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: '#3a3f4a', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#0d0f13' },
-        horzLine: { color: '#3a3f4a', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#0d0f13' },
+        vertLine: { color: '#4a4a4a', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#000000' },
+        horzLine: { color: '#4a4a4a', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#000000' },
       },
     });
 
     const candleSeries: ISeriesApi<'Candlestick'> = chart.addSeries(CandlestickSeries, {
-      upColor: '#24a889',
-      downColor: '#e45b63',
+      upColor: '#268bff',
+      downColor: '#f2f2f2',
       borderVisible: false,
-      wickUpColor: '#24a889',
-      wickDownColor: '#e45b63',
+      wickUpColor: '#268bff',
+      wickDownColor: '#f2f2f2',
       priceLineVisible: false,
     });
 
@@ -110,6 +110,9 @@ export function PositionChart({
         high: candle.high,
         low: candle.low,
         close: candle.close,
+        color: candle.close > candle.open ? '#268bff' : candle.close < candle.open ? '#f2f2f2' : '#929292',
+        borderColor: candle.close > candle.open ? '#268bff' : candle.close < candle.open ? '#f2f2f2' : '#929292',
+        wickColor: candle.close > candle.open ? '#268bff' : candle.close < candle.open ? '#f2f2f2' : '#929292',
       }];
     });
     candleSeries.setData(candleData);
@@ -118,7 +121,7 @@ export function PositionChart({
     if (averageCost > 0) {
       candleSeries.createPriceLine({
         price: averageCost,
-        color: '#d6a45a',
+        color: '#f59e0b',
         lineWidth: 1,
         lineStyle: LineStyle.Dashed,
         axisLabelVisible: true,
@@ -128,7 +131,7 @@ export function PositionChart({
     if (currentPrice !== null && currentPrice > 0) {
       candleSeries.createPriceLine({
         price: currentPrice,
-        color: '#2f6feb',
+        color: '#268bff',
         lineWidth: 1,
         lineStyle: LineStyle.Solid,
         axisLabelVisible: true,
@@ -142,7 +145,7 @@ export function PositionChart({
     for (const price of purchasePrices) {
       candleSeries.createPriceLine({
         price,
-        color: '#3a3f4a',
+        color: '#4a4a4a',
         lineWidth: 1,
         lineStyle: LineStyle.Dotted,
         axisLabelVisible: false,
@@ -159,7 +162,7 @@ export function PositionChart({
       markers.push({
         time,
         position: positionSide === 'SHORT' ? 'aboveBar' : 'belowBar',
-        color: positionSide === 'SHORT' ? '#e45b63' : '#24a889',
+        color: positionSide === 'SHORT' ? '#f04444' : '#268bff',
         shape: positionSide === 'SHORT' ? 'arrowDown' : 'arrowUp',
         text: `${positionSide === 'SHORT' ? 'SS' : 'B'} ${purchase.quantity}`,
       });
@@ -172,7 +175,7 @@ export function PositionChart({
       markers.push({
         time,
         position: positionSide === 'SHORT' ? 'belowBar' : 'aboveBar',
-        color: positionSide === 'SHORT' ? '#24a889' : '#e45b63',
+        color: positionSide === 'SHORT' ? '#268bff' : '#f04444',
         shape: positionSide === 'SHORT' ? 'arrowUp' : 'arrowDown',
         text: `${positionSide === 'SHORT' ? 'C' : 'S'} ${sale.quantity}`,
       });

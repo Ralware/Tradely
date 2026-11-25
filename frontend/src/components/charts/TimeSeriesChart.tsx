@@ -28,7 +28,7 @@ function shortDate(timestamp: string): string {
 export function TimeSeriesChart({
   points,
   height = 220,
-  color = '#2f6feb',
+  color = '#268bff',
   baseline,
   valueFormatter = (value) => value.toFixed(2),
   ariaLabel = 'Time series chart',
@@ -173,7 +173,7 @@ export function TimeSeriesChart({
               x2="100"
               y1={tick.position}
               y2={tick.position}
-              stroke="#1a1d22"
+              stroke="#161616"
               strokeWidth="1"
               vectorEffect="non-scaling-stroke"
             />
@@ -185,7 +185,7 @@ export function TimeSeriesChart({
               x2="100"
               y1={y(baseline)}
               y2={y(baseline)}
-              stroke="#3a3f4a"
+              stroke="#3a3a3a"
               strokeWidth="1"
               strokeDasharray="3 3"
               vectorEffect="non-scaling-stroke"
@@ -207,7 +207,7 @@ export function TimeSeriesChart({
             x2="0"
             y1="0"
             y2="100"
-            stroke="#555c66"
+            stroke="#6b6b6b"
             strokeWidth="1"
             strokeDasharray="3 3"
             vectorEffect="non-scaling-stroke"

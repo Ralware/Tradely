@@ -83,7 +83,7 @@ export function ErrorState({
     <div
       role="alert"
       className={cn(
-        'flex flex-col gap-2 rounded-md border border-[#3f2528] bg-[#150f11] px-3 py-2',
+        'flex flex-col gap-2 rounded-md border border-[#3f2528] bg-terminal-panel px-3 py-2',
         className,
       )}
     >
@@ -93,7 +93,7 @@ export function ErrorState({
         </span>
         <div className="min-w-0">
           <p className="text-2xs font-medium text-terminal-red">{title}</p>
-          <p className="mt-0.5 break-words text-2xs leading-relaxed text-[#d9a9a9]">{message}</p>
+          <p className="mt-0.5 break-words text-2xs leading-relaxed text-terminal-muted">{message}</p>
         </div>
       </div>
       {onRetry ? (
@@ -118,13 +118,16 @@ export function Notice({
 }) {
   const tones = {
     neutral: 'border-terminal-border bg-terminal-panel text-terminal-muted',
-    warning: 'border-[#4d3d1f] bg-[#14110b] text-[#dcc18d]',
-    negative: 'border-[#3f2528] bg-[#150f11] text-[#d9a9a9]',
-    positive: 'border-[#1f4d43] bg-[#0c1512] text-[#8fd6c2]',
+    warning: 'border-[#4d3d1f] bg-terminal-panel text-[#dcc18d]',
+    negative: 'border-[#3f2528] bg-terminal-panel text-terminal-red',
+    positive: 'border-[#254a8f] bg-terminal-panel text-terminal-green',
   } as const;
 
   return (
-    <div className={cn('rounded-md border px-2.5 py-1.5 text-2xs leading-relaxed', tones[tone], className)}>
+    <div
+      role={tone === 'negative' ? 'alert' : 'status'}
+      className={cn('rounded-md border px-2.5 py-1.5 text-2xs leading-relaxed', tones[tone], className)}
+    >
       {children}
     </div>
   );

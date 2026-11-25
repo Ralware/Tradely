@@ -82,6 +82,24 @@ class _CandleCache:
         self._inflight: dict[tuple[object, ...], Future[tuple[pd.DataFrame, str]]] = {}
         self._refreshing: set[tuple[object, ...]] = set()
         self._lock = threading.Lock()
+        self._stats: dict[str, float] = {
+            "hits": 0,
+            "misses": 0,
+            "deduplicated": 0,
+            "loads": 0,
+            "load_seconds": 0.0,
+            "incremental_refreshes": 0,
+            "incremental_refresh_seconds": 0.0,
+            "incremental_refresh_failures": 0,
+            "evictions": 0,
+        }
+
+    def _bump(self, name: str, amount: float = 1.0) -> None:
+        self._stats[name] = self._stats.get(name, 0.0) + amount
+
+    def stats(self) -> dict[str, float]:
+        with self._lock:
+            return dict(self._stats)
 
     def clear(self) -> None:
         with self._lock:
@@ -112,7 +130,9 @@ class _CandleCache:
                     and key not in self._refreshing
                 )
                 if not should_refresh:
+                    self._bump("hits")
                     return cached.frame.copy(), cached.source
+                self._bump("incremental_refreshes")
                 self._refreshing.add(key)
                 base_frame = cached.frame
                 base_source = cached.source
@@ -123,14 +143,19 @@ class _CandleCache:
                 future = self._inflight.get(key)
                 is_loader = future is None
                 if future is None:
+                    self._bump("misses")
                     future = Future()
                     self._inflight[key] = future
+                else:
+                    self._bump("deduplicated")
 
         if base_frame is not None and refresher is not None:
+            started = time.monotonic()
             try:
                 tail, source = refresher(base_frame)
                 merged = _merge_candles(base_frame, tail)
                 with self._lock:
+                    self._bump("incremental_refresh_seconds", time.monotonic() - started)
                     self._values[key] = _CacheValue(
                         expires=time.monotonic() + max(1, ttl_seconds),
                         loaded_at=time.monotonic(),
@@ -140,12 +165,14 @@ class _CandleCache:
                     self._values.move_to_end(key)
                     while len(self._values) > self.max_entries:
                         self._values.popitem(last=False)
+                        self._bump("evictions")
                 return merged.copy(), source or base_source
             except Exception as exc:  # keep serving the last good history
                 logger.warning("[MARKET] incremental refresh failed key=%s: %s", key, exc)
                 # Back off until the next refresh window instead of retrying a
                 # failing provider on every request.
                 with self._lock:
+                    self._bump("incremental_refresh_failures")
                     current = self._values.get(key)
                     if current is not None:
                         self._values[key] = _CacheValue(
@@ -163,9 +190,13 @@ class _CandleCache:
             frame, source = future.result()
             return frame.copy(), source
 
+        started = time.monotonic()
         try:
             frame, source = loader()
+            elapsed = time.monotonic() - started
             with self._lock:
+                self._bump("loads")
+                self._bump("load_seconds", elapsed)
                 self._values[key] = _CacheValue(
                     expires=time.monotonic() + max(1, ttl_seconds),
                     loaded_at=time.monotonic(),
@@ -175,6 +206,7 @@ class _CandleCache:
                 self._values.move_to_end(key)
                 while len(self._values) > self.max_entries:
                     self._values.popitem(last=False)
+                    self._bump("evictions")
             future.set_result((frame.copy(), source))
             return frame.copy(), source
         except Exception as exc:
@@ -195,6 +227,49 @@ class MarketService:
         self.cache = _CandleCache()
         self._metadata: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
         self._metadata_lock = threading.Lock()
+        # The unofficial bridge is the shared bottleneck. Bound concurrent
+        # provider calls independently of the analytics worker pool so adding
+        # workers cannot flood the bridge or exhaust its HTTP connection pool.
+        self._provider_limit = max(1, int(settings.market_provider_max_concurrency))
+        self._provider_slots = threading.BoundedSemaphore(self._provider_limit)
+        self._provider_lock = threading.Lock()
+        self._provider_metrics: dict[str, float] = {
+            "requests": 0,
+            "errors": 0,
+            "latency_seconds": 0.0,
+            "max_concurrency": float(self._provider_limit),
+        }
+
+    def _provider_call(self, operation: Callable[[], pd.DataFrame]) -> pd.DataFrame:
+        """Run one upstream call under the shared provider-concurrency limit."""
+        started = time.monotonic()
+        try:
+            with self._provider_slots:
+                return operation()
+        except Exception:
+            with self._provider_lock:
+                self._provider_metrics["errors"] += 1
+            raise
+        finally:
+            with self._provider_lock:
+                self._provider_metrics["requests"] += 1
+                self._provider_metrics["latency_seconds"] += time.monotonic() - started
+
+    def metrics(self) -> dict[str, Any]:
+        """Structured, secret-free diagnostics for the market-data layer."""
+        with self._provider_lock:
+            provider = dict(self._provider_metrics)
+            requests = provider.get("requests", 0.0)
+            provider["average_latency_seconds"] = (
+                provider.get("latency_seconds", 0.0) / requests if requests else 0.0
+            )
+        with self._metadata_lock:
+            metadata_entries = len(self._metadata)
+        return {
+            "candles": self.cache.stats(),
+            "provider": provider,
+            "metadata_cache_entries": metadata_entries,
+        }
 
     def _refresh_after_seconds(self, interval: str) -> int:
         configured = max(1, int(self.settings.market_latest_refresh_seconds))
@@ -240,13 +315,15 @@ class MarketService:
 
         def fetch() -> tuple[pd.DataFrame, str]:
             try:
-                frame = adapter.fetch_candles(
-                    symbol,
-                    market=market,
-                    exchange=exchange,
-                    interval=interval,
-                    start=start,
-                    end=end,
+                frame = self._provider_call(
+                    lambda: adapter.fetch_candles(
+                        symbol,
+                        market=market,
+                        exchange=exchange,
+                        interval=interval,
+                        start=start,
+                        end=end,
+                    )
                 )
                 frame = normalize_candles(frame)
                 frame.attrs.setdefault("source", adapter.name)
@@ -263,13 +340,15 @@ class MarketService:
             if cached.empty:
                 return fetch()
             tail_start = self._tail_start(interval, cached.index[-1])
-            tail = adapter.fetch_candles(
-                symbol,
-                market=market,
-                exchange=exchange,
-                interval=interval,
-                start=tail_start,
-                end=None,
+            tail = self._provider_call(
+                lambda: adapter.fetch_candles(
+                    symbol,
+                    market=market,
+                    exchange=exchange,
+                    interval=interval,
+                    start=tail_start,
+                    end=None,
+                )
             )
             tail = normalize_candles(tail)
             tail.attrs.setdefault("source", adapter.name)

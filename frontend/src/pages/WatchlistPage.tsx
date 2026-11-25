@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useApi } from '../hooks/useApi';
 import { useQuotes } from '../hooks/useQuotes';
-import { marketService } from '../services/marketService';
+import { useWatchlist } from '../hooks/useWatchlist';
 import { portfolioService } from '../services/portfolioService';
-import type { Instrument, SignalState, WatchlistItem } from '../types/api';
+import { sparklineService } from '../services/sparklineService';
+import type { Instrument, WatchlistItem } from '../types/api';
 import { instrumentPath } from '../utils/navigation';
 import { quoteRefFromWatchlist } from '../utils/quotes';
 import { nextWatchlistSort, watchlistItemKey } from '../utils/watchlistSort';
@@ -18,8 +18,7 @@ import { InstrumentSearch } from '../components/instruments/InstrumentSearch';
 
 export function WatchlistPage() {
   const navigate = useNavigate();
-  const watchlist = useApi((signal) => portfolioService.getWatchlist(signal), []);
-  const scanner = useApi((signal) => marketService.getScanner(signal), []);
+  const watchlist = useWatchlist();
 
   const [sparklines, setSparklines] = useState<Map<string, number[]>>(new Map());
   const [removing, setRemoving] = useState<string | null>(null);
@@ -44,70 +43,22 @@ export function WatchlistPage() {
   );
   const { quotes: watchlistQuotes, refresh: refreshQuotes } = useQuotes(watchlistRefs);
 
-  // Map scanner signals by key and symbol
-  const signalsMap = useMemo(() => {
-    const map = new Map<string, { state: SignalState; label?: string }>();
-    if (!scanner.data?.items) return map;
-    for (const item of scanner.data.items) {
-      const state = item.strategy.state;
-      let label: string | undefined;
-      if (state === 'SELL') {
-        label = 'Sell · Exit Long';
-      } else if (state === 'WAIT') {
-        label = '→ Wait';
-      } else if (state === 'BUY') {
-        label = 'Buy';
-      }
-      if (item.instrument_id) {
-        map.set(item.instrument_id, { state, label });
-      }
-      map.set(`${item.market}:${item.symbol}`, { state, label });
-      map.set(item.symbol, { state, label });
-    }
-    return map;
-  }, [scanner.data]);
-
-  // Fetch 7-day daily sparklines for each instrument
-  const sparklineCache = useRef<Map<string, number[]>>(new Map());
+  // 24-hour hourly sparklines are cached outside React, so revisiting the page
+  // reuses the series instead of re-requesting candles for every instrument.
   useEffect(() => {
-    if (watchlistItems.length === 0) return;
-    let cancelled = false;
-
-    async function loadSparklines() {
-      const nextMap = new Map(sparklineCache.current);
-      const missing = watchlistItems.filter((item) => !nextMap.has(watchlistItemKey(item)));
-
-      if (missing.length > 0) {
-        await Promise.all(
-          missing.map(async (item) => {
-            const key = watchlistItemKey(item);
-            try {
-              const res = await marketService.getCandles({
-                instrumentId: item.instrument_id,
-                symbol: item.symbol,
-                market: item.market,
-                exchange: item.exchange,
-                interval: '1d',
-                days: 7,
-              });
-              if (res.candles && res.candles.length > 0) {
-                const closes = res.candles.map((c) => c.close);
-                nextMap.set(key, closes);
-                sparklineCache.current.set(key, closes);
-              }
-            } catch {
-              // Ignore individual failure; Sparkline handles missing data
-            }
-          }),
-        );
-      }
-
-      if (!cancelled) {
-        setSparklines(new Map(nextMap));
-      }
+    sparklineService.prune(watchlistItems);
+    if (watchlistItems.length === 0) {
+      setSparklines(new Map());
+      return undefined;
     }
-
-    void loadSparklines();
+    let cancelled = false;
+    const cached = sparklineService.getSnapshot(watchlistItems);
+    if (cached.size > 0) {
+      setSparklines(cached);
+    }
+    void sparklineService.loadMany(watchlistItems).then((snapshot) => {
+      if (!cancelled) setSparklines(snapshot);
+    });
     return () => {
       cancelled = true;
     };
@@ -125,7 +76,6 @@ export function WatchlistPage() {
         exchange: item.exchange,
       });
       watchlist.reload();
-      scanner.reload();
     } catch (caught) {
       setActionError(caught instanceof Error ? caught.message : 'Could not remove instrument');
     } finally {
@@ -145,7 +95,6 @@ export function WatchlistPage() {
       });
       setAddModalOpen(false);
       watchlist.reload();
-      scanner.reload();
     } catch (caught) {
       setAddingError(caught instanceof Error ? caught.message : 'Could not add instrument');
     }
@@ -161,16 +110,18 @@ export function WatchlistPage() {
 
   function handleRefreshAll() {
     watchlist.reload();
-    scanner.reload();
     refreshQuotes();
-    sparklineCache.current.clear();
+    sparklineService.invalidate();
+    void sparklineService
+      .loadMany(watchlistItems, { force: true })
+      .then((snapshot) => setSparklines(snapshot));
   }
 
   return (
     <div className="w-full px-4 py-4 lg:px-6">
       <PageHeader
         title="Watchlist"
-        subtitle="Live quotes, rule-based signals and a 7-day trend for every tracked instrument."
+        subtitle="Live quotes and a 24-hour trend for every tracked instrument."
         meta={
           <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded border border-terminal-border bg-terminal-panelAlt px-1.5 text-2xs font-semibold text-terminal-muted">
             {watchlistItems.length} {watchlistItems.length === 1 ? 'instrument' : 'instruments'}
@@ -219,7 +170,6 @@ export function WatchlistPage() {
           <WatchlistTable
             items={watchlistItems}
             quotes={watchlistQuotes}
-            signals={signalsMap}
             sparklines={sparklines}
             sort={watchlistSort}
             onSort={(column) => setWatchlistSort((current) => nextWatchlistSort(current, column))}
@@ -233,7 +183,7 @@ export function WatchlistPage() {
       {/* Add Instrument Modal */}
       {addModalOpen ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-terminal-bg/80 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-terminal-bg/90 p-4"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setAddModalOpen(false);
           }}

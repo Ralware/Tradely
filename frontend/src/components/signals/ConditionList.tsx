@@ -21,7 +21,7 @@ export function ConditionList({
             className={cn(
               "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border",
               condition.passed
-                ? "border-[#1f4d43] bg-terminal-panelAlt text-terminal-green"
+                ? "border-[#254a8f] bg-terminal-panelAlt text-terminal-green"
                 : "border-terminal-border bg-terminal-panelAlt text-terminal-muted",
             )}
             aria-label={condition.passed ? "Passed" : "Not Passed"}

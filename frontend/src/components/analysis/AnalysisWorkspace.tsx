@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSelectedInstrument } from '../../contexts/SelectedInstrumentContext';
 import { apiRequest } from '../../services/api';
+import { analyticsViewStore } from '../../services/analyticsViewStore';
 import { snapshotStore } from '../../services/snapshotStore';
-import { isCompleteSnapshot, loadAnalyticsSnapshot } from '../../services/analyticsSnapshotLoader';
+import { invalidateSnapshotValidation, isCompleteSnapshot, loadAnalyticsSnapshot } from '../../services/analyticsSnapshotLoader';
 import { portfolioService } from '../../services/portfolioService';
 import { suppressStaleStrategy } from '../../services/staleStrategy';
 import type { DirectionMode, Instrument } from '../../types/api';
@@ -68,20 +69,22 @@ export function AnalysisWorkspace({
 
   const { symbol, name, market, interval, days, instrumentId } = selected;
 
-  const [overlays, setOverlays] = useState<OverlayToggles>({
-    sma: false,
-    ema: false,
-    bollinger: false,
-  });
-  const [showRsi, setShowRsi] = useState(false);
-  const [showMacd, setShowMacd] = useState(false);
-  const [localDirectionMode, setLocalDirectionMode] = useState<DirectionMode>('long_only');
+  const [overlays, setOverlays] = useState<OverlayToggles>(
+    () => analyticsViewStore.get().overlays,
+  );
+  const [showRsi, setShowRsi] = useState(() => analyticsViewStore.get().showRsi);
+  const [showMacd, setShowMacd] = useState(() => analyticsViewStore.get().showMacd);
+  const [localDirectionMode, setLocalDirectionMode] = useState<DirectionMode>(
+    () => analyticsViewStore.get().directionMode,
+  );
   const directionMode = controlledDirectionMode ?? localDirectionMode;
   const setDirectionMode = onDirectionModeChange ?? setLocalDirectionMode;
-  const [tab, setTab] = useState('risk');
+  const [tab, setTab] = useState(() => analyticsViewStore.get().tab);
   const [, forceSnapshotRender] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
+  const forceNextLoadRef = useRef(false);
   const [loadState, setLoadState] = useState<{
     key: string;
     status: 'loading' | 'ready' | 'error';
@@ -98,6 +101,31 @@ export function AnalysisWorkspace({
     const select = () => forceSnapshotRender((value) => value + 1);
     return snapshotStore.subscribe(instrumentId, interval, select);
   }, [instrumentId, interval]);
+
+  // View preferences survive navigation because they live in the shared store,
+  // not in this component's local state.
+  useEffect(() => {
+    analyticsViewStore.update({ overlays });
+  }, [overlays]);
+  useEffect(() => {
+    analyticsViewStore.update({ showRsi });
+  }, [showRsi]);
+  useEffect(() => {
+    analyticsViewStore.update({ showMacd });
+  }, [showMacd]);
+  useEffect(() => {
+    analyticsViewStore.update({ tab });
+  }, [tab]);
+  useEffect(() => {
+    if (!controlledDirectionMode) {
+      analyticsViewStore.update({ directionMode: localDirectionMode });
+    }
+  }, [controlledDirectionMode, localDirectionMode]);
+  useEffect(() => {
+    if (instrumentId) {
+      analyticsViewStore.setSelection({ instrumentId, interval, days });
+    }
+  }, [instrumentId, interval, days]);
 
   const snapshot = instrumentId ? snapshotStore.getSnapshot(instrumentId, interval) : undefined;
   const usableSnapshot = isCompleteSnapshot(snapshot) ? snapshot : undefined;
@@ -142,11 +170,15 @@ export function AnalysisWorkspace({
     const key = `${identity}\u0000${timeframe}`;
     const controller = new AbortController();
     let active = true;
+    const forceRefresh = forceNextLoadRef.current;
+    forceNextLoadRef.current = false;
     async function load(): Promise<void> {
       setLoadState({ key, status: 'loading' });
       try {
         const payload = await loadAnalyticsSnapshot(identity, timeframe, {
           signal: controller.signal,
+          forceRefresh,
+          reuseRecentlyValidated: true,
           onCached: (cached) => {
             if (active) snapshotStore.setSnapshot(identity, timeframe, cached);
           },
@@ -205,11 +237,21 @@ export function AnalysisWorkspace({
   async function refreshAll() {
     if (!instrumentId) return;
     setRefreshing(true);
+    setRefreshError(null);
     try {
       await apiRequest('/api/analytics/precompute/refresh', {
         method: 'POST', query: { instrument_id: instrumentId, interval },
       });
-    } finally { setRefreshing(false); }
+      // A deliberate refresh must ignore both the navigation validation window
+      // and any cached local bundle, then replace the chart in place.
+      invalidateSnapshotValidation(instrumentId, interval);
+      forceNextLoadRef.current = true;
+      setLoadAttempt((value) => value + 1);
+    } catch (caught) {
+      setRefreshError(caught instanceof Error ? caught.message : 'Refresh failed.');
+    } finally {
+      setRefreshing(false);
+    }
   }
 
   async function addToWatchlist() {
@@ -246,10 +288,10 @@ export function AnalysisWorkspace({
         />
         <div className="flex flex-wrap items-center gap-1.5">
           {watchState.message ? (
-            <span className="text-2xs text-terminal-green">{watchState.message}</span>
+            <span role="status" className="text-2xs text-terminal-green">{watchState.message}</span>
           ) : null}
           {watchState.error ? (
-            <span className="text-2xs text-terminal-red">{watchState.error}</span>
+            <span role="alert" className="text-2xs text-terminal-red">{watchState.error}</span>
           ) : null}
           <Button size="sm" icon="refresh" onClick={() => void refreshAll()} loading={refreshing}>
             Refresh
@@ -269,6 +311,10 @@ export function AnalysisWorkspace({
 
       {snapshotError && usableSnapshot ? (
         <Notice tone="warning">Refresh failed; showing the last known-good local analytics. {snapshotError}</Notice>
+      ) : null}
+
+      {refreshError ? (
+        <Notice tone="negative">Could not refresh analytics. {refreshError}</Notice>
       ) : null}
 
       {!instrumentId ? (
@@ -438,6 +484,7 @@ export function AnalysisWorkspace({
                 overlays={overlays}
                 showRsi={showRsi}
                 showMacd={showMacd}
+                instrumentId={instrumentId}
                 timeframe={displayedInterval}
                 symbol={symbol}
                 pricePrecision={pricePrecision}

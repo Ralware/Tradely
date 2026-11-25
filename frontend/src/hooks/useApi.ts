@@ -15,6 +15,19 @@ export interface UseApiResult<T> extends ApiState<T> {
   reload: () => void;
 }
 
+export interface UseApiFetchContext {
+  /**
+   * True when this run was triggered by `reload()`. Services use it to bypass
+   * their persistent cache and request fresh data from the backend.
+   */
+  force: boolean;
+}
+
+export type ApiFetcher<T> = (
+  signal: AbortSignal,
+  context: UseApiFetchContext,
+) => Promise<T>;
+
 export interface UseApiOptions<T> {
   enabled?: boolean;
   keepPreviousData?: boolean;
@@ -55,7 +68,7 @@ function isAbort(error: unknown): boolean {
  * Old data is never carried across a scope boundary such as a symbol change.
  */
 export function useApi<T>(
-  fetcher: (signal: AbortSignal) => Promise<T>,
+  fetcher: ApiFetcher<T>,
   deps: readonly unknown[],
   options: UseApiOptions<T> = {},
 ): UseApiResult<T> {
@@ -67,6 +80,7 @@ export function useApi<T>(
   fetcherRef.current = fetcher;
   const cachedDataRef = useRef(options.getCachedData);
   cachedDataRef.current = options.getCachedData;
+  const forceRef = useRef(false);
 
   const [state, setState] = useState<InternalApiState<T>>(() => {
     const cached = enabled ? cachedDataRef.current?.() ?? null : null;
@@ -97,6 +111,7 @@ export function useApi<T>(
 
   useEffect(() => {
     if (!enabled) {
+      forceRef.current = false;
       setState({
         data: null,
         loading: false,
@@ -111,6 +126,8 @@ export function useApi<T>(
     const controller = new AbortController();
     let active = true;
     const cached = cachedDataRef.current?.() ?? null;
+    const force = forceRef.current;
+    forceRef.current = false;
 
     setState((previous) => {
       const sameScope = Object.is(previous.scopeKey, scopeKey);
@@ -131,7 +148,7 @@ export function useApi<T>(
     });
 
     fetcherRef
-      .current(controller.signal)
+      .current(controller.signal, { force })
       .then((result) => {
         if (!active) return;
         setState({
@@ -175,6 +192,7 @@ export function useApi<T>(
   ]);
 
   const reload = useCallback(() => {
+    forceRef.current = true;
     setReloadToken((token) => token + 1);
   }, []);
 

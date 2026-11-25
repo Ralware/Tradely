@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { useInstrumentSearch } from '../../hooks/useInstrumentSearch';
 import { instrumentService } from '../../services/instrumentService';
@@ -53,6 +53,7 @@ export function InstrumentSearch({
   clearOnSelect?: boolean;
 }) {
   const search = useInstrumentSearch(value ?? '');
+  const listboxId = useId();
   const [open, setOpen] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -166,6 +167,15 @@ export function InstrumentSearch({
         onKeyDown={onKeyDown}
         placeholder={placeholder}
         aria-label="Instrument Search"
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={showDropdown}
+        aria-controls={listboxId}
+        aria-activedescendant={
+          showDropdown && rows[activeIndex]
+            ? `${listboxId}-option-${rows[activeIndex].instrument_id}`
+            : undefined
+        }
         autoComplete="off"
         autoFocus={autoFocus}
         disabled={disabled}
@@ -177,7 +187,12 @@ export function InstrumentSearch({
       />
 
       {showDropdown ? (
-        <div className="absolute left-0 right-0 top-[calc(100%+3px)] z-50 max-h-72 overflow-y-auto rounded-md border border-terminal-border bg-terminal-panel shadow-xl">
+        <div
+          id={listboxId}
+          role="listbox"
+          aria-label="Instrument search results"
+          className="absolute left-0 right-0 top-[calc(100%+3px)] z-50 max-h-72 overflow-y-auto rounded-md border border-terminal-border bg-terminal-panel shadow-xl"
+        >
           {search.loading ? (
             <p className="px-2 py-1.5 text-2xs text-terminal-muted">Recognizing Instrument…</p>
           ) : search.error ? (
@@ -187,11 +202,13 @@ export function InstrumentSearch({
               <p className="border-b border-terminal-borderSoft px-2 py-1 text-2xs text-terminal-amber">
                 {search.message ?? 'Multiple Supported Instruments Found'}
               </p>
-              {rows.map((candidate) => (
+              {rows.map((candidate, index) => (
                 <CandidateRow
                   key={candidate.instrument_id}
+                  id={`${listboxId}-option-${candidate.instrument_id}`}
                   candidate={candidate}
                   disabled={selecting}
+                  active={index === activeIndex}
                   onChoose={() => void choose(candidate)}
                 />
               ))}
@@ -206,18 +223,22 @@ export function InstrumentSearch({
             </p>
           ) : fallbackInstrument ? (
             <CandidateRow
+              id={`${listboxId}-option-${fallbackInstrument.instrument_id}`}
               candidate={fallbackInstrument}
               disabled={selecting}
               primary
+              active
               onChoose={() => void choose(fallbackInstrument)}
             />
           ) : rows.length > 0 ? (
-            rows.map((candidate) => (
+            rows.map((candidate, index) => (
               <CandidateRow
                 key={candidate.instrument_id}
+                id={`${listboxId}-option-${candidate.instrument_id}`}
                 candidate={candidate}
                 disabled={selecting}
                 primary={candidate.instrument_id === search.instrument?.instrument_id}
+                active={index === activeIndex}
                 onChoose={() => void choose(candidate)}
               />
             ))
@@ -232,11 +253,15 @@ function CandidateRow({
   candidate,
   primary = false,
   disabled,
+  active = false,
+  id,
   onChoose,
 }: {
   candidate: InstrumentCandidate | Instrument;
   primary?: boolean;
   disabled: boolean;
+  active?: boolean;
+  id?: string;
   onChoose: () => void;
 }) {
   const assetLabel =
@@ -244,13 +269,16 @@ function CandidateRow({
     (candidate.asset_type === 'crypto' ? 'Cryptocurrency' : marketLabel(candidate));
   return (
     <button
+      id={id}
       type="button"
+      role="option"
+      aria-selected={active}
       disabled={disabled}
       onMouseDown={(event) => event.preventDefault()}
       onClick={onChoose}
       className={cn(
         'flex w-full items-center justify-between gap-2 px-2 py-1 text-left hover:bg-white/[0.05] disabled:opacity-60',
-        primary && 'bg-terminal-panelAlt',
+        (primary || active) && 'bg-white/[0.04]',
       )}
     >
       <span className="min-w-0">

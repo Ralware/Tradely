@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSelectedInstrument } from "../contexts/SelectedInstrumentContext";
 import { AnalysisWorkspace } from "../components/analysis/AnalysisWorkspace";
 import { AnalysisWatchlist } from "../components/analysis/AnalysisWatchlist";
 import { StockNewsPreview } from "../components/analysis/StockNewsPreview";
+import { analyticsViewStore } from "../services/analyticsViewStore";
 import type { DirectionMode, WatchlistItem } from "../types/api";
 import { instrumentPath } from "../utils/navigation";
 import { Icon } from "../components/common/Icon";
@@ -12,7 +13,18 @@ export function AnalysisPage() {
   const navigate = useNavigate();
   const selected = useSelectedInstrument();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [directionMode, setDirectionMode] = useState<DirectionMode>('long_only');
+  const [directionMode, setDirectionMode] = useState<DirectionMode>(
+    () => analyticsViewStore.get().directionMode,
+  );
+
+  useEffect(() => {
+    if (!drawerOpen) return undefined;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') setDrawerOpen(false);
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [drawerOpen]);
 
   function handleSelectInstrument(item: WatchlistItem) {
     setDrawerOpen(false);
@@ -54,7 +66,10 @@ export function AnalysisPage() {
 
         <AnalysisWorkspace
           directionMode={directionMode}
-          onDirectionModeChange={setDirectionMode}
+          onDirectionModeChange={(mode) => {
+            setDirectionMode(mode);
+            analyticsViewStore.update({ directionMode: mode });
+          }}
         />
         {selected.instrumentId ? (
           <div className="mt-3 w-full">

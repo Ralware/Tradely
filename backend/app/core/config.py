@@ -27,6 +27,19 @@ class Settings(BaseSettings):
     # Cached history is reused, but the newest bars are refreshed incrementally
     # after this many seconds so the chart is not pinned to a five-minute TTL.
     market_latest_refresh_seconds: int = 15
+    # Provider calls are bounded independently of the analytics worker count.
+    # TradingView's unofficial bridge is the bottleneck; more workers than this
+    # only queue behind the same upstream connection.
+    market_provider_max_concurrency: int = 4
+    # Analytics jobs are coordinated through SQLite claims/leases. Two workers
+    # are safe because each identity is claimed exactly once, and the market
+    # layer coalesces identical provider requests.
+    analytics_worker_concurrency: int = 2
+    analytics_worker_poll_seconds: float = 2.0
+    analytics_worker_lease_seconds: int = 300
+    # One batched browser request may ask for many watchlist sparklines; the
+    # backend still bounds the underlying provider fan-out.
+    sparkline_max_concurrency: int = 4
     quote_crypto_ttl_seconds: int = 10
     quote_global_ttl_seconds: int = 300
     quote_india_ttl_seconds: int = 600

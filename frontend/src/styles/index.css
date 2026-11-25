@@ -3,8 +3,26 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --terminal-bg: #000000;
+    --terminal-surface: #000000;
+    --terminal-surface-2: #000000;
+    --terminal-hover: #111111;
+    --terminal-border: #1d1d1d;
+    --terminal-text: #f5f5f5;
+    --terminal-muted: #929292;
+    --terminal-accent: #268bff;
+    --terminal-buy: #268bff;
+    --terminal-sell: #f04444;
+    --terminal-neutral: #929292;
+    --terminal-candle-up: #268bff;
+    --terminal-candle-down: #f2f2f2;
+  }
+
   html {
     color-scheme: dark;
+    background: var(--terminal-bg);
+    accent-color: var(--terminal-accent);
   }
 
   *,
@@ -19,6 +37,7 @@
     min-height: 100vh;
     margin: 0;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    background: var(--terminal-bg);
   }
 
   button:not(:disabled),
@@ -35,7 +54,7 @@
   }
 
   ::selection {
-    background: rgba(47, 111, 235, 0.35);
+    background: rgba(38, 139, 255, 0.35);
   }
 
   :focus-visible {
@@ -63,7 +82,75 @@
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: #2a2a2a;
+    background: #303030;
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    font: inherit;
+  }
+
+  select {
+    appearance: none;
+    background-color: var(--terminal-surface-2);
+    border: 1px solid var(--terminal-border);
+    border-radius: 6px;
+    color: var(--terminal-text);
+    min-height: 32px;
+    padding: 0 30px 0 10px;
+  }
+
+  select:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible {
+    border-color: var(--terminal-accent);
+    outline: 1px solid var(--terminal-accent);
+    outline-offset: 1px;
+  }
+
+  option,
+  optgroup {
+    background: #000000;
+    color: #f5f5f5;
+  }
+
+  option:disabled {
+    color: #6f6f6f;
+  }
+
+  /* Keep native autofill from painting a light yellow block over the black UI. */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  textarea:-webkit-autofill,
+  select:-webkit-autofill {
+    -webkit-box-shadow: 0 0 0 1000px #000000 inset;
+    -webkit-text-fill-color: var(--terminal-text);
+    caret-color: var(--terminal-text);
+  }
+
+  /* The calendar glyph is rendered dark by some browsers; force it light. */
+  input[type="date"]::-webkit-calendar-picker-indicator,
+  input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+  input[type="time"]::-webkit-calendar-picker-indicator,
+  input[type="month"]::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    filter: invert(0.75);
+    opacity: 0.85;
+  }
+
+  input[type="date"]::-webkit-calendar-picker-indicator:hover,
+  input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover,
+  input[type="time"]::-webkit-calendar-picker-indicator:hover,
+  input[type="month"]::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+  }
+
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    opacity: 0.45;
   }
 }
 
@@ -83,7 +170,7 @@
 
   /* Native selects are appearance-none, so draw the disclosure caret ourselves. */
   .select-caret {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b919b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23929292' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 8px center;
     background-size: 12px 12px;
@@ -119,24 +206,24 @@
 
 @layer components {
   .tv-analysis-page {
-    background: #08090b;
+    background: #000000;
   }
 
   .tv-analysis-page .tv-analysis-watchlist-toggle {
-    background-color: #0d0f13;
-    border-color: #24272e;
+    background-color: #000000;
+    border-color: #1d1d1d;
   }
 
   .tv-technicals {
-    --tv-bg: #08090b;
-    --tv-surface: #0d0f13;
-    --tv-border: #24272e;
-    --tv-text: #e6e8eb;
-    --tv-muted: #8b919b;
-    --tv-buy: #4a8ff7;
-    --tv-buy-soft: #7fb0fb;
-    --tv-sell: #e6e8eb;
-    --tv-sell-soft: #b9bec7;
+    --tv-bg: #000000;
+    --tv-surface: #000000;
+    --tv-border: #1d1d1d;
+    --tv-text: #f5f5f5;
+    --tv-muted: #929292;
+    --tv-buy: #268bff;
+    --tv-buy-soft: #7db8ff;
+    --tv-sell: #f04444;
+    --tv-sell-soft: #ff8b8b;
     background: var(--tv-bg);
     color: var(--tv-text);
     display: flex;
@@ -186,7 +273,7 @@
 
   .tv-analysis-toolbar {
     align-items: center;
-    background: #0d0f13;
+    background: #000000;
     border: 1px solid var(--tv-border);
     border-radius: 10px;
     min-height: 48px;
@@ -194,8 +281,8 @@
   }
 
   .tv-analysis-toolbar input {
-    background: #08090b;
-    border-color: #2b2f37;
+    background: #000000;
+    border-color: #1d1d1d;
     border-radius: 6px;
     height: 32px;
     padding-left: 30px;
@@ -204,8 +291,8 @@
   }
 
   .tv-analysis-toolbar input:focus {
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
+    border-color: #268bff;
+    box-shadow: 0 0 0 3px rgba(38, 139, 255, 0.18);
   }
 
   .tv-analysis-toolbar > div > button {
@@ -251,8 +338,8 @@
   }
 
   .tv-timeframe-selector button[aria-selected="true"] {
-    background: #171b22;
-    border-color: #3a4150;
+    background: #111111;
+    border-color: #303030;
     color: var(--tv-text);
   }
 
@@ -338,6 +425,7 @@
   }
 
   .tv-rating-gauge-segment {
+    stroke-width: 10px;
     stroke-dasharray: 1;
     stroke-dashoffset: 1;
     animation: tv-gauge-reveal 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -381,17 +469,17 @@
   }
 
   .tv-rating-action-buy,
-  .tv-technical-action-buy {
+  .tv-technical-table td.tv-technical-action-buy {
     color: var(--tv-buy);
   }
 
   .tv-rating-action-sell,
-  .tv-technical-action-sell {
+  .tv-technical-table td.tv-technical-action-sell {
     color: var(--tv-sell);
   }
 
   .tv-rating-action-neutral,
-  .tv-technical-action-neutral {
+  .tv-technical-table td.tv-technical-action-neutral {
     color: var(--tv-muted);
   }
 
@@ -411,21 +499,22 @@
   .tv-rating-counts {
     background: var(--tv-surface);
     border: 1px solid var(--tv-border);
-    border-radius: 3px;
-    column-gap: 16px;
+    border-radius: 4px;
+    column-gap: 24px;
     display: grid;
     grid-template-columns: repeat(3, minmax(60px, max-content));
     justify-content: center;
     margin-top: 20px;
     max-width: 100%;
-    padding: 4px 0;
+    padding: 8px 16px;
   }
 
   .tv-rating-count {
     align-items: center;
     display: flex;
     flex-direction: column;
-    row-gap: 2px;
+    min-width: 48px;
+    row-gap: 4px;
     text-align: center;
   }
 
@@ -446,8 +535,21 @@
     color: var(--tv-sell);
   }
 
+  .tv-rating-count-sell span {
+    color: var(--tv-sell);
+  }
+
   .tv-rating-count-buy strong {
     color: var(--tv-buy);
+  }
+
+  .tv-rating-count-buy span {
+    color: var(--tv-buy);
+  }
+
+  .tv-rating-count-neutral strong,
+  .tv-rating-count-neutral span {
+    color: var(--tv-muted);
   }
 
   .tv-technical-tables {
@@ -572,7 +674,7 @@
     font-weight: 400 !important;
   }
 
-  .tv-technical-action-unavailable {
+  .tv-technical-table td.tv-technical-action-unavailable {
     color: var(--tv-muted) !important;
   }
 

@@ -45,6 +45,78 @@ describe('loadAnalyticsSnapshot', () => {
     expect(io.writeLocal).not.toHaveBeenCalled();
   });
 
+  it('shares one backend request between concurrent consumers', async () => {
+    let release!: (value: PreparedSnapshot) => void;
+    const io = dependencies({
+      request: vi.fn(() => new Promise<PreparedSnapshot>((resolve) => { release = resolve; })),
+    });
+
+    const first = loadAnalyticsSnapshot(identity, '1d', { dependencies: io });
+    const second = loadAnalyticsSnapshot(identity, '1d', { dependencies: io });
+    await vi.waitFor(() => expect(typeof release).toBe('function'));
+    release(snapshot());
+
+    await expect(first).resolves.toMatchObject({ fingerprint: 'fingerprint-1' });
+    await expect(second).resolves.toMatchObject({ fingerprint: 'fingerprint-1' });
+    expect(io.request).toHaveBeenCalledTimes(1);
+    expect(io.writeLocal).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses the validated snapshot after navigating away and back', async () => {
+    const asOf = new Date(Date.now() - 60_000).toISOString();
+    const live = snapshot({
+      analysis: {
+        fingerprint: 'fingerprint-1',
+        is_stale: false,
+        market: 'global',
+        interval: '1d',
+        as_of: asOf,
+        candles: [{ close: 12 }],
+      },
+      provenance: {
+        instrument_id: identity,
+        data_freshness: 'fresh',
+        latest_candle_timestamp: asOf,
+      },
+    });
+    let stored: PreparedSnapshot | undefined;
+    const io = dependencies({
+      readLocal: vi.fn(async () => stored),
+      writeLocal: vi.fn(async (_id, _interval, value) => { stored = value; }),
+      request: vi.fn(async () => live),
+    });
+
+    await loadAnalyticsSnapshot(identity, '1d', { dependencies: io });
+    await loadAnalyticsSnapshot(identity, '1d', { dependencies: io });
+
+    expect(io.request).toHaveBeenCalledTimes(1);
+    expect(io.writeLocal).toHaveBeenCalledTimes(1);
+  });
+
+  it('manual refresh bypasses local freshness but still deduplicates', async () => {
+    const local = snapshot();
+    const refreshed = snapshot({ fingerprint: 'fingerprint-2' });
+    refreshed.analysis.fingerprint = 'fingerprint-2';
+    refreshed.technical_ratings.fingerprint = 'fingerprint-2';
+    const io = dependencies({
+      readLocal: vi.fn(async () => local),
+      request: vi.fn(async () => refreshed),
+    });
+
+    const first = loadAnalyticsSnapshot(identity, '1d', {
+      dependencies: io,
+      forceRefresh: true,
+    });
+    const second = loadAnalyticsSnapshot(identity, '1d', {
+      dependencies: io,
+      forceRefresh: true,
+    });
+
+    await expect(first).resolves.toBe(refreshed);
+    await expect(second).resolves.toBe(refreshed);
+    expect(io.request).toHaveBeenCalledTimes(1);
+  });
+
   it('fetches, validates, and persists one timeframe on a cache miss', async () => {
     const live = snapshot();
     const io = dependencies({ request: vi.fn(async () => live) });

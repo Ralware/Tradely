@@ -38,15 +38,22 @@ export function PortfolioPage() {
   const positions = useApi(
     (signal) => portfolioService.getPositions(signal),
     [],
-    { keepPreviousData: true },
+    {
+      keepPreviousData: true,
+      getCachedData: () => portfolioService.getCachedPositions(),
+    },
   );
   const summary = useApi((signal) => portfolioService.getSummary(signal), [], {
     keepPreviousData: true,
+    getCachedData: () => portfolioService.getCachedSummary(),
   });
   const transactions = useApi(
     (signal) => portfolioService.getTransactions(signal),
     [],
-    { keepPreviousData: true },
+    {
+      keepPreviousData: true,
+      getCachedData: () => portfolioService.getCachedTransactions(),
+    },
   );
 
   const positionRows = positions.data?.positions ?? [];
@@ -64,6 +71,7 @@ export function PortfolioPage() {
   const { quotes, refresh: refreshQuotes } = useQuotes(positionRefs);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detailsHidden, setDetailsHidden] = useState(false);
   const detail = useApi(
     (signal) => portfolioService.getPositionDetail(selectedId ?? "", signal),
     [selectedId],
@@ -71,6 +79,8 @@ export function PortfolioPage() {
       enabled: Boolean(selectedId),
       keepPreviousData: true,
       keepPreviousDataKey: selectedId,
+      getCachedData: () =>
+        selectedId ? portfolioService.getCachedPositionDetail(selectedId) : null,
     },
   );
 
@@ -109,13 +119,16 @@ export function PortfolioPage() {
       }
       return;
     }
+    if (detailsHidden) {
+      return;
+    }
     if (
       !selectedId ||
       !positionRows.some((row) => row.instrument_id === selectedId)
     ) {
       setSelectedId(positionRows[0].instrument_id);
     }
-  }, [positionRows, selectedId]);
+  }, [positionRows, selectedId, detailsHidden]);
 
   function reloadPortfolio() {
     positions.reload();
@@ -130,6 +143,7 @@ export function PortfolioPage() {
     setMessage(savedMessage);
     const position = saved.position;
     if (position) {
+      setDetailsHidden(false);
       setSelectedId(position.instrument_id);
     }
     reloadPortfolio();
@@ -161,10 +175,12 @@ export function PortfolioPage() {
   }
 
   function selectPosition(position: Position) {
+    setDetailsHidden(false);
     setSelectedId(position.instrument_id);
   }
 
   function startClosePosition(position: Position) {
+    setDetailsHidden(false);
     setSelectedId(position.instrument_id);
     closeRequestId.current += 1;
     setCloseRequest({ position, requestId: closeRequestId.current });
@@ -237,7 +253,10 @@ export function PortfolioPage() {
           loading={detail.loading}
           error={detail.error}
           onReload={detail.reload}
-          onClose={() => setSelectedId(null)}
+          onClose={() => {
+            setDetailsHidden(true);
+            setSelectedId(null);
+          }}
           onClosePosition={startClosePosition}
         />
       </Card>

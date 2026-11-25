@@ -15,6 +15,9 @@ const STREAM_PATH = '/api/market/quotes/stream';
 const QUOTES_PATH = '/api/market/quotes';
 const FALLBACK_POLL_MS = 30_000;
 const REFRESH_DEBOUNCE_MS = 120;
+// A quote fetched this recently is still authoritative enough to render while
+// the stream reconnects, so remounting a view must not trigger another batch.
+const REUSE_QUOTE_MS = 15_000;
 
 function timestamp(value: string | null | undefined): number {
   if (!value) {
@@ -99,7 +102,14 @@ class QuoteHub {
     }
     if (keys.length > 0) {
       this.bindVisibility();
-      this.scheduleRefresh();
+      const needsRefresh = instruments.some((instrument) => {
+        const cached = this.quotes.get(instrument.instrument_id);
+        if (!cached) return true;
+        return Date.now() - timestamp(cached.retrieved_at) > REUSE_QUOTE_MS;
+      });
+      if (needsRefresh) {
+        this.scheduleRefresh();
+      }
       this.ensureStream();
     }
     return () => {

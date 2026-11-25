@@ -14,11 +14,11 @@ const NEEDLE_CY = 150.5;
 const RADIUS = 151.68;
 
 const SEGMENTS = [
-  { from: 178, to: 146, color: '#d9dde5' },
-  { from: 142, to: 110, color: '#f4f6fa' },
-  { from: 106, to: 74, color: '#787b86' },
-  { from: 70, to: 38, color: '#3b82f6' },
-  { from: 34, to: 2, color: '#2563eb' },
+  { from: 178, to: 146, color: '#f04444' },
+  { from: 142, to: 110, color: '#8f3535' },
+  { from: 106, to: 74, color: '#4a4a4a' },
+  { from: 70, to: 38, color: '#1f6fdc' },
+  { from: 34, to: 2, color: '#268bff' },
 ] as const;
 
 function polar(angleDegrees: number, radius: number): { x: number; y: number } {
@@ -77,9 +77,9 @@ export function TechnicalGauge({ label, summary, size = 'default' }: TechnicalGa
             <g className="tv-rating-needle" transform={`rotate(${rotation} ${CX} ${NEEDLE_CY})`}>
               <path
                 d="M 158 142.5 L 268.5 148.9 L 268.5 152.1 L 158 158.5 Z"
-                fill="#d1d4dc"
+                fill="#f5f5f5"
               />
-              <circle cx="158" cy="150.5" r="8" fill="#d1d4dc" />
+              <circle cx="158" cy="150.5" r="8" fill="#f5f5f5" />
             </g>
           ) : null}
         </svg>

@@ -30,7 +30,7 @@ export function TimeframeSelector({
             className={cn(
               'shrink-0 rounded-md px-2.5 py-1 text-xs transition-colors',
               active
-                ? 'bg-terminal-panelAlt font-medium text-terminal-text'
+                ? 'bg-white/[0.08] font-medium text-white'
                 : 'text-terminal-muted hover:bg-white/[0.04] hover:text-terminal-text',
             )}
           >

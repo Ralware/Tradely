@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { MouseEvent } from 'react';
-import type { Quote, SignalState, WatchlistItem } from '../../types/api';
+import type { Quote, WatchlistItem } from '../../types/api';
 import { cn, formatPercent, toneForNumber } from '../../utils/format';
 import {
   buildWatchlistRows,
@@ -19,7 +19,6 @@ import { Sparkline } from '../charts/Sparkline';
 export interface WatchlistTableProps {
   items: WatchlistItem[];
   quotes?: Map<string, Quote>;
-  signals?: Map<string, { state: SignalState; label?: string }>;
   sparklines?: Map<string, number[]>;
   sort: WatchlistSort | null;
   onSort: (column: WatchlistSortColumn) => void;
@@ -83,55 +82,11 @@ function formatSignedChange(value: number | null | undefined): string {
   );
 }
 
-// ─── Signal badge ─────────────────────────────────────────────────────────────
-
-interface SignalInfo {
-  state: SignalState;
-  label?: string;
-}
-
-const signalStyle: Record<SignalState, string> = {
-  BUY: 'border-[#1f4d43] text-terminal-green bg-terminal-panel',
-  SELL: 'border-[#4d2424] text-terminal-red bg-terminal-panel',
-  SELL_SHORT: 'border-[#4d2424] text-terminal-red bg-terminal-panel',
-  BUY_TO_COVER: 'border-[#1f4d43] text-terminal-green bg-terminal-panel',
-  WAIT: 'border-[#4d3d1f] text-terminal-amber bg-terminal-panel',
-  NO_SIGNAL: 'border-terminal-border text-terminal-muted bg-terminal-panel',
-  INSUFFICIENT_DATA: 'border-terminal-border text-terminal-muted bg-terminal-panel',
-  STALE_DATA: 'border-[#4d3d1f] text-terminal-amber bg-terminal-panel',
-  DATA_QUALITY_ERROR: 'border-[#4d2424] text-terminal-red bg-terminal-panel',
-};
-
-const signalLabel: Record<SignalState, string> = {
-  BUY: 'Buy',
-  SELL: 'Sell · Exit Long',
-  SELL_SHORT: 'Sell Short',
-  BUY_TO_COVER: 'Buy To Cover',
-  WAIT: 'Wait',
-  NO_SIGNAL: 'No Signal',
-  INSUFFICIENT_DATA: 'No Data',
-  STALE_DATA: 'Stale',
-  DATA_QUALITY_ERROR: 'Data Error',
-};
-
-function InlineSignalBadge({ signal }: { signal: SignalInfo }) {
-  const style = signalStyle[signal.state] ?? signalStyle.NO_SIGNAL;
-  const text = signal.label ?? signalLabel[signal.state] ?? signal.state;
-  return (
-    <span
-      className={`inline-flex items-center rounded border px-1.5 py-0.5 text-2xs font-medium leading-4 tracking-wide ${style}`}
-    >
-      {text}
-    </span>
-  );
-}
-
 // ─── WatchlistTable ───────────────────────────────────────────────────────────
 
 export function WatchlistTable({
   items,
   quotes,
-  signals,
   sparklines,
   sort,
   onSort,
@@ -232,16 +187,24 @@ export function WatchlistTable({
         className="overflow-x-auto"
         onScrollCapture={() => setMenu(null)}
       >
-        <table className="w-full min-w-[780px] border-collapse text-xs">
+        <table className="w-full min-w-[780px] table-fixed border-collapse text-xs">
+          <colgroup>
+            <col className="w-10" />
+            <col className="w-[32%]" />
+            <col className="w-[16%]" />
+            <col className="w-[14%]" />
+            <col className="w-[14%]" />
+            <col className="w-36" />
+            <col className="w-10" />
+          </colgroup>
           <thead>
             <tr className="select-none border-b border-terminal-border text-left text-2xs font-medium text-terminal-muted">
               <th className="w-10 py-2.5 pl-3 pr-2 text-left">#</th>
               <th className="py-2.5 pr-4">Symbol</th>
               {renderSortHeader('price', 'Last')}
-              {renderSortHeader('change', 'Change')}
-              {renderSortHeader('changePct', 'Chg%')}
-              <th className="py-2.5 pr-4 text-center">Signal</th>
-              <th className="w-32 py-2.5 pr-4 text-center">Chart (7D)</th>
+              {renderSortHeader('change', '24Hr Change')}
+              {renderSortHeader('changePct', '24Hr %')}
+              <th className="w-32 py-2.5 pr-4 text-center">Chart (24Hr)</th>
               <th className="w-10 py-2.5 pr-3 text-right">
                 <span className="sr-only">Actions</span>
               </th>
@@ -249,8 +212,6 @@ export function WatchlistTable({
           </thead>
           <tbody className="divide-y divide-terminal-borderSoft">
             {rows.map(({ item, key, quote }, index) => {
-              const signal =
-                signals?.get(key) ?? signals?.get(item.symbol) ?? null;
               const sparkData = sparklines?.get(key) ?? [];
               const isRemoving = removing === key;
 
@@ -301,14 +262,6 @@ export function WatchlistTable({
                     className={`num py-3 pr-4 text-right font-mono font-medium ${toneClass(quote?.day_change_pct)}`}
                   >
                     {formatPercent(quote?.day_change_pct ?? null, 2, true)}
-                  </td>
-
-                  <td className="py-3 pr-4 text-center">
-                    {signal ? (
-                      <InlineSignalBadge signal={signal} />
-                    ) : (
-                      <span className="text-2xs text-terminal-muted">—</span>
-                    )}
                   </td>
 
                   <td className="py-3 pr-4" onClick={(event) => event.stopPropagation()}>

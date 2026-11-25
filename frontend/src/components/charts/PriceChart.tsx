@@ -13,6 +13,7 @@ import {
   type UTCTimestamp,
 } from 'lightweight-charts';
 import type { Candle, IndicatorSeriesRow } from '../../types/api';
+import { analyticsViewStore } from '../../services/analyticsViewStore';
 import { formatNumber } from '../../utils/format';
 import { EmptyState } from '../common/States';
 
@@ -29,12 +30,26 @@ interface PriceChartProps {
   showRsi: boolean;
   showMacd: boolean;
   intraday?: boolean;
+  instrumentId?: string;
   timeframe?: string;
   symbol?: string;
   pricePrecision?: number | null;
   priceMinMove?: number | null;
   height?: number;
 }
+
+const CHART_COLORS = {
+  background: '#000000',
+  surface: '#000000',
+  border: '#1d1d1d',
+  grid: '#111111',
+  text: '#929292',
+  accent: '#268bff',
+  candleUp: '#268bff',
+  candleDown: '#f2f2f2',
+  candleNeutral: '#929292',
+  sell: '#f04444',
+} as const;
 
 const overlayGroups: Array<{
   key: keyof OverlayToggles;
@@ -43,27 +58,27 @@ const overlayGroups: Array<{
   {
     key: 'sma',
     lines: [
-      { field: 'sma_20', title: 'SMA 20', color: '#d6a45a' },
-      { field: 'sma_50', title: 'SMA 50', color: '#2f6feb' },
-      { field: 'sma_100', title: 'SMA 100', color: '#8b909a' },
-      { field: 'sma_200', title: 'SMA 200', color: '#8f7ee7' },
+      { field: 'sma_20', title: 'SMA 20', color: '#9ecbff' },
+      { field: 'sma_50', title: 'SMA 50', color: '#268bff' },
+      { field: 'sma_100', title: 'SMA 100', color: '#929292' },
+      { field: 'sma_200', title: 'SMA 200', color: '#b9a8ff' },
     ],
   },
   {
     key: 'ema',
     lines: [
-      { field: 'ema_20', title: 'EMA 20', color: '#26a69a' },
-      { field: 'ema_50', title: 'EMA 50', color: '#38bdf8' },
-      { field: 'ema_100', title: 'EMA 100', color: '#fbbf24' },
-      { field: 'ema_200', title: 'EMA 200', color: '#f472b6' },
+      { field: 'ema_20', title: 'EMA 20', color: '#6db2ff' },
+      { field: 'ema_50', title: 'EMA 50', color: '#268bff' },
+      { field: 'ema_100', title: 'EMA 100', color: '#f2c76e' },
+      { field: 'ema_200', title: 'EMA 200', color: '#ff9dcc' },
     ],
   },
   {
     key: 'bollinger',
     lines: [
-      { field: 'bb_upper', title: 'BB Upper', color: '#6b7280', dashed: true },
-      { field: 'bb_mid', title: 'BB Mid', color: '#9ca3af', dashed: true },
-      { field: 'bb_lower', title: 'BB Lower', color: '#6b7280', dashed: true },
+      { field: 'bb_upper', title: 'BB Upper', color: '#c1c1c1', dashed: true },
+      { field: 'bb_mid', title: 'BB Mid', color: '#929292', dashed: true },
+      { field: 'bb_lower', title: 'BB Lower', color: '#c1c1c1', dashed: true },
     ],
   },
 ];
@@ -86,6 +101,11 @@ function candlePoints(candles: Candle[]) {
     if (time === null) {
       return [];
     }
+    const color = candle.close > candle.open
+      ? CHART_COLORS.candleUp
+      : candle.close < candle.open
+        ? CHART_COLORS.candleDown
+        : CHART_COLORS.candleNeutral;
     return [
       {
         time,
@@ -93,6 +113,9 @@ function candlePoints(candles: Candle[]) {
         high: candle.high,
         low: candle.low,
         close: candle.close,
+        color,
+        borderColor: color,
+        wickColor: color,
       },
     ];
   });
@@ -109,9 +132,11 @@ function volumePoints(candles: Candle[]) {
         time,
         value: candle.volume,
         color:
-          candle.close >= candle.open
-            ? 'rgba(47, 111, 235, 0.28)'
-            : 'rgba(255, 255, 255, 0.28)',
+          candle.close > candle.open
+            ? 'rgba(38, 139, 255, 0.28)'
+            : candle.close < candle.open
+              ? 'rgba(242, 242, 242, 0.28)'
+              : 'rgba(146, 146, 146, 0.28)',
       },
     ];
   });
@@ -144,6 +169,21 @@ function candleStamp(timestamp: string): string {
   return `${new Date(parsed).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
 }
 
+function indicatorValueAt(series: IndicatorSeriesRow[] | null, field: string, timestamp: string | null): number | null {
+  if (!series || series.length === 0) return null;
+  const targetTime = timestamp === null ? null : toSeconds(timestamp);
+  const row = timestamp
+    ? series.find((item) => toSeconds(item.timestamp) === targetTime)
+    : series[series.length - 1];
+  return numeric(row?.[field]);
+}
+
+function indicatorDigits(field: string, priceDigits: number): number {
+  if (field === 'rsi_14') return 1;
+  if (field === 'macd' || field === 'macd_signal' || field === 'macd_hist') return 6;
+  return priceDigits;
+}
+
 export function PriceChart({
   candles,
   series,
@@ -151,6 +191,7 @@ export function PriceChart({
   showRsi,
   showMacd,
   intraday = false,
+  instrumentId = '',
   timeframe = '1d',
   symbol = '',
   pricePrecision = null,
@@ -166,6 +207,10 @@ export function PriceChart({
   const activeTimeframeRef = useRef<string | null>(null);
   const activeSymbolRef = useRef<string | null>(null);
   const timeRangeAnimationRef = useRef<number | null>(null);
+  const identityRef = useRef<string>('');
+  identityRef.current = instrumentId || symbol;
+  const timeframeRef = useRef(timeframe);
+  timeframeRef.current = timeframe;
   // Hover time is kept in React state so the HTML legend re-renders on
   // crosshair movement; the values themselves always come from `candles`.
   const [hoveredTime, setHoveredTime] = useState<UTCTimestamp | null>(null);
@@ -196,36 +241,36 @@ export function PriceChart({
     const chart: IChartApi = createChart(element, {
       autoSize: true,
       layout: {
-        background: { type: ColorType.Solid, color: '#0d0f13' },
-        textColor: '#8b919b',
+        background: { type: ColorType.Solid, color: CHART_COLORS.background },
+        textColor: CHART_COLORS.text,
         fontSize: 11,
         fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
         attributionLogo: false,
       },
       grid: {
-        vertLines: { color: '#1a1d22' },
-        horzLines: { color: '#1a1d22' },
+        vertLines: { color: CHART_COLORS.grid },
+        horzLines: { color: CHART_COLORS.grid },
       },
-      rightPriceScale: { borderColor: '#24272e', scaleMargins: { top: 0.08, bottom: 0.08 } },
+      rightPriceScale: { borderColor: CHART_COLORS.border, scaleMargins: { top: 0.08, bottom: 0.08 } },
       timeScale: {
-        borderColor: '#24272e',
+        borderColor: CHART_COLORS.border,
         timeVisible: intraday,
         secondsVisible: false,
         rightOffset: 4,
       },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: '#3a3f4a', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#0d0f13' },
-        horzLine: { color: '#3a3f4a', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#0d0f13' },
+        vertLine: { color: '#4a4a4a', width: 1, style: LineStyle.Dashed, labelBackgroundColor: CHART_COLORS.surface },
+        horzLine: { color: '#4a4a4a', width: 1, style: LineStyle.Dashed, labelBackgroundColor: CHART_COLORS.surface },
       },
     });
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: '#24a889',
-      downColor: '#e45b63',
+      upColor: CHART_COLORS.candleUp,
+      downColor: CHART_COLORS.candleDown,
       borderVisible: false,
-      wickUpColor: '#24a889',
-      wickDownColor: '#e45b63',
+      wickUpColor: CHART_COLORS.candleUp,
+      wickDownColor: CHART_COLORS.candleDown,
       priceLineVisible: false,
     });
 
@@ -252,11 +297,34 @@ export function PriceChart({
     };
     chart.subscribeCrosshairMove(handleCrosshair);
 
+    // Persist user zoom/scroll per instrument + timeframe so remounting the
+    // workspace (navigation) restores the exact same viewport.
+    let persistFrame: number | null = null;
+    const persistVisibleRange = () => {
+      if (persistFrame !== null) return;
+      persistFrame = requestAnimationFrame(() => {
+        persistFrame = null;
+        const range = chartRef.current?.timeScale().getVisibleLogicalRange();
+        const identity = identityRef.current;
+        if (!range || !identity) return;
+        analyticsViewStore.setRange(identity, timeframeRef.current, {
+          from: range.from,
+          to: range.to,
+        });
+      });
+    };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(persistVisibleRange);
+
     return () => {
       if (timeRangeAnimationRef.current !== null) {
         cancelAnimationFrame(timeRangeAnimationRef.current);
         timeRangeAnimationRef.current = null;
       }
+      if (persistFrame !== null) {
+        cancelAnimationFrame(persistFrame);
+        persistFrame = null;
+      }
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(persistVisibleRange);
       chart.unsubscribeCrosshairMove(handleCrosshair);
       chart.remove();
       chartRef.current = null;
@@ -308,6 +376,7 @@ export function PriceChart({
     activeSymbolRef.current = symbol;
     const timeScale = chart.timeScale();
     const previousRange = timeScale.getVisibleLogicalRange();
+    const storedRange = analyticsViewStore.getRange(instrumentId || symbol, timeframe);
 
     candleSeries.setData(candlePoints(candles));
     volumeSeries.setData(volumePoints(candles));
@@ -318,6 +387,13 @@ export function PriceChart({
       if (previousRange) {
         timeScale.setVisibleLogicalRange(previousRange);
       }
+      return;
+    }
+
+    // Returning to a previously-viewed instrument/timeframe restores the exact
+    // viewport the user left instead of zooming all the way out.
+    if (storedRange) {
+      timeScale.setVisibleLogicalRange(storedRange);
       return;
     }
 
@@ -356,7 +432,7 @@ export function PriceChart({
       }
     };
     timeRangeAnimationRef.current = requestAnimationFrame(animateRange);
-  }, [candles, timeframe, symbol]);
+  }, [candles, instrumentId, timeframe, symbol]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -415,7 +491,7 @@ export function PriceChart({
       const rsiSeries = chart.addSeries(
         LineSeries,
         {
-          color: '#8f7ee7',
+          color: '#b9a8ff',
           lineWidth: 2,
           priceLineVisible: false,
           lastValueVisible: true,
@@ -425,9 +501,9 @@ export function PriceChart({
       );
       rsiSeries.setData(seriesPoints(series, 'rsi_14'));
       for (const level of [70, 30]) {
-        rsiSeries.createPriceLine({
+          rsiSeries.createPriceLine({
           price: level,
-          color: '#3a3f4a',
+              color: '#4a4a4a',
           lineWidth: 1,
           lineStyle: LineStyle.Dashed,
           axisLabelVisible: false,
@@ -458,21 +534,21 @@ export function PriceChart({
             return [];
           }
           return [
-            { time, value, color: value >= 0 ? 'rgba(36, 168, 137, 0.5)' : 'rgba(228, 91, 99, 0.5)' },
+              { time, value, color: value >= 0 ? 'rgba(38, 139, 255, 0.5)' : 'rgba(240, 68, 68, 0.5)' },
           ];
         }),
       );
 
       const macdLine = chart.addSeries(
         LineSeries,
-        { color: '#2f6feb', lineWidth: 2, priceLineVisible: false, lastValueVisible: false },
+        { color: CHART_COLORS.accent, lineWidth: 2, priceLineVisible: false, lastValueVisible: false },
         paneIndex,
       );
       macdLine.setData(seriesPoints(series, 'macd'));
 
       const signalLine = chart.addSeries(
         LineSeries,
-        { color: '#d6a45a', lineWidth: 1, priceLineVisible: false, lastValueVisible: false },
+        { color: '#f2c76e', lineWidth: 1, priceLineVisible: false, lastValueVisible: false },
         paneIndex,
       );
       signalLine.setData(seriesPoints(series, 'macd_signal'));
@@ -493,9 +569,19 @@ export function PriceChart({
       ? 'text-terminal-muted'
       : displayCandle.close > displayCandle.open
         ? 'text-terminal-green'
-        : displayCandle.close < displayCandle.open
-          ? 'text-terminal-red'
-          : 'text-terminal-muted';
+          : displayCandle.close < displayCandle.open
+            ? 'text-terminal-red'
+            : 'text-terminal-muted';
+  const activeIndicatorLines = [
+    ...overlayGroups.flatMap((group) => overlays[group.key] ? group.lines : []),
+    ...(showRsi ? [{ field: 'rsi_14', title: 'RSI 14', color: '#b9a8ff' }] : []),
+    ...(showMacd ? [
+      { field: 'macd', title: 'MACD', color: CHART_COLORS.accent },
+      { field: 'macd_signal', title: 'Signal', color: '#f2c76e' },
+      { field: 'macd_hist', title: 'Histogram', color: CHART_COLORS.sell },
+    ] : []),
+  ];
+  const indicatorTimestamp = displayCandle?.timestamp ?? null;
 
   return (
     <div className="relative" style={{ height }}>
@@ -515,6 +601,17 @@ export function PriceChart({
           <span className="text-terminal-muted">
             Vol {formatNumber(displayCandle.volume, 0)}
           </span>
+          {activeIndicatorLines.map((line) => (
+            <span key={line.field} style={{ color: line.color }}>
+              <span className="font-medium">{line.title}</span>{' '}
+              <span className="num">
+                {formatNumber(
+                  indicatorValueAt(series, line.field, indicatorTimestamp),
+                  indicatorDigits(line.field, digits),
+                )}
+              </span>
+            </span>
+          ))}
         </div>
       ) : null}
       {candles.length === 0 ? (

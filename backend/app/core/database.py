@@ -1012,18 +1012,21 @@ class Database:
                           COALESCE(i.asset_type, w.asset_type, '') AS instrument_asset_type,
                           COALESCE(i.provider, w.provider, '') AS instrument_provider,
                           COALESCE(i.provider_symbol, w.provider_symbol, '') AS instrument_provider_symbol,
-                          COALESCE((
-                              SELECT SUM(CASE COALESCE(NULLIF(t.intent,''), t.side)
-                                  WHEN 'BUY' THEN t.quantity
-                                  WHEN 'SELL' THEN -t.quantity
-                                  WHEN 'SELL_SHORT' THEN -t.quantity
-                                  WHEN 'BUY_TO_COVER' THEN t.quantity
-                                  ELSE 0 END)
-                              FROM holding_transactions t
-                              WHERE t.instrument_id = w.instrument_id
-                          ), 0) AS held_quantity
+                          i.supported_intervals AS instrument_supported_intervals,
+                          COALESCE(h.held_quantity, 0) AS held_quantity
                    FROM watchlist w
                    LEFT JOIN instruments i ON i.instrument_id = w.instrument_id
+                   LEFT JOIN (
+                       SELECT instrument_id,
+                              SUM(CASE COALESCE(NULLIF(intent,''), side)
+                                  WHEN 'BUY' THEN quantity
+                                  WHEN 'SELL' THEN -quantity
+                                  WHEN 'SELL_SHORT' THEN -quantity
+                                  WHEN 'BUY_TO_COVER' THEN quantity
+                                  ELSE 0 END) AS held_quantity
+                       FROM holding_transactions
+                       GROUP BY instrument_id
+                   ) h ON h.instrument_id = w.instrument_id
                    ORDER BY w.market, w.symbol"""
             ).fetchall()
         items: list[dict[str, Any]] = []
@@ -1034,6 +1037,11 @@ class Database:
             item["provider"] = item.get("instrument_provider") or item.get("provider") or ""
             item["provider_symbol"] = (
                 item.get("instrument_provider_symbol") or item.get("provider_symbol") or item["symbol"]
+            )
+            item["supported_intervals"] = (
+                item.get("instrument_supported_intervals")
+                or item.get("supported_intervals")
+                or ""
             )
             item["name"] = item.get("instrument_name") or item.get("display_name") or item["symbol"]
             held_quantity = float(item.get("held_quantity") or 0)

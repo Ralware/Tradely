@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import { useApi } from '../../hooks/useApi';
 import { useQuotes } from '../../hooks/useQuotes';
+import { useWatchlist } from '../../hooks/useWatchlist';
 import { portfolioService } from '../../services/portfolioService';
 import type { Instrument, WatchlistItem } from '../../types/api';
 import { cn, formatNumber, formatPercent, toneForNumber } from '../../utils/format';
@@ -29,7 +29,7 @@ export function AnalysisWatchlist({
   onSelectInstrument: (item: WatchlistItem) => void;
   onClose?: () => void;
 }) {
-  const watchlist = useApi((signal) => portfolioService.getWatchlist(signal), []);
+  const watchlist = useWatchlist();
   const [addOpen, setAddOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,9 +77,10 @@ export function AnalysisWatchlist({
         market: item.market,
         exchange: item.exchange,
       });
+      setError(null);
       watchlist.reload();
-    } catch {
-      // Ignore
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not remove instrument');
     }
   }
 
@@ -145,6 +146,10 @@ export function AnalysisWatchlist({
         </div>
       ) : null}
 
+      {error && !addOpen ? (
+        <p className="border-b border-terminal-borderSoft px-2.5 py-1 text-2xs text-terminal-red">{error}</p>
+      ) : null}
+
       {/* Watchlist Items */}
       <div className="flex-1 overflow-y-auto divide-y divide-terminal-borderSoft">
         {watchlist.loading && !watchlist.data ? (
@@ -170,9 +175,20 @@ export function AnalysisWatchlist({
             return (
               <div
                 key={key}
+                role="button"
+                tabIndex={0}
+                aria-label={`Open analysis for ${item.symbol}`}
+                aria-current={isSelected ? 'true' : undefined}
                 onClick={() => onSelectInstrument(item)}
+                onKeyDown={(event) => {
+                  if (event.target !== event.currentTarget) return;
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    onSelectInstrument(item);
+                  }
+                }}
                 className={cn(
-                  'group flex cursor-pointer items-center justify-between py-2 pl-2.5 pr-3 transition-colors',
+                  'group flex cursor-pointer items-center justify-between py-2 pl-2.5 pr-3 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-terminal-accent',
                   isSelected
                     ? 'border-l-2 border-terminal-accent bg-terminal-accentSoft'
                     : 'border-l-2 border-transparent hover:bg-white/[0.03]',
@@ -211,7 +227,7 @@ export function AnalysisWatchlist({
                     onClick={(e) => void handleRemove(e, item)}
                     title="Remove from Watchlist"
                     aria-label={`Remove ${item.symbol} from watchlist`}
-                    className="flex h-5 w-5 items-center justify-center rounded text-terminal-muted opacity-0 transition-all hover:bg-white/[0.1] hover:text-terminal-red group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+                    className="flex h-5 w-5 items-center justify-center rounded text-terminal-muted opacity-0 transition-all hover:bg-white/[0.1] hover:text-terminal-red group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 max-sm:opacity-100"
                   >
                     <Icon name="close" size={11} />
                   </button>

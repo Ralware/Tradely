@@ -1,4 +1,5 @@
 from app.main import app
+from app.core.models import WatchlistItem
 from fastapi.testclient import TestClient
 import numpy as np
 import pandas as pd
@@ -177,6 +178,106 @@ def test_market_candles_route_passes_bounded_days_to_provider(monkeypatch):
     assert response.status_code == 200
     assert received["days"] == 7
     assert received["full_history"] is False
+
+
+def test_scanner_reuses_prepared_daily_signal_without_fetching_candles(monkeypatch):
+    instrument = app.state.db.resolve_instrument("AAPL", "global", exchange="NASDAQ")
+    app.state.db.add_watchlist(WatchlistItem(instrument_id=instrument.instrument_id))
+    prepared = {
+        "instrument_id": instrument.instrument_id,
+        "interval": "1d",
+        "fingerprint": "prepared-fingerprint",
+        "latest_close": 123.45,
+        "source": "tradingview",
+        "is_adjusted": None,
+        "adjustment_status": "unknown",
+        "is_stale": False,
+        "strategy": {"state": "BUY", "direction": "LONG"},
+    }
+    monkeypatch.setattr(
+        app.state.analytics_precompute,
+        "get_prepared_daily_signal",
+        lambda *_args, **_kwargs: prepared,
+    )
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("Scanner must reuse the prepared snapshot when it is current")
+
+    monkeypatch.setattr(app.state.market_service, "candles", forbidden)
+    response = client.get("/api/scanner/watchlist")
+    assert response.status_code == 200
+    row = next(
+        item for item in response.json()["items"]
+        if item["instrument_id"] == instrument.instrument_id
+    )
+    assert row["cache"] == "prepared"
+    assert row["strategy"]["state"] == "BUY"
+    assert row["last_close"] == 123.45
+    app.state.db.remove_watchlist_instrument(instrument.instrument_id)
+
+
+def test_batched_sparkline_route_bounds_and_reuses_market_candles(monkeypatch):
+    instrument = app.state.db.resolve_instrument("MSFT", "global", exchange="NASDAQ")
+    index = pd.date_range(end=pd.Timestamp.now(tz="UTC").floor("h"), periods=3, freq="h")
+    frame = pd.DataFrame({
+        "open": [1., 2., 3.], "high": [2., 3., 4.], "low": [.5, 1.5, 2.5],
+        "close": [1.5, 2.5, 3.5], "volume": [10., 20., 30.],
+    }, index=index)
+    calls = []
+    monkeypatch.setattr(
+        app.state.market_service,
+        "candles",
+        lambda *args, **kwargs: calls.append(kwargs) or (frame, "test-provider"),
+    )
+
+    response = client.post("/api/sparklines", json={
+        "instrument_ids": [instrument.instrument_id],
+        "interval": "1h",
+        "days": 1,
+    })
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["items"][instrument.instrument_id]["closes"] == [1.5, 2.5, 3.5]
+    assert calls[0]["full_history"] is False
+    assert calls[0]["days"] == 1
+
+
+def test_scanner_suppresses_prepared_indian_signal_without_verified_adjustment(monkeypatch):
+    instrument = app.state.db.resolve_instrument("RELIANCE", "india", exchange="NSE")
+    app.state.db.add_watchlist(WatchlistItem(instrument_id=instrument.instrument_id))
+    prepared = {
+        "instrument_id": instrument.instrument_id,
+        "interval": "1d",
+        "fingerprint": "prepared-fingerprint",
+        "latest_close": 2900.0,
+        "source": "tradingview",
+        "is_adjusted": None,
+        "adjustment_status": "unknown",
+        "is_stale": False,
+        "strategy": {"state": "BUY", "direction": "LONG", "entry_reference": 2900.0},
+    }
+    monkeypatch.setattr(
+        app.state.analytics_precompute,
+        "get_prepared_daily_signal",
+        lambda *_args, **_kwargs: prepared,
+    )
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("A current prepared snapshot must be reused")
+
+    monkeypatch.setattr(app.state.market_service, "candles", forbidden)
+    response = client.get("/api/scanner/watchlist")
+    assert response.status_code == 200
+    row = next(
+        item for item in response.json()["items"]
+        if item["instrument_id"] == instrument.instrument_id
+    )
+    assert row["cache"] == "prepared"
+    assert row["strategy"]["state"] == "DATA_QUALITY_ERROR"
+    assert row["strategy"]["direction"] is None
+    assert row["strategy"]["entry_reference"] is None
+    app.state.db.remove_watchlist_instrument(instrument.instrument_id)
 
 
 def test_unknown_indian_adjustment_suppresses_analysis_and_refuses_backtest(monkeypatch):

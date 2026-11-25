@@ -5,7 +5,7 @@ import type { PositionDirection, RiskResult } from "../../types/api";
 import { formatNumber } from "../../utils/format";
 import { Button } from "../common/Button";
 import { Card } from "../common/Card";
-import { Field, Input, Select } from "../common/Field";
+import { Input, Select } from "../common/Field";
 import { ErrorState, Notice } from "../common/States";
 import { KeyValue } from "../common/Stat";
 
@@ -135,52 +135,48 @@ export function RiskCalculator({
               { value: "SHORT", label: "Short" },
             ]}
           />
-          <Field label="Account Capital">
-            <Input
-              type="number"
-              min={1}
-              step="any"
-              value={capital}
-              onChange={(event) => setCapital(event.target.value)}
-            />
-          </Field>
-          <Field label="Risk per Trade (%)" hint="Maximum 2%">
-            <Input
-              type="number"
-              min={0.01}
-              max={2}
-              step="0.01"
-              value={riskPercent}
-              onChange={(event) => setRiskPercent(event.target.value)}
-            />
-          </Field>
-          <Field label="Entry Price">
-            <Input
-              type="number"
-              min={0}
-              step="any"
-              value={entryPrice}
-              onChange={(event) => setEntryPrice(event.target.value)}
-            />
-          </Field>
-          <Field label="Stop Price">
-            <Input
-              type="number"
-              min={0}
-              step="any"
-              value={stopPrice}
-              onChange={(event) => setStopPrice(event.target.value)}
-            />
-          </Field>
-          <Field label="Lot Size">
-            <Input
-              type="number"
-              min={1}
-              step={1}
-              value={lotSize}
-              onChange={(event) => setLotSize(event.target.value)}
-            />
-          </Field>
+          <Input
+            label="Account Capital"
+            type="number"
+            min={1}
+            step="any"
+            value={capital}
+            onChange={(event) => setCapital(event.target.value)}
+          />
+          <Input
+            label="Risk per Trade (%)"
+            hint="Maximum 2%"
+            type="number"
+            min={0.01}
+            max={2}
+            step="0.01"
+            value={riskPercent}
+            onChange={(event) => setRiskPercent(event.target.value)}
+          />
+          <Input
+            label="Entry Price"
+            type="number"
+            min={0}
+            step="any"
+            value={entryPrice}
+            onChange={(event) => setEntryPrice(event.target.value)}
+          />
+          <Input
+            label="Stop Price"
+            type="number"
+            min={0}
+            step="any"
+            value={stopPrice}
+            onChange={(event) => setStopPrice(event.target.value)}
+          />
+          <Input
+            label="Lot Size"
+            type="number"
+            min={1}
+            step={1}
+            value={lotSize}
+            onChange={(event) => setLotSize(event.target.value)}
+          />
         </div>
 
         <Button type="submit" variant="primary" loading={loading}>

@@ -4,11 +4,12 @@ import asyncio
 import json
 import re
 from collections.abc import AsyncIterator
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from typing import Any
 
 import pandas as pd
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from app.core.instruments import canonical_instrument, parse_instrument_id
@@ -187,9 +188,13 @@ def health() -> dict[str, Any]:
 
 
 @router.get("/analytics/precomputed/index")
-def precomputed_index(request: Request) -> dict[str, Any]:
+def precomputed_index(
+    request: Request,
+    limit: int | None = Query(None, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> dict[str, Any]:
     """Compact manifest only; never fetches provider data or calculates analytics."""
-    return request.app.state.analytics_precompute.manifest()
+    return request.app.state.analytics_precompute.manifest(limit=limit, offset=offset)
 
 
 @router.get("/analytics/on-demand/{instrument_id}/{interval}")
@@ -336,8 +341,42 @@ def candles(
 @router.get("/scanner/watchlist")
 def scan_watchlist(request: Request) -> dict[str, Any]:
     results = []
+    engine = request.app.state.analytics_precompute
     for item in request.app.state.db.get_watchlist():
         try:
+            # Reuse the prepared daily signal when its fingerprint/strategy
+            # version is still current. The scanner therefore does not fetch
+            # candles or rerun indicators for an unchanged watchlist entry.
+            prepared = (
+                engine.get_prepared_daily_signal(str(item["instrument_id"]), "1d")
+                if item.get("instrument_id") else None
+            )
+            if (prepared is not None and not prepared["is_stale"]
+                    and prepared.get("latest_close") is not None):
+                prepared_signal = prepared["strategy"]
+                if (item["market"] == "india"
+                        and prepared["adjustment_status"] != "adjusted"):
+                    reason = (
+                        "Historical corporate-action adjustment status could not be verified."
+                        if prepared["adjustment_status"] == "unknown" else
+                        "Indian-equity history is known to be unadjusted."
+                    )
+                    prepared_signal = suppress_actionable_strategy(
+                        prepared_signal, state="DATA_QUALITY_ERROR",
+                        explanation=f"{reason} Strategy signal suppressed.",
+                    )
+                results.append(_scan_identity(item) | {
+                    "symbol": item["symbol"],
+                    "market": item["market"],
+                    "source": prepared["source"],
+                    "last_close": float(prepared["latest_close"]),
+                    "is_adjusted": prepared["is_adjusted"],
+                    "adjustment_status": prepared["adjustment_status"],
+                    "is_stale": False,
+                    "strategy": prepared_signal,
+                    "cache": "prepared",
+                })
+                continue
             frame, source = request.app.state.market_service.candles(
                 item["symbol"], market=item["market"], exchange=item["exchange"] or None,
                 interval="1d", days=500, provider="auto",
@@ -368,6 +407,70 @@ def scan_watchlist(request: Request) -> dict[str, Any]:
                             "symbol": item["symbol"], "market": item["market"], "error": str(exc),
                             "strategy": {"state": "DATA_QUALITY_ERROR"}})
     return {"items": results, "count": len(results), "note": "Scanner only evaluates the configured daily strategy on completed daily bars."}
+
+
+@router.post("/sparklines")
+def watchlist_sparklines(
+    request: Request, payload: dict[str, Any] = Body(...)
+) -> dict[str, Any]:
+    """Return bounded, batched 24-hour sparkline closes for many instruments.
+
+    One browser request replaces an unbounded per-symbol fan-out. The market
+    layer still reuses its candle cache and coalesces identical provider calls,
+    so revisiting the watchlist does not refetch the same hourly history.
+    """
+    raw_ids = payload.get("instrument_ids")
+    if not isinstance(raw_ids, list):
+        raise HTTPException(status_code=422, detail="instrument_ids must be a list")
+    instrument_ids = [str(value) for value in raw_ids if str(value).strip()][:100]
+    interval = str(payload.get("interval") or "1h")
+    try:
+        days = max(1, min(7, int(payload.get("days") or 1)))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="days must be an integer") from exc
+    if not instrument_ids:
+        return {"items": {}, "errors": {}, "interval": interval, "days": days}
+
+    settings = request.app.state.settings
+    max_workers = max(
+        1,
+        min(
+            int(getattr(settings, "sparkline_max_concurrency", 4)),
+            len(instrument_ids),
+        ),
+    )
+
+    def load(instrument_id: str) -> tuple[str, dict[str, Any]]:
+        instrument = request.app.state.db.instrument_for_id(instrument_id)
+        if instrument is None:
+            raise ValueError(f"Unknown instrument {instrument_id}")
+        frame, source = request.app.state.market_service.candles(
+            instrument["symbol"],
+            market=instrument["market"],
+            exchange=instrument.get("exchange") or None,
+            interval=interval,
+            days=days,
+            provider="auto",
+            full_history=False,
+        )
+        return instrument_id, {
+            "closes": [float(value) for value in frame["close"].tolist()],
+            "source": source,
+            "last_candle_at": frame.index[-1].isoformat(),
+        }
+
+    items: dict[str, Any] = {}
+    errors: dict[str, str] = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(load, instrument_id): instrument_id for instrument_id in instrument_ids}
+        for future in as_completed(futures):
+            instrument_id = futures[future]
+            try:
+                key, value = future.result()
+                items[key] = value
+            except Exception as exc:
+                errors[instrument_id] = str(exc)
+    return {"items": items, "errors": errors, "interval": interval, "days": days}
 
 
 @router.get("/instruments/{symbol}/analysis")

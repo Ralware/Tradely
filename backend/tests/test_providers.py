@@ -287,6 +287,47 @@ def test_market_cache_deduplicates_concurrent_provider_requests(monkeypatch):
     assert len(calls) == 1
 
 
+def test_market_cache_refreshes_only_the_tail_and_reports_metrics(monkeypatch):
+    service = MarketService(Settings(_env_file=None))
+    index = pd.date_range("2025-01-01", periods=3, tz="UTC")
+    base = pd.DataFrame({
+        "open": [1, 2, 3], "high": [2, 3, 4], "low": [0, 1, 2],
+        "close": [1.5, 2.5, 3.5], "volume": [10, 20, 30],
+    }, index=index)
+    tail_index = pd.date_range("2025-01-03", periods=2, tz="UTC")
+    tail = pd.DataFrame({
+        "open": [3, 4], "high": [4, 5], "low": [2, 3],
+        "close": [3.5, 4.5], "volume": [30, 40],
+    }, index=tail_index)
+    calls = []
+
+    def fetch(*args, **kwargs):
+        calls.append(kwargs)
+        return base if len(calls) == 1 else tail
+
+    monkeypatch.setattr(service.tradingview, "fetch_candles", fetch)
+    monkeypatch.setattr(service, "_refresh_after_seconds", lambda _interval: 0)
+
+    first, _ = service.candles(
+        "AAPL", market="global", exchange="NASDAQ", interval="1d", full_history=False,
+    )
+    second, _ = service.candles(
+        "AAPL", market="global", exchange="NASDAQ", interval="1d", full_history=False,
+    )
+
+    assert len(first) == 3
+    assert len(calls) == 2
+    assert calls[1]["start"] is not None
+    assert calls[1]["end"] is None
+    assert len(second) == 4
+    assert second.index.is_monotonic_increasing
+    assert not second.index.has_duplicates
+    metrics = service.metrics()
+    assert metrics["candles"]["loads"] == 1
+    assert metrics["candles"]["incremental_refreshes"] == 1
+    assert metrics["provider"]["requests"] == 2
+
+
 def test_market_cache_evicts_entries_at_its_capacity():
     cache = _CandleCache(max_entries=1)
     frame = pd.DataFrame({
