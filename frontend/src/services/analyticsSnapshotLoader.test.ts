@@ -116,4 +116,60 @@ describe('loadAnalyticsSnapshot', () => {
     expect(warning).toHaveBeenCalledTimes(2);
     warning.mockRestore();
   });
+
+  it('refreshes an intraday snapshot whose newest candle is older than its interval', async () => {
+    // Flags still say fresh, but a 1m bar from two days ago must not be reused.
+    const local = snapshot({
+      interval: '1m',
+      analysis: {
+        fingerprint: 'fingerprint-1',
+        is_stale: false,
+        market: 'crypto',
+        interval: '1m',
+        as_of: '2026-11-22T10:00:00Z',
+        candles: [{ close: 12 }],
+      },
+      provenance: {
+        instrument_id: identity,
+        data_freshness: 'fresh',
+        latest_candle_timestamp: '2026-11-22T10:00:00Z',
+      },
+    });
+    const live = snapshot({ interval: '1m' });
+    const io = dependencies({
+      readLocal: vi.fn(async () => local),
+      request: vi.fn(async () => live),
+    });
+    const onCached = vi.fn();
+
+    const loaded = await loadAnalyticsSnapshot(identity, '1m', { dependencies: io, onCached });
+
+    expect(loaded).toBe(live);
+    expect(onCached).toHaveBeenCalledWith(local);
+    expect(io.request).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses an intraday snapshot whose newest candle is still current', async () => {
+    const asOf = new Date(Date.now() - 30_000).toISOString();
+    const local = snapshot({
+      interval: '1m',
+      analysis: {
+        fingerprint: 'fingerprint-1',
+        is_stale: false,
+        market: 'crypto',
+        interval: '1m',
+        as_of: asOf,
+        candles: [{ close: 12 }],
+      },
+      provenance: {
+        instrument_id: identity,
+        data_freshness: 'fresh',
+        latest_candle_timestamp: asOf,
+      },
+    });
+    const io = dependencies({ readLocal: vi.fn(async () => local) });
+
+    await expect(loadAnalyticsSnapshot(identity, '1m', { dependencies: io })).resolves.toBe(local);
+    expect(io.request).not.toHaveBeenCalled();
+  });
 });

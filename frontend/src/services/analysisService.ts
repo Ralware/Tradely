@@ -124,6 +124,14 @@ function removeCacheEntry(key: string): void {
   }
 }
 
+function responseTimestamp(data: MarketDataResponse): number | null {
+  const record = data as unknown as Record<string, unknown>;
+  const value = record.generated_at ?? record.as_of ?? record.last_candle_at ?? record.latest_candle_timestamp;
+  if (!value) return null;
+  const parsed = Date.parse(String(value));
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
 function estimateSizeBytes(data: MarketDataResponse): number {
   try {
     // JSON strings are UTF-16 in JS; x2 is a conservative in-memory estimate.
@@ -194,6 +202,22 @@ function cachedResponse<T extends MarketDataResponse>(
 
   const pending = request().then((data) => {
     if (!signal?.aborted && (cacheGenerations.get(instrumentId) ?? 0) === generation) {
+      // Never let a slower, older response replace newer cached analytics for
+      // the same instrument/timeframe.
+      const existingKey = cacheAliases.get(baseKey);
+      const existing = existingKey ? marketDataCache.get(existingKey) : undefined;
+      const incomingTime = responseTimestamp(data);
+      const existingTime = existing ? responseTimestamp(existing.data) : null;
+      if (
+        existing
+        && incomingTime !== null
+        && existingTime !== null
+        && incomingTime < existingTime
+      ) {
+        // Serve the newer cached payload so a slow response cannot roll the
+        // chart back to older candles.
+        return existing.data as unknown as T;
+      }
       const fingerprint = data.fingerprint ?? `${data.interval ?? query.interval ?? '1d'}:${'as_of' in data ? String((data as { as_of?: string }).as_of ?? '') : ''}`;
       const variantKey = JSON.stringify([baseKey, data.source, data.is_adjusted ?? null, fingerprint]);
       removeCacheEntry(variantKey);

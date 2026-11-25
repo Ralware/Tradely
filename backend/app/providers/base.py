@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from datetime import date
 
+import numpy as np
 import pandas as pd
 
 
@@ -27,12 +28,24 @@ def normalize_candles(
 
     result = frame.copy()
     attrs = dict(frame.attrs)
+    original_rows = len(result)
     result.index = pd.to_datetime(result.index, utc=True, errors="coerce")
     result["volume"] = result["volume"] if "volume" in result.columns else 0
     for column in ("open", "high", "low", "close", "volume"):
         result[column] = pd.to_numeric(result[column], errors="coerce")
     result = result.loc[~result.index.isna()]
     result = result.dropna(subset=["open", "high", "low", "close"])
+    # Reject non-finite prices and impossible OHLC relationships instead of
+    # letting them reach indicators, the price axis or a backtest.
+    finite = np.isfinite(result[["open", "high", "low", "close"]].to_numpy(dtype=float)).all(axis=1)
+    result = result.loc[finite]
+    if not result.empty:
+        body_high = result[["open", "close", "low"]].max(axis=1)
+        body_low = result[["open", "close", "high"]].min(axis=1)
+        valid_ohlc = (result["high"] >= body_high) & (result["low"] <= body_low)
+        valid_volume = result["volume"].isna() | (result["volume"] >= 0)
+        result = result.loc[valid_ohlc & valid_volume]
+    duplicates = int(result.index.duplicated(keep="last").sum())
     result = result.loc[~result.index.duplicated(keep="last")]
     result = result.sort_index(kind="stable")
     truncated = max_candles is not None and len(result) > max_candles
@@ -42,6 +55,9 @@ def normalize_candles(
         raise ProviderError("Provider returned no valid OHLC candles")
     result = result[["open", "high", "low", "close", "volume"]]
     result.attrs.update(attrs)
+    result.attrs["normalized_rows"] = len(result)
+    result.attrs["invalid_rows"] = max(0, original_rows - len(result) - duplicates)
+    result.attrs["duplicate_rows"] = duplicates
     if truncated:
         result.attrs["history_truncated"] = True
     return result

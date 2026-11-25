@@ -73,6 +73,10 @@ const CANDLE_TIMEOUT_MS = Math.max(
   5000,
   Number(process.env.TRADINGVIEW_CANDLE_TIMEOUT_MS || 45000),
 );
+const CANDLE_CACHE_MS = Math.max(
+  0,
+  Number(process.env.TRADINGVIEW_CANDLE_CACHE_MS || 5000),
+);
 const QUOTE_TIMEOUT_MS = Math.max(
   5000,
   Number(process.env.TRADINGVIEW_QUOTE_TIMEOUT_MS || 25000),
@@ -268,15 +272,23 @@ async function candles(query) {
     throw new BridgeError(400, "INVALID_ARGUMENT", "from must be before to");
   }
 
+  const maxCountParam = query.get("maxCount");
+  const requestedMax =
+    maxCountParam === null || maxCountParam === ""
+      ? undefined
+      : parsePositiveInteger(maxCountParam, "maxCount", 20_000, 1_000_000);
+
   let count;
   let maxCount;
   if (from !== undefined) {
     const end = to ?? Math.floor(Date.now() / 1000);
     const step = timeframeSeconds(timeframe);
-    maxCount = Math.max(1, Math.ceil((end - from) / step) + 3);
+    maxCount =
+      requestedMax ?? Math.max(1, Math.ceil((end - from) / step) + 3);
   } else {
     // A count request keeps working, but it is no longer capped at one batch.
     count = parsePositiveInteger(query.get("count"), "count", 500, 1_000_000);
+    maxCount = requestedMax;
   }
 
   const key = cacheKey(
@@ -286,25 +298,31 @@ async function candles(query) {
     from ?? "",
     to ?? "",
     count ?? maxCount,
+    maxCount ?? "",
     adjustment,
   );
-  const result = await cached(key, 60000, () =>
+  const result = await cached(key, CANDLE_CACHE_MS, () =>
     withSlot(() =>
       getCandles({
         symbol,
         timeframe,
         adjustment,
-        ...(from !== undefined ? { from, maxCount } : { count }),
+        ...(from !== undefined ? { from, maxCount } : { count, maxCount }),
         ...(to !== undefined ? { to } : {}),
         timeoutMs: CANDLE_TIMEOUT_MS,
         ...(credentials ? { credentials } : {}),
       }),
     ),
   );
+  const requested = from !== undefined ? maxCount : count;
   return {
     symbol,
     timeframe,
     count: result.length,
+    requested_count: requested,
+    max_count: maxCount ?? null,
+    history_truncated:
+      typeof requested === "number" && result.length >= requested,
     from: from ?? null,
     to: to ?? null,
     adjustment,

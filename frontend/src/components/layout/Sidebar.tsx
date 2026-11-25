@@ -11,7 +11,7 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { to: '/', label: 'Watchlist', icon: 'list', end: true },
+  { to: '/', label: 'Watchlist', icon: 'star', end: true },
   { to: '/analysis', label: 'Analysis', icon: 'chart' },
   { to: '/portfolio', label: 'Portfolio', icon: 'portfolio' },
   { to: '/backtesting', label: 'Backtesting', icon: 'flask' },

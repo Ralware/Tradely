@@ -605,7 +605,7 @@
   .tv-strategy-summary > .panel-surface {
     background: var(--tv-surface);
     border-color: var(--tv-border);
-    border-radius: 2px;
+    border-radius: 8px;
   }
 
   .tv-analysis-tabs [role="tablist"] {

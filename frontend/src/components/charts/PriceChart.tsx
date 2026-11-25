@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   CandlestickSeries,
   ColorType,
@@ -9,9 +9,11 @@ import {
   createChart,
   type IChartApi,
   type ISeriesApi,
+  type MouseEventParams,
   type UTCTimestamp,
 } from 'lightweight-charts';
 import type { Candle, IndicatorSeriesRow } from '../../types/api';
+import { formatNumber } from '../../utils/format';
 import { EmptyState } from '../common/States';
 
 export interface OverlayToggles {
@@ -28,6 +30,9 @@ interface PriceChartProps {
   showMacd: boolean;
   intraday?: boolean;
   timeframe?: string;
+  symbol?: string;
+  pricePrecision?: number | null;
+  priceMinMove?: number | null;
   height?: number;
 }
 
@@ -123,6 +128,22 @@ function seriesPoints(
   });
 }
 
+function fallbackPrecision(value: number | null | undefined): number {
+  if (value === null || value === undefined || !Number.isFinite(value)) return 2;
+  const magnitude = Math.abs(value);
+  if (magnitude >= 1000) return 2;
+  if (magnitude >= 1) return 4;
+  if (magnitude >= 0.01) return 6;
+  if (magnitude >= 0.0001) return 8;
+  return 10;
+}
+
+function candleStamp(timestamp: string): string {
+  const parsed = Date.parse(timestamp);
+  if (Number.isNaN(parsed)) return timestamp;
+  return `${new Date(parsed).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+}
+
 export function PriceChart({
   candles,
   series,
@@ -131,6 +152,9 @@ export function PriceChart({
   showMacd,
   intraday = false,
   timeframe = '1d',
+  symbol = '',
+  pricePrecision = null,
+  priceMinMove = null,
   height = 380,
 }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -140,7 +164,26 @@ export function PriceChart({
   const overlaySeriesRef = useRef<ISeriesApi<'Line'>[]>([]);
   const indicatorSeriesRef = useRef<Array<ISeriesApi<'Line'> | ISeriesApi<'Histogram'>>>([]);
   const activeTimeframeRef = useRef<string | null>(null);
+  const activeSymbolRef = useRef<string | null>(null);
   const timeRangeAnimationRef = useRef<number | null>(null);
+  // Hover time is kept in React state so the HTML legend re-renders on
+  // crosshair movement; the values themselves always come from `candles`.
+  const [hoveredTime, setHoveredTime] = useState<UTCTimestamp | null>(null);
+
+  const digits =
+    typeof pricePrecision === 'number' && Number.isFinite(pricePrecision)
+      ? Math.max(0, Math.min(12, Math.trunc(pricePrecision)))
+      : fallbackPrecision(candles.length ? candles[candles.length - 1].close : null);
+  const minMove =
+    typeof priceMinMove === 'number' && Number.isFinite(priceMinMove) && priceMinMove > 0
+      ? priceMinMove
+      : 10 ** -digits;
+  const latestCandle = candles.length ? candles[candles.length - 1] : null;
+  const hoveredCandle =
+    hoveredTime === null
+      ? null
+      : candles.find((candle) => toSeconds(candle.timestamp) === hoveredTime) ?? null;
+  const displayCandle = hoveredCandle ?? latestCandle;
 
   // The chart is created once and kept alive across data changes. Timeframe
   // switches only replace series data, so the canvas never unmounts or flashes.
@@ -153,8 +196,8 @@ export function PriceChart({
     const chart: IChartApi = createChart(element, {
       autoSize: true,
       layout: {
-        background: { type: ColorType.Solid, color: '#000000' },
-        textColor: '#8b909a',
+        background: { type: ColorType.Solid, color: '#0d0f13' },
+        textColor: '#8b919b',
         fontSize: 11,
         fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
         attributionLogo: false,
@@ -172,17 +215,17 @@ export function PriceChart({
       },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: '#3a3f4a', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#000000' },
-        horzLine: { color: '#3a3f4a', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#000000' },
+        vertLine: { color: '#3a3f4a', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#0d0f13' },
+        horzLine: { color: '#3a3f4a', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#0d0f13' },
       },
     });
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: '#2f6feb',
-      downColor: '#ffffff',
+      upColor: '#24a889',
+      downColor: '#e45b63',
       borderVisible: false,
-      wickUpColor: '#2f6feb',
-      wickDownColor: '#ffffff',
+      wickUpColor: '#24a889',
+      wickDownColor: '#e45b63',
       priceLineVisible: false,
     });
 
@@ -202,11 +245,19 @@ export function PriceChart({
     candleSeriesRef.current = candleSeries;
     volumeSeriesRef.current = volumeSeries;
 
+    const handleCrosshair = (param: MouseEventParams) => {
+      // `param.time` is absent when the pointer leaves the plot area, which is
+      // exactly when the legend must fall back to the newest candle.
+      setHoveredTime(typeof param.time === 'number' ? (param.time as UTCTimestamp) : null);
+    };
+    chart.subscribeCrosshairMove(handleCrosshair);
+
     return () => {
       if (timeRangeAnimationRef.current !== null) {
         cancelAnimationFrame(timeRangeAnimationRef.current);
         timeRangeAnimationRef.current = null;
       }
+      chart.unsubscribeCrosshairMove(handleCrosshair);
       chart.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
@@ -216,6 +267,18 @@ export function PriceChart({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    // Instrument-specific precision from the provider price scale; candle
+    // values themselves are never rounded.
+    candleSeriesRef.current?.applyOptions({
+      priceFormat: { type: 'price', precision: digits, minMove },
+    });
+  }, [digits, minMove]);
+
+  useEffect(() => {
+    setHoveredTime(null);
+  }, [symbol, timeframe]);
 
   useEffect(() => {
     chartRef.current?.timeScale().applyOptions({
@@ -238,12 +301,26 @@ export function PriceChart({
     }
     const timeframeChanged =
       activeTimeframeRef.current !== null && activeTimeframeRef.current !== timeframe;
+    const symbolChanged =
+      activeSymbolRef.current !== null && activeSymbolRef.current !== symbol;
+    const firstLoad = activeTimeframeRef.current === null;
     activeTimeframeRef.current = timeframe;
+    activeSymbolRef.current = symbol;
     const timeScale = chart.timeScale();
     const previousRange = timeScale.getVisibleLogicalRange();
 
     candleSeries.setData(candlePoints(candles));
     volumeSeries.setData(volumePoints(candles));
+
+    // A routine refresh appends bars at the same logical indices, so keep the
+    // user's zoom and scroll position instead of snapping back to fitContent.
+    if (!firstLoad && !timeframeChanged && !symbolChanged) {
+      if (previousRange) {
+        timeScale.setVisibleLogicalRange(previousRange);
+      }
+      return;
+    }
+
     timeScale.fitContent();
 
     const targetRange = timeScale.getVisibleLogicalRange();
@@ -279,7 +356,7 @@ export function PriceChart({
       }
     };
     timeRangeAnimationRef.current = requestAnimationFrame(animateRange);
-  }, [candles, timeframe]);
+  }, [candles, timeframe, symbol]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -381,7 +458,7 @@ export function PriceChart({
             return [];
           }
           return [
-            { time, value, color: value >= 0 ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)' },
+            { time, value, color: value >= 0 ? 'rgba(36, 168, 137, 0.5)' : 'rgba(228, 91, 99, 0.5)' },
           ];
         }),
       );
@@ -411,9 +488,35 @@ export function PriceChart({
     });
   }, [intraday]);
 
+  const tone =
+    displayCandle === null
+      ? 'text-terminal-muted'
+      : displayCandle.close > displayCandle.open
+        ? 'text-terminal-green'
+        : displayCandle.close < displayCandle.open
+          ? 'text-terminal-red'
+          : 'text-terminal-muted';
+
   return (
     <div className="relative" style={{ height }}>
       <div ref={containerRef} className="h-full w-full" aria-label="Price chart" />
+      {displayCandle ? (
+        <div
+          className="pointer-events-none absolute left-2 top-1.5 z-10 flex max-w-[calc(100%-1rem)] flex-wrap items-center gap-x-3 gap-y-0.5 text-2xs"
+          aria-live="off"
+        >
+          <span className="font-semibold text-terminal-text">{symbol || '—'}</span>
+          <span className="uppercase tracking-wide text-terminal-muted">{timeframe}</span>
+          <span className="text-terminal-muted">{candleStamp(displayCandle.timestamp)}</span>
+          <span className={tone}>O {formatNumber(displayCandle.open, digits)}</span>
+          <span className={tone}>H {formatNumber(displayCandle.high, digits)}</span>
+          <span className={tone}>L {formatNumber(displayCandle.low, digits)}</span>
+          <span className={tone}>C {formatNumber(displayCandle.close, digits)}</span>
+          <span className="text-terminal-muted">
+            Vol {formatNumber(displayCandle.volume, 0)}
+          </span>
+        </div>
+      ) : null}
       {candles.length === 0 ? (
         <div className="absolute inset-0 flex items-center justify-center bg-terminal-bg/80">
           <EmptyState title="No candles available" icon="chart" />

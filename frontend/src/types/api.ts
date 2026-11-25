@@ -88,6 +88,17 @@ export interface Instrument {
   aliases?: string[];
   capabilities?: InstrumentCapabilities;
   asset_label?: string;
+  price_scale?: number | null;
+  price_precision?: number | null;
+  min_move?: number | null;
+  price_currency?: string | null;
+}
+
+export interface PriceMetadata {
+  price_scale?: number | null;
+  price_precision?: number | null;
+  min_move?: number | null;
+  price_currency?: string | null;
 }
 
 export type InstrumentRecognitionStatus = 'resolved' | 'ambiguous' | 'not_found' | 'unsupported';
@@ -175,12 +186,15 @@ export interface CandlesResponse {
   exchange: string | null;
   interval: string;
   instrument?: Instrument | null;
+  price_metadata?: PriceMetadata | null;
   source: string;
   is_adjusted: boolean;
   freshness: string;
   is_stale: boolean;
   history_truncated: boolean;
   history_pages: number | null;
+  last_candle_confirmed?: boolean | null;
+  forming_bar_excluded?: boolean;
   last_candle_at: string;
   count: number;
   candles: Candle[];
@@ -229,11 +243,14 @@ export interface AnalysisResponse {
   exchange: string | null;
   interval: string;
   instrument?: Instrument | null;
+  price_metadata?: PriceMetadata | null;
   source: string;
   is_adjusted: boolean;
   is_stale: boolean;
   history_truncated: boolean;
   history_pages: number | null;
+  last_candle_confirmed?: boolean | null;
+  forming_bar_excluded?: boolean;
   as_of: string;
   fingerprint: string;
   latest: LatestOhlcv;
@@ -259,6 +276,7 @@ export interface IndicatorSeriesResponse {
   exchange: string | null;
   interval: string;
   instrument?: Instrument | null;
+  price_metadata?: PriceMetadata | null;
   source: string;
   is_adjusted: boolean;
   is_stale: boolean;
@@ -694,6 +712,7 @@ export interface TechnicalSummaryResponse {
   exchange: string | null;
   interval: string;
   instrument?: Instrument | null;
+  price_metadata?: PriceMetadata | null;
   source: string;
   is_adjusted: boolean;
   is_stale: boolean;
@@ -743,6 +762,10 @@ export interface AnalyticsProvenance {
   indicator_total: number;
   indicator_unavailable: number;
   technical_rating_cache_hit: boolean;
+  history_truncated?: boolean;
+  history_pages?: number | null;
+  forming_bar_excluded?: boolean;
+  price_metadata?: PriceMetadata | null;
 }
 
 export interface AnalyticsSnapshotResponse {
@@ -755,6 +778,9 @@ export interface AnalyticsSnapshotResponse {
   source: string;
   is_adjusted: boolean;
   fingerprint: string;
+  price_metadata?: PriceMetadata | null;
+  history_truncated?: boolean;
+  history_pages?: number | null;
   analysis: AnalysisResponse;
   indicator_series: IndicatorSeriesResponse;
   technical_ratings: TechnicalSummaryResponse;

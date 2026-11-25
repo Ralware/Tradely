@@ -12,8 +12,12 @@ export function formatNumber(value: number | null | undefined, maximumFractionDi
   }).format(value);
 }
 
-export function formatPrice(value: number | null | undefined, currency?: string | null): string {
-  const formatted = formatNumber(value, 2);
+export function formatPrice(
+  value: number | null | undefined,
+  currency?: string | null,
+  maximumFractionDigits = 2,
+): string {
+  const formatted = formatNumber(value, maximumFractionDigits);
   if (formatted === '—' || !currency) {
     return formatted;
   }
@@ -54,7 +58,13 @@ export function formatSignedFixed(value: number | null | undefined, digits = 2):
 }
 
 /** Decimal places for an absolute price change, not for a quoted price. */
-export function changeDigits(value: number | null | undefined): number {
+export function changeDigits(
+  value: number | null | undefined,
+  pricePrecision?: number | null,
+): number {
+  if (typeof pricePrecision === 'number' && Number.isFinite(pricePrecision)) {
+    return Math.max(0, Math.min(12, Math.trunc(pricePrecision)));
+  }
   if (value === null || value === undefined || Number.isNaN(value)) {
     return 2;
   }

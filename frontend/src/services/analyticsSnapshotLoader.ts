@@ -2,6 +2,7 @@ import { apiRequest } from './api';
 import { snapshotDatabase } from './snapshotDatabase';
 import { snapshotStore } from './snapshotStore';
 import type { PreparedSnapshot } from './snapshotStore';
+import { isTimestampFresh } from '../utils/freshness';
 
 export function isCompleteSnapshot(value: PreparedSnapshot | undefined): value is PreparedSnapshot {
   if (!value || value.schema_version !== 1 || !value.fingerprint) return false;
@@ -51,8 +52,21 @@ const defaultDependencies: SnapshotLoadDependencies = {
   },
 };
 
-function isFresh(snapshot: PreparedSnapshot): boolean {
-  return snapshot.analysis?.is_stale !== true && snapshot.provenance?.data_freshness !== 'stale';
+export function isSnapshotFresh(
+  snapshot: PreparedSnapshot,
+  now: Date = new Date(),
+): boolean {
+  if (!snapshot || snapshot.analysis?.is_stale === true) return false;
+  if (snapshot.provenance?.data_freshness === 'stale') return false;
+  const interval = String(snapshot.interval ?? snapshot.analysis?.interval ?? '1d');
+  const market = String(snapshot.analysis?.market ?? snapshot.market ?? '');
+  // The candle timestamp is authoritative; a snapshot generated hours ago for
+  // an intraday timeframe must not be reused just because its flags said fresh.
+  const latest =
+    snapshot.provenance?.latest_candle_timestamp
+    ?? snapshot.analysis?.as_of
+    ?? snapshot.generated_at;
+  return isTimestampFresh(latest, market, interval, now);
 }
 
 export async function loadAnalyticsSnapshot(
@@ -74,7 +88,7 @@ export async function loadAnalyticsSnapshot(
   }
   if (isCompleteSnapshot(local)) {
     options.onCached?.(local);
-    if (isFresh(local)) return local;
+    if (isSnapshotFresh(local)) return local;
   }
   if (options.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
 

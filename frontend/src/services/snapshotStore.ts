@@ -29,6 +29,15 @@ function notify(id: string, interval: string): void {
   listeners.get(key(id, interval))?.forEach((listener) => listener());
 }
 
+function snapshotTime(snapshot: PreparedSnapshot | undefined): number {
+  if (!snapshot) return Number.NaN;
+  const value =
+    snapshot.provenance?.latest_candle_timestamp
+    ?? snapshot.analysis?.as_of
+    ?? snapshot.generated_at;
+  return typeof value === 'string' ? Date.parse(value) : Number.NaN;
+}
+
 export const snapshotStore = {
   getSnapshot(instrumentId: string, interval: string): PreparedSnapshot | undefined {
     return snapshots.get(key(instrumentId, interval));
@@ -37,9 +46,21 @@ export const snapshotStore = {
     return snapshots.get(key(instrumentId, interval))?.strategy_variants?.[`${directionMode}:${positionSide ?? 'NONE'}`];
   },
   setSnapshot(instrumentId: string, interval: string, snapshot: PreparedSnapshot): void {
-    snapshots.set(key(instrumentId, interval), snapshot);
-    const previous = manifests.get(key(instrumentId, interval));
-    manifests.set(key(instrumentId, interval), {
+    const itemKey = key(instrumentId, interval);
+    const existing = snapshots.get(itemKey);
+    // A late/queued response must never roll the chart back to older candles.
+    const incomingTime = snapshotTime(snapshot);
+    const existingTime = snapshotTime(existing);
+    if (
+      Number.isFinite(incomingTime)
+      && Number.isFinite(existingTime)
+      && incomingTime < existingTime
+    ) {
+      return;
+    }
+    snapshots.set(itemKey, snapshot);
+    const previous = manifests.get(itemKey);
+    manifests.set(itemKey, {
       ...previous, instrument_id: instrumentId, interval, status: 'READY',
       snapshot_id: snapshot.snapshot_id, fingerprint: snapshot.fingerprint,
       generated_at: snapshot.generated_at,

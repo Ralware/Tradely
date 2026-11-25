@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 from app.core.database import Database
+from app.services.freshness import is_candle_stale
 from app.services.indicators import compute_indicators
 from app.services.strategy import STRATEGY_VERSION, evaluate_trend_breakout
 from app.services.tv_technical_rating import (
@@ -65,16 +66,7 @@ def _records(frame: pd.DataFrame) -> list[dict[str, Any]]:
 
 
 def _stale(frame: pd.DataFrame, market: str, interval: str) -> bool:
-    if frame.empty:
-        return True
-    age = pd.Timestamp.now(tz="UTC") - pd.Timestamp(frame.index[-1])
-    if interval == "1wk":
-        threshold = pd.Timedelta(days=14)
-    elif interval == "1mo":
-        threshold = pd.Timedelta(days=62)
-    else:
-        threshold = pd.Timedelta(hours=48 if market == "crypto" else 120)
-    return age > threshold
+    return is_candle_stale(frame, market, interval)
 
 
 class AnalyticsPrecompute:
@@ -263,6 +255,13 @@ class AnalyticsPrecompute:
         instrument = self.db.instrument_for_id(instrument_id)
         if not instrument:
             raise ValueError(f"Unknown instrument: {instrument_id}")
+        price_metadata: dict[str, Any] = {}
+        try:
+            price_metadata = self.market_service.price_metadata(
+                instrument["symbol"], instrument.get("exchange")
+            )
+        except Exception:  # metadata is optional; never block analytics
+            logger.debug("[MARKET] price metadata unavailable for %s", instrument_id)
         days = HISTORY_DAYS[interval]
         frame, source = self.market_service.candles(
             instrument["symbol"], market=instrument["market"], exchange=instrument.get("exchange"),
@@ -300,6 +299,13 @@ class AnalyticsPrecompute:
             warnings.append("Latest candle is stale for this market; actionable signal output is suppressed.")
         if instrument["market"] == "india" and not frame.attrs["is_adjusted"]:
             warnings.append("Indian equity candles are unadjusted. Corporate actions can distort long-term indicators; do not treat strategy output as actionable.")
+        history_truncated = bool(frame.attrs.get("history_truncated", False))
+        history_pages = frame.attrs.get("history_pages")
+        last_bar_confirmed = frame.attrs.get("last_bar_confirmed")
+        forming_bar_excluded = bool(frame.attrs.get("forming_bar_excluded", False))
+        if history_truncated:
+            warnings.append("The provider returned the maximum requested bar count; older history may exist.")
+        instrument_view = {**instrument, **price_metadata}
         strategies: dict[str, Any] = {}
         for direction in DIRECTIONS:
             for position in POSITIONS:
@@ -316,24 +322,40 @@ class AnalyticsPrecompute:
         payload = {
             "schema_version": SCHEMA_VERSION,
             "symbol": instrument["symbol"], "market": instrument["market"],
-            "exchange": instrument.get("exchange"), "instrument": instrument,
+            "exchange": instrument.get("exchange"), "instrument": instrument_view,
+            "price_metadata": price_metadata,
             "interval": interval, "source": source, "is_adjusted": frame.attrs["is_adjusted"],
             "fingerprint": fingerprint, "generated_at": now,
+            "history_truncated": history_truncated, "history_pages": history_pages,
+            "last_candle_confirmed": last_bar_confirmed,
+            "forming_bar_excluded": forming_bar_excluded,
             "analysis": {"symbol": instrument["symbol"], "market": instrument["market"],
-                "exchange": instrument.get("exchange"), "instrument": instrument, "interval": interval,
+                "exchange": instrument.get("exchange"), "instrument": instrument_view, "interval": interval,
                 "source": source, "is_adjusted": frame.attrs["is_adjusted"], "is_stale": stale,
+                "history_truncated": history_truncated, "history_pages": history_pages,
+                "last_candle_confirmed": last_bar_confirmed,
+                "forming_bar_excluded": forming_bar_excluded,
+                "price_metadata": price_metadata,
                 "as_of": frame.index[-1].isoformat(), "fingerprint": fingerprint,
                 "latest": {key: float(latest[key]) for key in ("open","high","low","close","volume")},
                 "indicators": values, "candles": _records(frame), "warnings": warnings},
             "indicator_series": {"interval": interval, "source": source, "fingerprint": fingerprint,
+                "instrument": instrument_view, "price_metadata": price_metadata,
                 "count": len(indicators), "series": _records(indicators)},
             "technical_ratings": {"source": source, "interval": interval,
+                "instrument": instrument_view, "price_metadata": price_metadata,
                 "is_adjusted": frame.attrs["is_adjusted"], "is_stale": stale, "as_of": frame.index[-1].isoformat(),
                 "fingerprint": fingerprint, **technical},
             "strategy_variants": strategies,
             "provenance": {"instrument_id": instrument_id, "source": source, "interval": interval,
                 "is_adjusted": frame.attrs["is_adjusted"], "ohlcv_fingerprint": fingerprint,
                 "candle_count": len(frame), "latest_candle_timestamp": frame.index[-1].isoformat(),
+                "last_candle_confirmed": last_bar_confirmed,
+                "candle_status": ("confirmed" if last_bar_confirmed is True
+                                  else "unconfirmed" if last_bar_confirmed is False else "unknown"),
+                "forming_bar_excluded": forming_bar_excluded,
+                "history_truncated": history_truncated, "history_pages": history_pages,
+                "price_metadata": price_metadata,
                 "snapshot_generated_at": now, "data_freshness": "stale" if stale else "fresh"},
         }
         blob, checksum = _encode(payload)

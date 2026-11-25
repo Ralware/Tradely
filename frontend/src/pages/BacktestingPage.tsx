@@ -524,7 +524,7 @@ export function BacktestingPage() {
               <TimeSeriesChart
                 points={equityPoints}
                 height={240}
-                color="#26a69a"
+                color="#24a889"
                 baseline={result.initial_capital}
                 valueFormatter={(value) => formatNumber(value, 2)}
                 ariaLabel="Backtest Equity Curve"
@@ -534,7 +534,7 @@ export function BacktestingPage() {
               <TimeSeriesChart
                 points={drawdownPoints}
                 height={240}
-                color="#ef5350"
+                color="#e45b63"
                 baseline={0}
                 valueFormatter={(value) => `${formatNumber(value, 2)}%`}
                 ariaLabel="Backtest Drawdown Curve"

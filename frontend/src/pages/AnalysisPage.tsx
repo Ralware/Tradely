@@ -47,7 +47,7 @@ export function AnalysisPage() {
             onClick={() => setDrawerOpen(true)}
             className="tv-analysis-watchlist-toggle inline-flex items-center gap-1.5 rounded-md border border-terminal-border bg-terminal-panel px-2.5 py-1.5 text-2xs font-medium text-terminal-muted transition-colors hover:text-terminal-text"
           >
-            <Icon name="list" size={13} />
+            <Icon name="star" size={13} />
             <span>Watchlist</span>
           </button>
         </div>

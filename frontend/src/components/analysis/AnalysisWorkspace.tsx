@@ -8,6 +8,7 @@ import { isCompleteSnapshot, loadAnalyticsSnapshot } from '../../services/analyt
 import { portfolioService } from '../../services/portfolioService';
 import type { DirectionMode, Instrument } from '../../types/api';
 import { changeDigits, cn, formatDate, formatNumber, formatPercent, formatSignedFixed, toneForNumber } from '../../utils/format';
+import { pricePrecisionFor, minMoveFromMetadata } from '../../utils/precision';
 import { defaultDaysFor, intervalLabel, isIntradayInterval } from '../../utils/timeframes';
 import { instrumentPath } from '../../utils/navigation';
 import { Badge } from '../common/Badge';
@@ -53,13 +54,6 @@ function ToggleChip({
       {children}
     </button>
   );
-}
-
-function priceDigits(value: number | null): number {
-  if (value === null) return 2;
-  if (value >= 1000) return 2;
-  if (value >= 1) return 4;
-  return 6;
 }
 
 function marketLabel(market: string, assetType: string | undefined): string {
@@ -172,6 +166,14 @@ export function AnalysisWorkspace({
   }, [instrumentId, interval, loadAttempt]);
 
   const last = quote?.last ?? data?.latest.close ?? null;
+  const priceMetadata =
+    data?.price_metadata
+    ?? technicals?.price_metadata
+    ?? indicatorSeries?.price_metadata
+    ?? selected.instrument
+    ?? null;
+  const pricePrecision = pricePrecisionFor(last, priceMetadata);
+  const priceMinMove = minMoveFromMetadata(priceMetadata);
   const previousClose =
     data && data.candles.length > 1 ? data.candles[data.candles.length - 2].close : null;
   const change =
@@ -293,7 +295,7 @@ export function AnalysisWorkspace({
             </div>
           ) : null}
 
-      <div className="tv-instrument-heading flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+        <div className="tv-instrument-heading flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <h1 className="text-lg font-semibold leading-none tracking-tight text-terminal-text">
@@ -310,7 +312,7 @@ export function AnalysisWorkspace({
               </div>
               <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
                 <span className="num text-xl font-semibold leading-none text-terminal-text">
-                  {formatNumber(last, priceDigits(last))}
+                  {formatNumber(last, pricePrecision)}
                   <span className="ml-1 text-2xs font-normal text-terminal-muted">{currency}</span>
                 </span>
                 <span
@@ -323,7 +325,7 @@ export function AnalysisWorkspace({
                         : 'text-terminal-muted',
                   )}
                 >
-                  {change === null ? '—' : formatSignedFixed(change, changeDigits(change))}
+                  {change === null ? '—' : formatSignedFixed(change, changeDigits(change, pricePrecision))}
                   {'  '}
                   {formatPercent(changePct, 2, true)}
                 </span>
@@ -448,6 +450,9 @@ export function AnalysisWorkspace({
                 showRsi={showRsi}
                 showMacd={showMacd}
                 timeframe={displayedInterval}
+                symbol={symbol}
+                pricePrecision={pricePrecision}
+                priceMinMove={priceMinMove}
                 intraday={intraday}
                 height={360}
               />
@@ -505,7 +510,7 @@ export function AnalysisWorkspace({
                 title="Recent Candles"
                 subtitle={`Last ${Math.min(30, data.candles.length)} Bars · ${intervalLabel(displayedInterval)}`}
               >
-                <CandleTable candles={data.candles} limit={30} />
+                <CandleTable candles={data.candles} limit={30} pricePrecision={pricePrecision} />
               </Card>
             </div>
           ) : null}

@@ -4,7 +4,7 @@ import asyncio
 import json
 import re
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 import pandas as pd
@@ -31,6 +31,7 @@ from app.instruments.resolver import (
 )
 from app.providers.base import ProviderError
 from app.services.backtest import run_trend_breakout_backtest
+from app.services.freshness import is_candle_stale
 from app.services.indicators import compute_indicators
 from app.services.portfolio import build_ledger, detail_view, position_view, summary_view
 from app.services.strategy import STRATEGY_VERSION, evaluate_trend_breakout, position_size
@@ -63,18 +64,23 @@ def _to_json_records(
 
 
 def _is_stale(frame: pd.DataFrame, market: str, interval: str = "1d") -> bool:
-    if frame.empty:
-        return True
-    age = pd.Timestamp.now(tz="UTC") - frame.index[-1]
-    # Daily EOD candle timestamps are often session-date labels, not close timestamps.
-    if interval == "1wk":
-        threshold = timedelta(days=14)
-    elif interval == "1mo":
-        threshold = timedelta(days=62)
-    else:
-        threshold_hours = 48 if market == "crypto" else 120
-        threshold = timedelta(hours=threshold_hours)
-    return age > threshold
+    return is_candle_stale(frame, market, interval)
+
+
+def _attach_price_metadata(
+    request: Request, instrument: dict[str, Any]
+) -> dict[str, Any]:
+    """Add provider display precision without altering candle prices."""
+    metadata: dict[str, Any] = {}
+    try:
+        metadata = request.app.state.market_service.price_metadata(
+            str(instrument.get("symbol") or ""), instrument.get("exchange")
+        )
+    except Exception:  # metadata must never block market data
+        metadata = {}
+    if metadata:
+        instrument.update(metadata)
+    return metadata
 
 
 def _scan_identity(item: dict[str, Any]) -> dict[str, Any]:
@@ -291,6 +297,7 @@ def candles(
     symbol = instrument["symbol"]
     market = instrument["market"]
     exchange = instrument["exchange"]
+    price_metadata = _attach_price_metadata(request, instrument)
     try:
         frame, source = request.app.state.market_service.candles(
             symbol, market=market, exchange=exchange, interval=interval, days=days, provider=provider
@@ -299,16 +306,24 @@ def candles(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     latest = frame.index[-1].to_pydatetime()
     stale = _is_stale(frame, market, interval)
+    history_truncated = bool(frame.attrs.get("history_truncated", False))
+    warnings: list[str] = []
+    if history_truncated:
+        warnings.append(
+            "The provider returned the maximum requested bar count; older history may exist."
+        )
     return {
         "symbol": symbol, "market": market, "exchange": exchange, "interval": interval,
-        "instrument": instrument,
+        "instrument": instrument, "price_metadata": price_metadata,
         "source": source, "is_adjusted": bool(frame.attrs.get("is_adjusted", False)),
         "freshness": "stale" if stale else frame.attrs.get("freshness", "provider-dependent"),
-        "is_stale": stale, "history_truncated": bool(frame.attrs.get("history_truncated", False)),
+        "is_stale": stale, "history_truncated": history_truncated,
         "history_pages": frame.attrs.get("history_pages"),
+        "last_candle_confirmed": frame.attrs.get("last_bar_confirmed"),
+        "forming_bar_excluded": bool(frame.attrs.get("forming_bar_excluded", False)),
         "last_candle_at": latest.isoformat(), "count": len(frame),
         "candles": _to_json_records(frame),
-        "warnings": [],
+        "warnings": warnings,
     }
 
 
@@ -359,6 +374,7 @@ def analyze(
     symbol = instrument["symbol"]
     market = instrument["market"]
     exchange = instrument["exchange"]
+    price_metadata = _attach_price_metadata(request, instrument)
     try:
         frame, source = request.app.state.market_service.candles(
             symbol, market=market, exchange=exchange, interval=interval, days=days, provider=provider
@@ -387,7 +403,10 @@ def analyze(
     )
     adjusted = bool(frame.attrs.get("is_adjusted", False))
     stale = _is_stale(frame, market, interval)
+    history_truncated = bool(frame.attrs.get("history_truncated", False))
     warnings = []
+    if history_truncated:
+        warnings.append("The provider returned the maximum requested bar count; older history may exist.")
     if stale:
         warnings.append("Latest candle is stale for this market; actionable signal output is suppressed.")
         signal.state = "STALE_DATA"
@@ -408,10 +427,12 @@ def analyze(
     request.app.state.db.save_signal(signal_payload)
     return {
         "symbol": symbol, "market": market, "exchange": exchange, "interval": interval,
-        "instrument": instrument,
+        "instrument": instrument, "price_metadata": price_metadata,
         "source": source, "is_adjusted": adjusted, "is_stale": stale,
-        "history_truncated": bool(frame.attrs.get("history_truncated", False)),
+        "history_truncated": history_truncated,
         "history_pages": frame.attrs.get("history_pages"),
+        "last_candle_confirmed": frame.attrs.get("last_bar_confirmed"),
+        "forming_bar_excluded": bool(frame.attrs.get("forming_bar_excluded", False)),
         "as_of": frame.index[-1].isoformat(),
         "fingerprint": ohlcv_fingerprint(frame),
         "latest": {key: float(latest[key]) for key in ("open", "high", "low", "close", "volume")},
@@ -613,6 +634,7 @@ def analytics_snapshot(
     symbol = instrument["symbol"]
     market = instrument["market"]
     exchange = instrument["exchange"]
+    price_metadata = _attach_price_metadata(request, instrument)
     try:
         frame, source = request.app.state.market_service.candles(
             symbol, market=market, exchange=exchange, interval=interval,
@@ -641,7 +663,10 @@ def analytics_snapshot(
     )
     adjusted = bool(frame.attrs.get("is_adjusted", False))
     stale = _is_stale(frame, market, interval)
+    history_truncated = bool(frame.attrs.get("history_truncated", False))
     warnings: list[str] = []
+    if history_truncated:
+        warnings.append("The provider returned the maximum requested bar count; older history may exist.")
     if stale:
         warnings.append("Latest candle is stale for this market; actionable signal output is suppressed.")
         signal.state = "STALE_DATA"
@@ -667,7 +692,8 @@ def analytics_snapshot(
     technical_payload = {
         **technical_payload,
         "symbol": symbol, "market": market, "exchange": exchange,
-        "instrument": instrument, "interval": interval, "source": source,
+        "instrument": instrument, "price_metadata": price_metadata,
+        "interval": interval, "source": source,
         "is_adjusted": adjusted, "is_stale": stale,
         "as_of": frame.index[-1].isoformat(), "fingerprint": fingerprint,
     }
@@ -676,10 +702,13 @@ def analytics_snapshot(
         request.app.state.db.save_signal(signal_payload)
     analysis_payload = {
         "symbol": symbol, "market": market, "exchange": exchange,
-        "interval": interval, "instrument": instrument, "source": source,
+        "interval": interval, "instrument": instrument,
+        "price_metadata": price_metadata, "source": source,
         "is_adjusted": adjusted, "is_stale": stale,
-        "history_truncated": bool(frame.attrs.get("history_truncated", False)),
+        "history_truncated": history_truncated,
         "history_pages": frame.attrs.get("history_pages"),
+        "last_candle_confirmed": frame.attrs.get("last_bar_confirmed"),
+        "forming_bar_excluded": bool(frame.attrs.get("forming_bar_excluded", False)),
         "as_of": frame.index[-1].isoformat(), "fingerprint": fingerprint,
         "latest": {key: float(latest[key]) for key in ("open", "high", "low", "close", "volume")},
         "indicators": values, "strategy": signal_payload,
@@ -687,7 +716,8 @@ def analytics_snapshot(
     }
     indicator_payload = {
         "symbol": symbol, "market": market, "exchange": exchange,
-        "interval": interval, "instrument": instrument, "source": source,
+        "interval": interval, "instrument": instrument,
+        "price_metadata": price_metadata, "source": source,
         "is_adjusted": adjusted, "is_stale": stale,
         "as_of": frame.index[-1].isoformat(), "fingerprint": fingerprint,
         "count": len(indicators), "series": _to_json_records(indicators),
@@ -718,6 +748,10 @@ def analytics_snapshot(
         "technical_rating_version": technical_payload.get("source_version"),
         "technical_rating_dependency": technical_payload.get("dependency"),
         "data_freshness": "stale" if stale else "fresh",
+        "history_truncated": history_truncated,
+        "history_pages": frame.attrs.get("history_pages"),
+        "forming_bar_excluded": bool(frame.attrs.get("forming_bar_excluded", False)),
+        "price_metadata": price_metadata,
         "indicator_available": technical_payload["summary"]["overall"]["available"],
         "indicator_total": technical_payload["summary"]["overall"]["total"],
         "indicator_unavailable": technical_payload["summary"]["overall"]["unavailable"],
@@ -728,7 +762,9 @@ def analytics_snapshot(
         "generated_at": generated_at,
         "symbol": symbol, "market": market, "exchange": exchange,
         "interval": interval, "source": source, "is_adjusted": adjusted,
-        "fingerprint": fingerprint,
+        "fingerprint": fingerprint, "price_metadata": price_metadata,
+        "history_truncated": history_truncated,
+        "history_pages": frame.attrs.get("history_pages"),
         "analysis": analysis_payload,
         "indicator_series": indicator_payload,
         "technical_ratings": technical_payload,

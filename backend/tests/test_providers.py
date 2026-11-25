@@ -62,7 +62,7 @@ def test_tradingview_candle_adapter_uses_exchange_symbol_and_split_adjustment(mo
     assert frame.attrs["source"] == TRADINGVIEW_PROVIDER
 
 
-def test_tradingview_candle_adapter_requests_maximum_history_when_no_range(monkeypatch):
+def test_tradingview_candle_adapter_bounds_history_request_when_no_range(monkeypatch):
     captured = {}
 
     def fake_get(url, params=None, timeout=None):
@@ -70,14 +70,78 @@ def test_tradingview_candle_adapter_requests_maximum_history_when_no_range(monke
         return FakeResponse({"candles": [candle_row("2026-11-10T00:00:00Z")]})
 
     monkeypatch.setattr("app.providers.tradingview.httpx.get", fake_get)
-    frame = TradingViewProvider(Settings(_env_file=None)).fetch_candles(
+    frame = TradingViewProvider(
+        Settings(_env_file=None, tradingview_history_max_bars=20_000)
+    ).fetch_candles(
         "AAPL", market="global", exchange="NASDAQ", interval="1d",
         start=None, end=None,
     )
 
-    assert captured["params"]["count"] == 1_000_000
+    # The bridge pages in 5,000-bar batches; an unbounded count would run into
+    # the request timeout, so the configured ceiling is always sent.
+    assert captured["params"]["count"] == 20_000
+    assert captured["params"]["maxCount"] == 20_000
     assert "from" not in captured["params"]
     assert "to" not in captured["params"]
+    assert len(frame) == 1
+    assert frame.attrs["history_truncated"] is False
+
+
+def test_tradingview_reports_truncation_when_provider_returns_a_full_batch(monkeypatch):
+    rows = [
+        candle_row(pd.Timestamp("2026-01-01", tz="UTC") + pd.Timedelta(days=offset))
+        for offset in range(5)
+    ]
+    monkeypatch.setattr(
+        "app.providers.tradingview.httpx.get",
+        lambda *a, **k: FakeResponse({"candles": rows}),
+    )
+    frame = TradingViewProvider(
+        Settings(_env_file=None, tradingview_history_max_bars=5)
+    ).fetch_candles(
+        "AAPL", market="global", exchange="NASDAQ", interval="1d",
+        start=None, end=None,
+    )
+    assert frame.attrs["history_truncated"] is True
+    assert frame.attrs["provider_rows"] == 5
+    assert frame.attrs["requested_bars"] == 5
+
+
+def test_price_metadata_translates_pricescale_to_display_precision():
+    from app.providers.tradingview import price_metadata_from_symbol_info
+
+    metadata = price_metadata_from_symbol_info(
+        {"pricescale": 10000, "minmov": 5, "currency_code": "usd"}
+    )
+    assert metadata["price_precision"] == 4
+    assert metadata["min_move"] == pytest.approx(0.0005)
+    assert metadata["price_currency"] == "USD"
+    assert price_metadata_from_symbol_info(None) == {}
+    assert price_metadata_from_symbol_info({"pricescale": 0}) == {}
+
+
+def test_tradingview_retries_rate_limited_requests(monkeypatch):
+    calls = []
+
+    def fake_get(url, params=None, timeout=None):
+        calls.append(1)
+        if len(calls) == 1:
+            return FakeResponse({"error": "rate limited"}, status_code=429)
+        return FakeResponse({"candles": [candle_row("2026-11-10T00:00:00Z")]})
+
+    monkeypatch.setattr("app.providers.tradingview.httpx.get", fake_get)
+    monkeypatch.setattr("app.providers.tradingview.time.sleep", lambda *_: None)
+    frame = TradingViewProvider(
+        Settings(
+            _env_file=None,
+            tradingview_request_retries=2,
+            tradingview_retry_backoff_seconds=0,
+        )
+    ).fetch_candles(
+        "AAPL", market="global", exchange="NASDAQ", interval="1d",
+        start=None, end=None,
+    )
+    assert len(calls) == 2
     assert len(frame) == 1
 
 
@@ -260,3 +324,74 @@ def test_crypto_finality_uses_continuous_utc_sessions(interval, start, before, a
     frame = pd.DataFrame({"close": [100.]}, index=[pd.Timestamp(start, tz="UTC")])
     assert _drop_incomplete_final_bar(frame, interval, "crypto", now=pd.Timestamp(before)).empty
     assert len(_drop_incomplete_final_bar(frame, interval, "crypto", now=pd.Timestamp(after))) == 1
+
+
+def test_candle_cache_refreshes_only_the_tail_after_the_refresh_window():
+    cache = _CandleCache()
+    base = pd.DataFrame(
+        {
+            "open": [1.0, 2.0],
+            "high": [1.0, 2.0],
+            "low": [1.0, 2.0],
+            "close": [1.0, 2.0],
+            "volume": [1.0, 1.0],
+        },
+        index=pd.to_datetime(["2026-01-01", "2026-01-02"], utc=True),
+    )
+    load_calls = []
+    refresh_calls = []
+
+    def loader():
+        load_calls.append(1)
+        return base, "source"
+
+    def refresher(cached):
+        refresh_calls.append(cached.index[-1])
+        tail = pd.DataFrame(
+            {
+                "open": [3.0],
+                "high": [3.0],
+                "low": [3.0],
+                "close": [3.0],
+                "volume": [1.0],
+            },
+            index=pd.to_datetime(["2026-01-03"], utc=True),
+        )
+        return tail, "source"
+
+    key = ("symbol", "1d")
+    first, _ = cache.get_or_load(key, 300, loader, refresh_after_seconds=0, refresher=refresher)
+    assert len(load_calls) == 1
+    assert len(first) == 2
+
+    refreshed, _ = cache.get_or_load(
+        key, 300, loader, refresh_after_seconds=0, refresher=refresher
+    )
+    # History is reused; only the incremental tail is fetched.
+    assert len(load_calls) == 1
+    assert len(refresh_calls) == 1
+    assert len(refreshed) == 3
+    assert refreshed.index.is_monotonic_increasing
+    assert not refreshed.index.has_duplicates
+
+
+def test_candle_cache_keeps_last_good_history_when_refresh_fails():
+    cache = _CandleCache()
+    base = pd.DataFrame(
+        {"open": [1.0], "high": [1.0], "low": [1.0], "close": [1.0], "volume": [1.0]},
+        index=pd.to_datetime(["2026-01-01"], utc=True),
+    )
+    cache.get_or_load(("symbol", "1d"), 300, lambda: (base, "source"))
+
+    def failing_refresher(cached):
+        raise RuntimeError("provider down")
+
+    frame, source = cache.get_or_load(
+        ("symbol", "1d"),
+        300,
+        lambda: (base, "source"),
+        refresh_after_seconds=0,
+        refresher=failing_refresher,
+    )
+    assert len(frame) == 1
+    assert source == "source"

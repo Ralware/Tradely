@@ -212,9 +212,9 @@ export function WatchlistPage() {
       {/* Full-width unified Watchlist table */}
       <div className="panel-surface w-full overflow-hidden">
         {watchlist.loading && !watchlist.data ? (
-          <LoadingPanel label="Loading Watchlist" rows={8} />
+          <LoadingPanel className="p-3" label="Loading Watchlist" rows={8} />
         ) : watchlist.error ? (
-          <ErrorState message={watchlist.error} onRetry={watchlist.reload} />
+          <ErrorState className="m-3" message={watchlist.error} onRetry={watchlist.reload} />
         ) : (
           <WatchlistTable
             items={watchlistItems}

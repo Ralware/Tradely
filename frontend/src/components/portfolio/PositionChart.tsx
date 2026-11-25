@@ -66,8 +66,8 @@ export function PositionChart({
     const chart: IChartApi = createChart(element, {
       autoSize: true,
       layout: {
-        background: { type: ColorType.Solid, color: '#000000' },
-        textColor: '#8b909a',
+        background: { type: ColorType.Solid, color: '#0d0f13' },
+        textColor: '#8b919b',
         fontSize: 11,
         fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
         attributionLogo: false,
@@ -85,17 +85,17 @@ export function PositionChart({
       },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: '#3a3f4a', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#000000' },
-        horzLine: { color: '#3a3f4a', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#000000' },
+        vertLine: { color: '#3a3f4a', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#0d0f13' },
+        horzLine: { color: '#3a3f4a', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#0d0f13' },
       },
     });
 
     const candleSeries: ISeriesApi<'Candlestick'> = chart.addSeries(CandlestickSeries, {
-      upColor: '#26a69a',
-      downColor: '#ef5350',
+      upColor: '#24a889',
+      downColor: '#e45b63',
       borderVisible: false,
-      wickUpColor: '#26a69a',
-      wickDownColor: '#ef5350',
+      wickUpColor: '#24a889',
+      wickDownColor: '#e45b63',
       priceLineVisible: false,
     });
 
@@ -159,7 +159,7 @@ export function PositionChart({
       markers.push({
         time,
         position: positionSide === 'SHORT' ? 'aboveBar' : 'belowBar',
-        color: positionSide === 'SHORT' ? '#ef5350' : '#26a69a',
+        color: positionSide === 'SHORT' ? '#e45b63' : '#24a889',
         shape: positionSide === 'SHORT' ? 'arrowDown' : 'arrowUp',
         text: `${positionSide === 'SHORT' ? 'SS' : 'B'} ${purchase.quantity}`,
       });
@@ -172,7 +172,7 @@ export function PositionChart({
       markers.push({
         time,
         position: positionSide === 'SHORT' ? 'belowBar' : 'aboveBar',
-        color: positionSide === 'SHORT' ? '#26a69a' : '#ef5350',
+        color: positionSide === 'SHORT' ? '#24a889' : '#e45b63',
         shape: positionSide === 'SHORT' ? 'arrowUp' : 'arrowDown',
         text: `${positionSide === 'SHORT' ? 'C' : 'S'} ${sale.quantity}`,
       });

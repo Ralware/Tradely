@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import calendar
+import logging
+import math
+import time
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -55,14 +58,45 @@ INTERVAL_SECONDS: dict[str, int] = {
     "1mo": 2592000,
 }
 
+logger = logging.getLogger(__name__)
+
 _FRESHNESS_NOTE = (
     "TradingView is an unofficial community API; available delay depends on the "
     "exchange and account plan (anonymous NSE data is typically 15 minutes delayed)."
 )
 
-# The bridge/library pages deep history until TradingView stops returning bars.
-# This is a request ceiling, not a Tradely display cap.
+# The bridge/library pages deep history in 5,000-bar batches. This ceiling keeps
+# a single request inside the bridge timeout while covering years of daily bars
+# and weeks of minute bars. Callers can lower it through settings.
 MAX_HISTORY_REQUEST = 1_000_000
+_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+
+
+def price_metadata_from_symbol_info(payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Translate TradingView ``pricescale``/``minmov`` into display precision.
+
+    Values are presentation metadata only; candle prices are never rounded.
+    """
+    if not isinstance(payload, dict):
+        return {}
+    try:
+        pricescale = int(payload.get("pricescale") or 0)
+        minmov = int(payload.get("minmov") or 1)
+    except (TypeError, ValueError):
+        return {}
+    if pricescale < 1 or minmov < 1:
+        return {}
+    precision = max(0, len(str(pricescale)) - 1)
+    metadata: dict[str, Any] = {
+        "price_scale": pricescale,
+        "min_move": minmov / pricescale,
+        "price_precision": precision,
+        "min_move_units": minmov,
+    }
+    currency = payload.get("currency_code") or payload.get("currency")
+    if currency:
+        metadata["price_currency"] = str(currency).strip().upper()
+    return metadata
 
 
 def _iso_from_unix(value: Any) -> str | None:
@@ -88,40 +122,74 @@ class TradingViewBridge:
         *,
         timeout: float,
     ) -> dict[str, Any]:
-        try:
-            response = httpx.get(
-                f"{self.base_url}{path}",
-                params=params,
-                timeout=timeout,
-            )
-        except httpx.HTTPError as exc:
-            raise ProviderError(
-                "The TradingView bridge is unavailable at "
-                f"{self.base_url}. Start it with run.bat, run.sh, or "
-                f"`npm start` in tradingview-bridge. ({exc})"
-            ) from exc
-        if response.status_code >= 400:
-            detail = ""
+        attempts = max(1, int(self.settings.tradingview_request_retries))
+        backoff = max(0.0, float(self.settings.tradingview_retry_backoff_seconds))
+        last_error: Exception | None = None
+
+        for attempt in range(1, attempts + 1):
+            try:
+                response = httpx.get(
+                    f"{self.base_url}{path}",
+                    params=params,
+                    timeout=timeout,
+                )
+            except httpx.HTTPError as exc:
+                last_error = exc
+                if attempt >= attempts:
+                    break
+                delay = backoff * (2 ** (attempt - 1))
+                logger.warning(
+                    "[TV] %s request failed (%s); retrying in %.1fs (attempt %d/%d)",
+                    path, exc.__class__.__name__, delay, attempt, attempts,
+                )
+                if delay:
+                    time.sleep(delay)
+                continue
+
+            if response.status_code in _RETRYABLE_STATUS and attempt < attempts:
+                headers = getattr(response, "headers", {}) or {}
+                retry_after = headers.get("retry-after") if hasattr(headers, "get") else None
+                delay = backoff * (2 ** (attempt - 1))
+                try:
+                    delay = max(delay, float(retry_after))
+                except (TypeError, ValueError):
+                    pass
+                logger.warning(
+                    "[TV] %s returned HTTP %s; retrying in %.1fs (attempt %d/%d)",
+                    path, response.status_code, delay, attempt, attempts,
+                )
+                if delay:
+                    time.sleep(delay)
+                continue
+
+            if response.status_code >= 400:
+                detail = ""
+                try:
+                    payload = response.json()
+                    error = payload.get("error") if isinstance(payload, dict) else None
+                    if isinstance(error, dict):
+                        detail = str(error.get("message") or "")
+                    elif error:
+                        detail = str(error)
+                except ValueError:
+                    detail = (response.text or "")[:200]
+                raise ProviderError(
+                    f"TradingView bridge returned HTTP {response.status_code}"
+                    + (f": {detail}" if detail else "")
+                )
             try:
                 payload = response.json()
-                error = payload.get("error") if isinstance(payload, dict) else None
-                if isinstance(error, dict):
-                    detail = str(error.get("message") or "")
-                elif error:
-                    detail = str(error)
-            except ValueError:
-                detail = (response.text or "")[:200]
-            raise ProviderError(
-                f"TradingView bridge returned HTTP {response.status_code}"
-                + (f": {detail}" if detail else "")
-            )
-        try:
-            payload = response.json()
-        except ValueError as exc:
-            raise ProviderError("The TradingView bridge returned an unreadable response") from exc
-        if not isinstance(payload, dict):
-            raise ProviderError("The TradingView bridge returned an unexpected payload")
-        return payload
+            except ValueError as exc:
+                raise ProviderError("The TradingView bridge returned an unreadable response") from exc
+            if not isinstance(payload, dict):
+                raise ProviderError("The TradingView bridge returned an unexpected payload")
+            return payload
+
+        raise ProviderError(
+            "The TradingView bridge is unavailable at "
+            f"{self.base_url}. Start it with run.bat, run.sh, or "
+            f"`npm start` in tradingview-bridge. ({last_error})"
+        ) from last_error
 
     def health(self) -> dict[str, Any]:
         return self._request(
@@ -136,6 +204,8 @@ class TradingViewBridge:
         start: int | None = None,
         end: int | None = None,
         adjustment: str = "splits",
+        count: int | None = None,
+        max_count: int | None = None,
     ) -> list[dict[str, Any]]:
         params: dict[str, Any] = {
             "symbol": symbol,
@@ -147,9 +217,14 @@ class TradingViewBridge:
                 params["from"] = start
             if end is not None:
                 params["to"] = end
+            if max_count is not None:
+                params["maxCount"] = max_count
         else:
-            # The bridge/library pages until TradingView has no older bars.
-            params["count"] = MAX_HISTORY_REQUEST
+            # The bridge/library pages in batches until the requested count is
+            # satisfied or TradingView has no older bars.
+            params["count"] = count or max_count or MAX_HISTORY_REQUEST
+            if max_count is not None:
+                params["maxCount"] = max_count
         payload = self._request(
             "/candles",
             params,
@@ -202,23 +277,19 @@ class TradingViewBridge:
         return [item for item in results if isinstance(item, dict)]
 
 
-def _drop_incomplete_final_bar(
+def _final_bar_is_forming(
     frame: pd.DataFrame, interval: str, market: str, *, now: pd.Timestamp | None = None
-) -> pd.DataFrame:
-    """Never expose a still-forming bar to signals, quotes or backtests."""
+) -> bool:
+    """Whether the newest bar's interval has not completed yet."""
     if frame.empty:
-        return frame
+        return False
     now = pd.Timestamp.now(tz="UTC") if now is None else now
     last = frame.index[-1]
     seconds = INTERVAL_SECONDS.get(interval)
 
     if market == "crypto" and interval in ("1wk", "1mo"):
         end = last + (pd.DateOffset(weeks=1) if interval == "1wk" else pd.offsets.MonthBegin(1))
-        return frame.iloc[:-1] if now < end else frame
-
-    if market == "crypto" and interval in ("1wk", "1mo"):
-        end = last + (pd.DateOffset(weeks=1) if interval == "1wk" else pd.offsets.MonthBegin(1))
-        return frame.iloc[:-1] if now < end else frame
+        return now < end
 
     if interval == "1d":
         if market in {"india", "global"}:
@@ -226,13 +297,13 @@ def _drop_incomplete_final_bar(
             close_hour, close_minute = (15, 45) if market == "india" else (16, 5)
             last_local = last.tz_convert(zone)
             now_local = now.tz_convert(zone)
-            if last_local.date() == now_local.date() and (
+            return last_local.date() == now_local.date() and (
                 now_local.hour, now_local.minute
-            ) < (close_hour, close_minute):
-                frame = frame.iloc[:-1]
-        elif last + pd.Timedelta(days=1) > now:
-            frame = frame.iloc[:-1]
-    elif interval == "1wk":
+            ) < (close_hour, close_minute)
+        return last + pd.Timedelta(days=1) > now
+    if interval == "3d":
+        return last + pd.Timedelta(days=3) > now
+    if interval == "1wk":
         zone = ZoneInfo("Asia/Kolkata" if market == "india" else "America/New_York")
         last_local = last.tz_convert(zone)
         now_local = now.tz_convert(zone)
@@ -242,9 +313,8 @@ def _drop_incomplete_final_bar(
         week_complete = now_local.weekday() > 4 or (
             now_local.weekday() == 4 and (now_local.hour, now_local.minute) >= close_time
         )
-        if last_week == current_week and not week_complete:
-            frame = frame.iloc[:-1]
-    elif interval == "1mo":
+        return last_week == current_week and not week_complete
+    if interval == "1mo":
         zone = ZoneInfo("Asia/Kolkata" if market == "india" else "America/New_York")
         last_local = last.tz_convert(zone)
         now_local = now.tz_convert(zone)
@@ -253,12 +323,22 @@ def _drop_incomplete_final_bar(
         month_complete = now_local.day == month_end and (
             now_local.hour, now_local.minute
         ) >= close_time
-        if (last_local.year, last_local.month) == (now_local.year, now_local.month) and not month_complete:
-            frame = frame.iloc[:-1]
-    elif seconds is not None:
-        if last + pd.Timedelta(seconds=seconds) > now:
-            frame = frame.iloc[:-1]
-    return frame
+        return (
+            (last_local.year, last_local.month) == (now_local.year, now_local.month)
+            and not month_complete
+        )
+    if seconds is not None:
+        return last + pd.Timedelta(seconds=seconds) > now
+    return False
+
+
+def _drop_incomplete_final_bar(
+    frame: pd.DataFrame, interval: str, market: str, *, now: pd.Timestamp | None = None
+) -> pd.DataFrame:
+    """Never expose a still-forming bar to signals, quotes or backtests."""
+    if frame.empty:
+        return frame
+    return frame.iloc[:-1] if _final_bar_is_forming(frame, interval, market, now=now) else frame
 
 
 class TradingViewProvider(MarketDataProvider):
@@ -291,6 +371,7 @@ class TradingViewProvider(MarketDataProvider):
             raise ProviderError("TradingView requires an exchange-qualified symbol")
         tv_symbol = f"{exchange.upper()}:{symbol.upper()}"
 
+        max_bars = max(1, int(self.settings.tradingview_history_max_bars))
         end_date = end or datetime.now(UTC).date()
         start_date = start or (end_date - timedelta(days=365 * 3))
         if start_date > end_date:
@@ -300,11 +381,21 @@ class TradingViewProvider(MarketDataProvider):
             start_ts = int(pd.Timestamp(start_date, tz="UTC").timestamp())
             end_ts = int(pd.Timestamp(end_date + timedelta(days=1), tz="UTC").timestamp()) - 1
             rows = self.bridge.candles(
-                tv_symbol, timeframe=timeframe, start=start_ts, end=end_ts
+                tv_symbol,
+                timeframe=timeframe,
+                start=start_ts,
+                end=end_ts,
+                max_count=max_bars,
             )
         else:
-            # Maximum available history for this symbol/timeframe.
-            rows = self.bridge.candles(tv_symbol, timeframe=timeframe)
+            # Bounded deep history: the library pages in 5,000-bar batches and
+            # stops at this ceiling instead of running into the bridge timeout.
+            rows = self.bridge.candles(
+                tv_symbol,
+                timeframe=timeframe,
+                count=max_bars,
+                max_count=max_bars,
+            )
         prepared = [
             {
                 "timestamp": pd.to_datetime(row.get("time"), unit="s", utc=True, errors="coerce"),
@@ -330,20 +421,33 @@ class TradingViewProvider(MarketDataProvider):
                 f"TradingView returned no candles for {tv_symbol} in the requested range"
             )
         frame = normalize_candles(frame)
+        forming = _final_bar_is_forming(frame, interval, market)
         frame = _drop_incomplete_final_bar(frame, interval, market)
         if frame.empty:
             raise ProviderError(
                 "TradingView returned only an incomplete candle for this interval"
             )
+        # A full batch means the provider may have more bars than the request
+        # ceiling. Never present a capped response as complete history.
+        history_truncated = bool(rows) and len(rows) >= max_bars
         frame.attrs["source"] = self.name
         frame.attrs["is_adjusted"] = True
         frame.attrs["freshness"] = _FRESHNESS_NOTE
-        frame.attrs["history_truncated"] = False
+        frame.attrs["history_truncated"] = history_truncated
+        frame.attrs["history_pages"] = math.ceil(len(rows) / 5000) if rows else 0
+        frame.attrs["requested_bars"] = max_bars
+        frame.attrs["provider_rows"] = len(rows)
         frame.attrs["provider_symbol"] = tv_symbol
         frame.attrs["candle_timeframe"] = timeframe
         # _drop_incomplete_final_bar removes the latest bar when its interval
-        # has not completed. The final returned row is therefore confirmed.
+        # has not completed. The final returned row is therefore confirmed, and
+        # the exclusion is recorded so callers can distinguish the two states.
         frame.attrs["last_bar_confirmed"] = True
+        frame.attrs["forming_bar_excluded"] = forming
+        logger.info(
+            "[TV] candles symbol=%s interval=%s rows=%d requested=%d truncated=%s forming=%s",
+            tv_symbol, interval, len(frame), max_bars, history_truncated, forming,
+        )
         return frame
 
     def quotes(self, symbols: list[str]) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
@@ -351,6 +455,21 @@ class TradingViewProvider(MarketDataProvider):
 
     def symbol_info(self, symbol: str) -> dict[str, Any]:
         return self.bridge.symbol_info(symbol)
+
+    def price_metadata(self, symbol: str, exchange: str | None) -> dict[str, Any]:
+        """Display precision from the provider's symbol metadata.
+
+        The bridge caches symbol metadata for six hours, so this is a cheap
+        lookup after the first request. Failure is non-fatal: callers fall back
+        to the instrument's existing display rules.
+        """
+        if not exchange:
+            return {}
+        try:
+            info = self.bridge.symbol_info(f"{exchange.upper()}:{symbol.upper()}")
+        except ProviderError:
+            return {}
+        return price_metadata_from_symbol_info(info)
 
     def search(self, query: str, *, limit: int = 20) -> list[dict[str, Any]]:
         return self.bridge.search(query, limit=limit)

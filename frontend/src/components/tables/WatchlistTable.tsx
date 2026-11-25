@@ -218,6 +218,7 @@ export function WatchlistTable({
   if (items.length === 0) {
     return (
       <EmptyState
+        className="m-3"
         title="Watchlist Empty"
         description="Add an instrument to get started."
         icon="portfolio"

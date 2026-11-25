@@ -16,8 +16,17 @@ class Settings(BaseSettings):
     tradingview_quotes_timeout_seconds: float = 30.0
     tradingview_search_timeout_seconds: float = 15.0
     tradingview_live_search_enabled: bool = True
+    # The bridge/library pages in 5,000-bar batches. Capping the request keeps
+    # deep-history loads inside the bridge timeout while still covering several
+    # years of daily bars and weeks of minute bars.
+    tradingview_history_max_bars: int = 20_000
+    tradingview_request_retries: int = 2
+    tradingview_retry_backoff_seconds: float = 0.5
 
     market_cache_seconds: int = 300
+    # Cached history is reused, but the newest bars are refreshed incrementally
+    # after this many seconds so the chart is not pinned to a five-minute TTL.
+    market_latest_refresh_seconds: int = 15
     quote_crypto_ttl_seconds: int = 10
     quote_global_ttl_seconds: int = 300
     quote_india_ttl_seconds: int = 600

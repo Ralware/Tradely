@@ -148,11 +148,12 @@ export function AnalysisWatchlist({
       {/* Watchlist Items */}
       <div className="flex-1 overflow-y-auto divide-y divide-terminal-borderSoft">
         {watchlist.loading && !watchlist.data ? (
-          <LoadingPanel label="Loading Watchlist" rows={6} />
+          <LoadingPanel className="p-3" label="Loading Watchlist" rows={6} />
         ) : watchlist.error ? (
-          <ErrorState message={watchlist.error} onRetry={watchlist.reload} />
+          <ErrorState className="m-2" message={watchlist.error} onRetry={watchlist.reload} />
         ) : items.length === 0 ? (
           <EmptyState
+            className="m-2"
             title="Watchlist Empty"
             description="Add an instrument using the + button."
             icon="portfolio"
