@@ -29,12 +29,12 @@ from app.instruments.resolver import (
     InstrumentResolutionError,
     InstrumentUnavailableError,
 )
-from app.providers.base import ProviderError
+from app.providers.base import ProviderError, get_adjustment_status
 from app.services.backtest import run_trend_breakout_backtest
 from app.services.freshness import is_candle_stale
 from app.services.indicators import compute_indicators
 from app.services.portfolio import build_ledger, detail_view, position_view, summary_view
-from app.services.strategy import STRATEGY_VERSION, evaluate_trend_breakout, position_size
+from app.services.strategy import STRATEGY_VERSION, evaluate_trend_breakout, position_size, suppress_actionable_strategy
 from app.services.technicals import build_technical_summary as build_conventional_summary
 from app.services.tv_technical_rating import (
     DEPENDENCY as TV_RATING_DEPENDENCY,
@@ -65,6 +65,11 @@ def _to_json_records(
 
 def _is_stale(frame: pd.DataFrame, market: str, interval: str = "1d") -> bool:
     return is_candle_stale(frame, market, interval)
+
+
+def _is_adjusted(frame: pd.DataFrame) -> bool | None:
+    status = get_adjustment_status(frame)
+    return True if status == "adjusted" else False if status == "unadjusted" else None
 
 
 def _attach_price_metadata(
@@ -153,9 +158,9 @@ def _cached_tv_rating_snapshot(
         scope = f"{instrument.get('market')}:{instrument.get('exchange')}:{instrument.get('symbol')}"
     if refresh:
         technical_rating_cache.invalidate(scope)
-    adjusted = bool(frame.attrs.get("is_adjusted", False))
+    adjustment_status = get_adjustment_status(frame)
     key = (
-        scope, interval, days, provider, source, adjusted, fingerprint,
+        scope, interval, days, provider, source, adjustment_status, fingerprint,
         TV_RATING_SOURCE_VERSION, TV_RATING_DEPENDENCY,
     )
 
@@ -300,7 +305,8 @@ def candles(
     price_metadata = _attach_price_metadata(request, instrument)
     try:
         frame, source = request.app.state.market_service.candles(
-            symbol, market=market, exchange=exchange, interval=interval, days=days, provider=provider
+            symbol, market=market, exchange=exchange, interval=interval, days=days,
+            provider=provider, full_history=False,
         )
     except (ProviderError, ValueError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -315,7 +321,7 @@ def candles(
     return {
         "symbol": symbol, "market": market, "exchange": exchange, "interval": interval,
         "instrument": instrument, "price_metadata": price_metadata,
-        "source": source, "is_adjusted": bool(frame.attrs.get("is_adjusted", False)),
+        "source": source, "is_adjusted": _is_adjusted(frame), "adjustment_status": get_adjustment_status(frame),
         "freshness": "stale" if stale else frame.attrs.get("freshness", "provider-dependent"),
         "is_stale": stale, "history_truncated": history_truncated,
         "history_pages": frame.attrs.get("history_pages"),
@@ -338,16 +344,24 @@ def scan_watchlist(request: Request) -> dict[str, Any]:
             )
             signal = evaluate_trend_breakout(frame, symbol=item["symbol"], market=item["market"], source=source)
             stale = _is_stale(frame, item["market"], "1d")
-            adjusted = bool(frame.attrs.get("is_adjusted", False))
+            adjusted = _is_adjusted(frame)
+            adjustment_status = get_adjustment_status(frame)
             if stale:
-                signal.state = "STALE_DATA"
-                signal.explanation = "Latest candle is stale; signal suppressed."
-            elif item["market"] == "india" and not adjusted:
-                signal.state = "DATA_QUALITY_ERROR"
-                signal.explanation = "Unadjusted Indian history; strategy signal suppressed."
+                signal = suppress_actionable_strategy(
+                    signal, state="STALE_DATA",
+                    explanation="Signal suppressed because the latest candle is stale.",
+                )
+            elif item["market"] == "india" and adjustment_status != "adjusted":
+                reason = ("Historical corporate-action adjustment status could not be verified."
+                          if adjustment_status == "unknown" else
+                          "Indian-equity history is known to be unadjusted.")
+                signal = suppress_actionable_strategy(
+                    signal, state="DATA_QUALITY_ERROR",
+                    explanation=f"{reason} Strategy signal suppressed.",
+                )
             results.append(_scan_identity(item) | {
                             "symbol": item["symbol"], "market": item["market"], "source": source,
-                            "last_close": float(frame.iloc[-1]["close"]), "is_adjusted": adjusted,
+                            "last_close": float(frame.iloc[-1]["close"]), "is_adjusted": adjusted, "adjustment_status": get_adjustment_status(frame),
                             "is_stale": stale, "strategy": signal.model_dump(mode="json")})
         except Exception as exc:
             results.append(_scan_identity(item) | {
@@ -401,7 +415,8 @@ def analyze(
         position_side=position_side,
         indicators=indicators,
     )
-    adjusted = bool(frame.attrs.get("is_adjusted", False))
+    adjusted = _is_adjusted(frame)
+    adjustment_status = get_adjustment_status(frame)
     stale = _is_stale(frame, market, interval)
     history_truncated = bool(frame.attrs.get("history_truncated", False))
     warnings = []
@@ -409,26 +424,24 @@ def analyze(
         warnings.append("The provider returned the maximum requested bar count; older history may exist.")
     if stale:
         warnings.append("Latest candle is stale for this market; actionable signal output is suppressed.")
-        signal.state = "STALE_DATA"
-        signal.entry_reference = None
-        signal.stop_reference = None
-        signal.risk_per_unit = None
-        signal.direction = None
-        signal.explanation = "Signal suppressed because the latest candle exceeds the configured freshness window. Verify the provider and market session."
-    if market == "india" and not adjusted:
-        warnings.append("Indian equity candles are unadjusted. Corporate actions can distort long-term indicators; do not treat strategy output as actionable.")
-        signal.state = "DATA_QUALITY_ERROR"
-        signal.entry_reference = None
-        signal.stop_reference = None
-        signal.risk_per_unit = None
-        signal.direction = None
-        signal.explanation = "Signal suppressed because TradingView did not confirm split-adjusted history for this instrument."
+        signal = suppress_actionable_strategy(
+            signal, state="STALE_DATA",
+            explanation="Signal suppressed because the latest candle exceeds the configured freshness window. Verify the provider and market session.",
+        )
+    if market == "india" and adjustment_status != "adjusted":
+        if adjustment_status == "unknown":
+            warnings.append("Historical corporate-action adjustment status could not be verified; Indian-equity strategy output is suppressed.")
+            explanation = "Signal suppressed because historical corporate-action adjustment status could not be verified."
+        else:
+            warnings.append("Indian-equity history is known to be unadjusted; strategy output is suppressed.")
+            explanation = "Signal suppressed because this Indian-equity history is known to be unadjusted."
+        signal = suppress_actionable_strategy(signal, state="DATA_QUALITY_ERROR", explanation=explanation)
     signal_payload = signal.model_dump(mode="json")
     request.app.state.db.save_signal(signal_payload)
     return {
         "symbol": symbol, "market": market, "exchange": exchange, "interval": interval,
         "instrument": instrument, "price_metadata": price_metadata,
-        "source": source, "is_adjusted": adjusted, "is_stale": stale,
+        "source": source, "is_adjusted": adjusted, "adjustment_status": get_adjustment_status(frame), "is_stale": stale,
         "history_truncated": history_truncated,
         "history_pages": frame.attrs.get("history_pages"),
         "last_candle_confirmed": frame.attrs.get("last_bar_confirmed"),
@@ -478,7 +491,7 @@ def indicator_series(
     return {
         "symbol": symbol, "market": market, "exchange": exchange, "interval": interval,
         "instrument": instrument,
-        "source": source, "is_adjusted": bool(frame.attrs.get("is_adjusted", False)),
+        "source": source, "is_adjusted": _is_adjusted(frame), "adjustment_status": get_adjustment_status(frame),
         "is_stale": _is_stale(frame, market, interval),
         "as_of": frame.index[-1].isoformat(),
         "fingerprint": ohlcv_fingerprint(frame),
@@ -546,7 +559,7 @@ def technical_summary(
         "instrument": instrument,
         "interval": interval,
         "source": source,
-        "is_adjusted": bool(frame.attrs.get("is_adjusted", False)),
+        "is_adjusted": _is_adjusted(frame), "adjustment_status": get_adjustment_status(frame),
         "is_stale": _is_stale(frame, market, interval),
         "as_of": frame.index[-1].isoformat(),
         "fingerprint": fingerprint,
@@ -600,7 +613,7 @@ def technical_ratings(
         "instrument": instrument,
         "interval": interval,
         "source": source,
-        "is_adjusted": bool(frame.attrs.get("is_adjusted", False)),
+        "is_adjusted": _is_adjusted(frame), "adjustment_status": get_adjustment_status(frame),
         "is_stale": _is_stale(frame, market, interval),
         "as_of": frame.index[-1].isoformat(),
         "fingerprint": fingerprint,
@@ -661,7 +674,8 @@ def analytics_snapshot(
         frame, symbol=symbol, market=market, source=source,
         direction_mode=direction_mode, position_side=position_side, indicators=indicators,
     )
-    adjusted = bool(frame.attrs.get("is_adjusted", False))
+    adjusted = _is_adjusted(frame)
+    adjustment_status = get_adjustment_status(frame)
     stale = _is_stale(frame, market, interval)
     history_truncated = bool(frame.attrs.get("history_truncated", False))
     warnings: list[str] = []
@@ -669,21 +683,18 @@ def analytics_snapshot(
         warnings.append("The provider returned the maximum requested bar count; older history may exist.")
     if stale:
         warnings.append("Latest candle is stale for this market; actionable signal output is suppressed.")
-        signal.state = "STALE_DATA"
-        signal.entry_reference = None
-        signal.stop_reference = None
-        signal.risk_per_unit = None
-        signal.direction = None
-        signal.explanation = "Signal suppressed because the latest candle exceeds the configured freshness window. Verify the provider and market session."
-    if market == "india" and not adjusted:
-        warnings.append("Indian equity candles are unadjusted. Corporate actions can distort long-term indicators; do not treat strategy output as actionable.")
-        signal.state = "DATA_QUALITY_ERROR"
-        signal.entry_reference = None
-        signal.stop_reference = None
-        signal.risk_per_unit = None
-        signal.direction = None
-        signal.explanation = "Signal suppressed because TradingView did not confirm split-adjusted history for this instrument."
-
+        signal = suppress_actionable_strategy(
+            signal, state="STALE_DATA",
+            explanation="Signal suppressed because the latest candle exceeds the configured freshness window. Verify the provider and market session.",
+        )
+    if market == "india" and adjustment_status != "adjusted":
+        if adjustment_status == "unknown":
+            warnings.append("Historical corporate-action adjustment status could not be verified; Indian-equity strategy output is suppressed.")
+            explanation = "Signal suppressed because historical corporate-action adjustment status could not be verified."
+        else:
+            warnings.append("Indian-equity history is known to be unadjusted; strategy output is suppressed.")
+            explanation = "Signal suppressed because this Indian-equity history is known to be unadjusted."
+        signal = suppress_actionable_strategy(signal, state="DATA_QUALITY_ERROR", explanation=explanation)
     technical_payload = _cached_tv_rating_snapshot(
         instrument=instrument, frame=frame, fingerprint=fingerprint,
         source=source, interval=interval, days=days, provider=provider,
@@ -694,7 +705,7 @@ def analytics_snapshot(
         "symbol": symbol, "market": market, "exchange": exchange,
         "instrument": instrument, "price_metadata": price_metadata,
         "interval": interval, "source": source,
-        "is_adjusted": adjusted, "is_stale": stale,
+        "is_adjusted": adjusted, "adjustment_status": get_adjustment_status(frame), "is_stale": stale,
         "as_of": frame.index[-1].isoformat(), "fingerprint": fingerprint,
     }
     signal_payload = signal.model_dump(mode="json")
@@ -704,7 +715,7 @@ def analytics_snapshot(
         "symbol": symbol, "market": market, "exchange": exchange,
         "interval": interval, "instrument": instrument,
         "price_metadata": price_metadata, "source": source,
-        "is_adjusted": adjusted, "is_stale": stale,
+        "is_adjusted": adjusted, "adjustment_status": get_adjustment_status(frame), "is_stale": stale,
         "history_truncated": history_truncated,
         "history_pages": frame.attrs.get("history_pages"),
         "last_candle_confirmed": frame.attrs.get("last_bar_confirmed"),
@@ -718,7 +729,7 @@ def analytics_snapshot(
         "symbol": symbol, "market": market, "exchange": exchange,
         "interval": interval, "instrument": instrument,
         "price_metadata": price_metadata, "source": source,
-        "is_adjusted": adjusted, "is_stale": stale,
+        "is_adjusted": adjusted, "adjustment_status": get_adjustment_status(frame), "is_stale": stale,
         "as_of": frame.index[-1].isoformat(), "fingerprint": fingerprint,
         "count": len(indicators), "series": _to_json_records(indicators),
     }
@@ -732,7 +743,7 @@ def analytics_snapshot(
     provenance = {
         "instrument_id": instrument.get("instrument_id"),
         "symbol": symbol, "market": market, "exchange": exchange,
-        "interval": interval, "source": source, "is_adjusted": adjusted,
+        "interval": interval, "source": source, "is_adjusted": adjusted, "adjustment_status": get_adjustment_status(frame),
         "candle_count": len(frame),
         "latest_candle_timestamp": frame.index[-1].isoformat(),
         "last_candle_confirmed": frame.attrs.get("last_bar_confirmed"),
@@ -761,7 +772,7 @@ def analytics_snapshot(
         "snapshot_id": snapshot_id,
         "generated_at": generated_at,
         "symbol": symbol, "market": market, "exchange": exchange,
-        "interval": interval, "source": source, "is_adjusted": adjusted,
+        "interval": interval, "source": source, "is_adjusted": adjusted, "adjustment_status": get_adjustment_status(frame),
         "fingerprint": fingerprint, "price_metadata": price_metadata,
         "history_truncated": history_truncated,
         "history_pages": frame.attrs.get("history_pages"),
@@ -841,11 +852,12 @@ def backtest_trend_breakout(request: Request, payload: BacktestRequest) -> dict[
                 status_code=409,
                 detail="Backtest refused: the latest candle is stale for this market. Refresh data before evaluating results.",
             )
-        if market == "india" and not bool(frame.attrs.get("is_adjusted", False)):
-            raise HTTPException(
-                status_code=409,
-                detail="Backtest refused: TradingView did not confirm split-adjusted Indian equity history.",
-            )
+        if market == "india" and get_adjustment_status(frame) != "adjusted":
+            status = get_adjustment_status(frame)
+            detail = ("Backtest refused: historical corporate-action adjustment status could not be verified."
+                      if status == "unknown" else
+                      "Backtest refused: Indian-equity history is known to be unadjusted.")
+            raise HTTPException(status_code=409, detail=detail)
         result = run_trend_breakout_backtest(
             frame, initial_capital=payload.initial_capital, risk_fraction=payload.risk_fraction,
             cost_bps_per_side=(payload.commission_bps_per_side if payload.commission_bps_per_side is not None else payload.cost_bps_per_side) + payload.slippage_bps_per_side,
@@ -862,7 +874,7 @@ def backtest_trend_breakout(request: Request, payload: BacktestRequest) -> dict[
     result.update({"symbol": symbol, "market": market, "instrument": instrument,
                    "source": source,
                    "strategy": "Trend + Donchian 20 Breakout", "strategy_version": STRATEGY_VERSION,
-                   "data_adjusted": bool(frame.attrs.get("is_adjusted", False)),
+                   "data_adjusted": _is_adjusted(frame), "adjustment_status": get_adjustment_status(frame),
                    "date_range": {"start": frame.index[0].isoformat(), "end": frame.index[-1].isoformat()},
                    "executed_at": datetime.now(UTC).isoformat(),
                    "execution_assumptions": {"initial_capital": payload.initial_capital,

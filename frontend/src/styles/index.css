@@ -240,6 +240,16 @@
     padding: 0 10px;
   }
 
+  .tv-timeframe-selector {
+    flex-wrap: nowrap;
+    width: max-content;
+  }
+
+  .tv-timeframe-selector button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
   .tv-timeframe-selector button[aria-selected="true"] {
     background: #171b22;
     border-color: #3a4150;

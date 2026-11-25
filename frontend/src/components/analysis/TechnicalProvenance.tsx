@@ -36,7 +36,7 @@ export function TechnicalProvenance({ provenance, ratings }: {
         <InfoItem label="Pine Dependency" value={ratings.dependency} />
         <InfoItem label="Market Data Source" value={provenance.source} />
         <InfoItem label="Data Freshness" value={provenance.data_freshness} />
-        <InfoItem label="Adjusted OHLCV" value={provenance.is_adjusted ? 'Yes' : 'No'} />
+        <InfoItem label="Adjustment Status" value={provenance.adjustment_status ?? (provenance.is_adjusted === true ? 'Adjusted' : provenance.is_adjusted === false ? 'Unadjusted' : 'Unknown / unverified')} />
         <InfoItem label="Indicator Availability" value={`${provenance.indicator_available}/${provenance.indicator_total} · ${provenance.indicator_unavailable} unavailable`} />
         <InfoItem label="Rating Cache" value={provenance.technical_rating_cache_hit ? 'Hit' : 'Calculated'} />
       </div>

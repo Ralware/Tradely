@@ -1,5 +1,7 @@
 from app.main import app
 from fastapi.testclient import TestClient
+import numpy as np
+import pandas as pd
 
 client = TestClient(app)
 
@@ -158,6 +160,50 @@ def test_daily_backtest_rejects_intraday_interval():
         "symbol": "RELIANCE", "market": "india", "interval": "15m"
     })
     assert response.status_code == 422
+
+
+def test_market_candles_route_passes_bounded_days_to_provider(monkeypatch):
+    instrument = app.state.db.resolve_instrument("MSFT", "global", exchange="NASDAQ")
+    index = pd.date_range(end=pd.Timestamp.now(tz="UTC").floor("D"), periods=2, freq="D")
+    frame = pd.DataFrame({"open": [1., 2.], "high": [2., 3.], "low": [.5, 1.5],
+                          "close": [1.5, 2.5], "volume": [10., 20.]}, index=index)
+    received = {}
+    monkeypatch.setattr(app.state.market_service, "candles",
+                        lambda *args, **kwargs: received.update(kwargs) or (frame, "test-provider"))
+    monkeypatch.setattr(app.state.market_service, "price_metadata", lambda *args, **kwargs: {})
+
+    response = client.get("/api/market/candles", params={"instrument_id": instrument.instrument_id, "days": 7})
+
+    assert response.status_code == 200
+    assert received["days"] == 7
+    assert received["full_history"] is False
+
+
+def test_unknown_indian_adjustment_suppresses_analysis_and_refuses_backtest(monkeypatch):
+    instrument = app.state.db.resolve_instrument("RELIANCE", "india", exchange="NSE")
+    index = pd.date_range(end=pd.Timestamp.now(tz="UTC").floor("D"), periods=260, freq="D")
+    close = pd.Series(100 + np.arange(260) * .2 + np.sin(np.arange(260) / 5), index=index)
+    frame = pd.DataFrame({"open": close - .1, "high": close + 1, "low": close - 1,
+                          "close": close, "volume": 1000 + np.arange(260)}, index=index)
+    frame.attrs.update({"adjustment_status": "unknown", "is_adjusted": True})
+    monkeypatch.setattr(app.state.market_service, "candles", lambda *args, **kwargs: (frame.copy(), "mock"))
+
+    analysis = client.get(f"/api/instruments/{instrument.symbol}/analysis", params={"instrument_id": instrument.instrument_id})
+    assert analysis.status_code == 200
+    body = analysis.json()
+    assert body["adjustment_status"] == "unknown"
+    assert body["is_adjusted"] is None
+    assert body["strategy"]["state"] == "DATA_QUALITY_ERROR"
+    assert body["strategy"]["direction"] is None
+    assert body["strategy"]["entry_reference"] is None
+    assert body["strategy"]["stop_reference"] is None
+    assert body["strategy"]["risk_per_unit"] is None
+
+    backtest = client.post("/api/backtests/trend-breakout", json={
+        "instrument_id": instrument.instrument_id, "interval": "1d", "days": 365,
+    })
+    assert backtest.status_code == 409
+    assert "could not be verified" in backtest.json()["detail"]
 
 
 def test_removed_endpoints_return_not_found():

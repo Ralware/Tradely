@@ -5,10 +5,29 @@ from datetime import UTC, datetime
 
 import pandas as pd
 
-from app.core.models import DirectionMode, PositionDirection, SignalCondition, StrategySignal
+from app.core.models import DirectionMode, PositionDirection, SignalCondition, SignalState, StrategySignal
 from app.services.indicators import compute_indicators
 
 STRATEGY_VERSION = "trend-donchian-v1.2.0"
+
+
+def suppress_actionable_strategy(
+    signal: StrategySignal | dict[str, object], *, state: SignalState, explanation: str
+) -> StrategySignal | dict[str, object]:
+    """Invalidate every field that could be read as an actionable trade recommendation."""
+    cleared = {
+        "state": state,
+        "direction": None,
+        "entry_reference": None,
+        "stop_reference": None,
+        "risk_per_unit": None,
+        "explanation": explanation,
+    }
+    if isinstance(signal, StrategySignal):
+        return signal.model_copy(update=cleared)
+    result = dict(signal)
+    result.update(cleared)
+    return result
 
 
 def _evaluate_trend_breakout_long_only(

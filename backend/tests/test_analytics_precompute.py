@@ -31,8 +31,10 @@ def test_migration_creates_additive_analytics_tables(tmp_path):
     db = Database(tmp_path / "tradely.sqlite3")
     with db.connect() as connection:
         tables = {row["name"] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        indexes = {row["name"] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='index'")}
         version = connection.execute("PRAGMA user_version").fetchone()[0]
     assert {"market_bars", "market_analytics_snapshots", "strategy_snapshots", "analytics_jobs"} <= tables
+    assert "idx_strategy_snapshots_parent" in indexes
     assert version >= 4
     assert db.get_watchlist() == []
 
@@ -112,6 +114,24 @@ def _valid_frame(periods=260):
                           "close": close, "volume": 1000 + np.arange(periods)}, index=index)
     frame.attrs.update({"is_adjusted": True, "last_bar_confirmed": True})
     return frame
+
+
+def test_manifest_uses_snapshot_metadata_without_full_payload_validation(tmp_path, monkeypatch):
+    db = Database(tmp_path / "manifest.sqlite3")
+    instrument = db.resolve_instrument("MSFT", "global", exchange="NASDAQ")
+    db.add_watchlist(WatchlistItem(instrument_id=instrument.instrument_id))
+    engine = AnalyticsPrecompute(db, FrameMarket(_valid_frame()))
+    engine._compute_and_publish(instrument.instrument_id, "1d")
+
+    def reject_full_validation(*_args, **_kwargs):
+        pytest.fail("The manifest must not decode every historical snapshot")
+
+    monkeypatch.setattr(engine, "get_snapshot", reject_full_validation)
+    item = next(row for row in engine.manifest()["items"] if row["interval"] == "1d")
+
+    assert item["status"] == "READY"
+    assert item["snapshot_id"]
+    assert item["fingerprint"]
 
 
 def test_search_miss_is_computed_persisted_and_reused_without_a_second_fetch(tmp_path):
@@ -235,3 +255,98 @@ def test_incomplete_snapshot_is_not_ready_and_failed_refresh_preserves_last_good
         engine._compute_and_publish(instrument.instrument_id, "1d")
     with db.connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM market_analytics_snapshots WHERE status='READY'").fetchone()[0] == 1
+
+
+def test_failed_stale_refresh_returns_reference_only_copy_without_mutating_persisted_signals(tmp_path, monkeypatch):
+    db = Database(tmp_path / "stale-fallback.sqlite3")
+    instrument = db.resolve_instrument("MSFT", "global", exchange="NASDAQ")
+    engine = AnalyticsPrecompute(db, FrameMarket(_valid_frame()))
+    engine._compute_and_publish(instrument.instrument_id, "1d")
+    with db.connect() as connection:
+        rows = connection.execute(
+            "SELECT strategy_snapshot_id,payload,payload_checksum FROM strategy_snapshots WHERE instrument_id=?",
+            (instrument.instrument_id,),
+        ).fetchall()
+        for row in rows:
+            blob, checksum = _encode({
+                "state": "BUY", "direction": "LONG", "entry_reference": 100.0,
+                "stop_reference": 95.0, "risk_per_unit": 5.0,
+            })
+            connection.execute(
+                "UPDATE strategy_snapshots SET payload=?,payload_checksum=? WHERE strategy_snapshot_id=?",
+                (blob, checksum, row["strategy_snapshot_id"]),
+            )
+        before = [tuple(row) for row in connection.execute(
+            "SELECT payload,payload_checksum FROM strategy_snapshots WHERE instrument_id=? ORDER BY strategy_snapshot_id",
+            (instrument.instrument_id,),
+        ).fetchall()]
+    monkeypatch.setattr(engine, "_snapshot_is_stale", lambda _payload: True)
+
+    class FailingMarket:
+        def candles(self, *args, **kwargs):
+            raise RuntimeError("provider unavailable")
+
+    engine.market_service = FailingMarket()
+    stale = engine.get_or_compute_snapshot(instrument.instrument_id, "1d")
+
+    assert stale["analysis"]["is_stale"] is True
+    assert stale["technical_ratings"]["is_stale"] is True
+    assert stale["indicator_series"]["is_stale"] is True
+    assert any("retained for reference only" in item for item in stale["analysis"]["warnings"])
+    assert len(stale["strategy_variants"]) == 9
+    for variant in stale["strategy_variants"].values():
+        assert variant["state"] == "STALE_DATA"
+        assert variant["direction"] is None
+        assert variant["entry_reference"] is None
+        assert variant["stop_reference"] is None
+        assert variant["risk_per_unit"] is None
+    with db.connect() as connection:
+        after = [tuple(row) for row in connection.execute(
+            "SELECT payload,payload_checksum FROM strategy_snapshots WHERE instrument_id=? ORDER BY strategy_snapshot_id",
+            (instrument.instrument_id,),
+        ).fetchall()]
+    assert after == before
+    persisted = engine.get_snapshot(instrument.instrument_id, "1d")
+    assert all(item["state"] == "BUY" and item["entry_reference"] == 100.0
+               for item in persisted["strategy_variants"].values())
+
+
+def test_stale_reference_refresh_recovers_after_a_later_successful_fetch(tmp_path, monkeypatch):
+    db = Database(tmp_path / "stale-recovery.sqlite3")
+    instrument = db.resolve_instrument("MSFT", "global", exchange="NASDAQ")
+    market = FrameMarket(_valid_frame())
+    engine = AnalyticsPrecompute(db, market)
+    engine._compute_and_publish(instrument.instrument_id, "1d")
+    monkeypatch.setattr(engine, "_snapshot_is_stale", lambda _payload: True)
+
+    class FailingMarket:
+        def candles(self, *args, **kwargs):
+            raise RuntimeError("provider unavailable")
+
+    engine.market_service = FailingMarket()
+    fallback = engine.get_or_compute_snapshot(instrument.instrument_id, "1d")
+    assert fallback["analysis"]["is_stale"] is True
+
+    engine.market_service = market
+    refreshed = engine.get_or_compute_snapshot(instrument.instrument_id, "1d")
+    assert refreshed["analysis"]["is_stale"] is False
+    assert refreshed["provenance"]["data_freshness"] == "fresh"
+    assert all(item["state"] != "STALE_DATA" for item in refreshed["strategy_variants"].values())
+
+
+def test_explicit_unknown_adjustment_status_is_not_promoted_by_legacy_boolean(tmp_path):
+    db = Database(tmp_path / "unknown-adjustment.sqlite3")
+    instrument = db.resolve_instrument("RELIANCE", "india", exchange="NSE")
+    frame = _valid_frame()
+    frame.attrs.update({"adjustment_status": "unknown", "is_adjusted": True})
+    engine = AnalyticsPrecompute(db, FrameMarket(frame))
+
+    engine._compute_and_publish(instrument.instrument_id, "1d")
+    snapshot = engine.get_snapshot(instrument.instrument_id, "1d")
+
+    assert snapshot["adjustment_status"] == "unknown"
+    assert snapshot["is_adjusted"] is None
+    assert all(item["state"] == "DATA_QUALITY_ERROR" for item in snapshot["strategy_variants"].values())
+    assert all(item["direction"] is None and item["entry_reference"] is None
+               and item["stop_reference"] is None and item["risk_per_unit"] is None
+               for item in snapshot["strategy_variants"].values())

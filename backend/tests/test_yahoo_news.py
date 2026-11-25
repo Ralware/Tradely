@@ -151,3 +151,67 @@ def test_news_date_filter_is_inclusive_timezone_aware_and_skips_invalid_timestam
 
     assert [row["title"] for row in rows] == ["end", "start"]
     assert db.count_news(instrument_id="global:NASDAQ:AAPL", date_from=start_utc, date_to=end_utc) == 2
+
+
+def test_news_date_filter_compares_exact_microseconds_and_list_matches_count(tmp_path: Path):
+    db = Database(tmp_path / "news-microseconds.sqlite3")
+    timestamps = [
+        ("one-microsecond-before", "2026-11-01T12:00:00.123455+00:00"),
+        ("lower-bound", "2026-11-01T12:00:00.123456+00:00"),
+        ("upper-bound", "2026-11-01T12:00:00.123457+00:00"),
+        ("one-microsecond-after", "2026-11-01T12:00:00.123458+00:00"),
+    ]
+    articles = [{
+        "yahoo_id": name, "title": name, "published_at": published,
+        "article_url": f"https://news.example/{name}",
+        "canonical_url": f"https://news.example/{name}", "related_symbols": ["AAPL"],
+        "source": "Yahoo Finance Search",
+    } for name, published in timestamps]
+    db.save_news_refresh(
+        instrument_id="global:NASDAQ:AAPL", symbol="AAPL", articles=articles,
+        attempted_at="2026-11-02T00:00:00+00:00", expires_at="2026-11-02T00:05:00+00:00",
+    )
+
+    rows = db.list_news(
+        instrument_id="global:NASDAQ:AAPL",
+        date_from="2026-11-01T17:30:00.123456+05:30",
+        date_to="2026-11-01T12:00:00.123457Z",
+    )
+    assert {row["title"] for row in rows} == {"lower-bound", "upper-bound"}
+    assert len(rows) == db.count_news(
+        instrument_id="global:NASDAQ:AAPL",
+        date_from="2026-11-01T17:30:00.123456+05:30",
+        date_to="2026-11-01T12:00:00.123457Z",
+    ) == 2
+
+
+def test_schema_v5_news_timestamps_are_additively_backfilled(tmp_path: Path):
+    path = tmp_path / "legacy-news.sqlite3"
+    db = Database(path)
+    article = {
+        "yahoo_id": "legacy-1", "title": "Legacy timestamp",
+        "published_at": "2025-05-06T07:08:09.123456+05:30",
+        "article_url": "https://news.example/legacy", "related_symbols": ["AAPL"],
+        "source": "Yahoo Finance Search",
+    }
+    db.save_news_refresh(
+        instrument_id="global:NASDAQ:AAPL", symbol="AAPL", articles=[article],
+        attempted_at="2025-05-06T00:00:00+00:00", expires_at="2025-05-06T00:05:00+00:00",
+    )
+    with db.connect() as connection:
+        connection.execute("DROP INDEX idx_news_published_us")
+        connection.execute("ALTER TABLE news_articles DROP COLUMN published_at_us")
+        connection.execute("PRAGMA user_version = 5")
+
+    migrated = Database(path)
+    with migrated.connect() as connection:
+        row = connection.execute("SELECT published_at,published_at_us FROM news_articles").fetchone()
+        version = connection.execute("PRAGMA user_version").fetchone()[0]
+    assert row["published_at"] == "2025-05-06T01:38:09.123456+00:00"
+    assert row["published_at_us"] is not None
+    assert version >= 6
+    assert migrated.count_news(
+        instrument_id="global:NASDAQ:AAPL",
+        date_from="2025-05-06T07:08:09.123456+05:30",
+        date_to="2025-05-06T07:08:09.123456+05:30",
+    ) == 1

@@ -6,15 +6,14 @@ import { apiRequest } from '../../services/api';
 import { snapshotStore } from '../../services/snapshotStore';
 import { isCompleteSnapshot, loadAnalyticsSnapshot } from '../../services/analyticsSnapshotLoader';
 import { portfolioService } from '../../services/portfolioService';
+import { suppressStaleStrategy } from '../../services/staleStrategy';
 import type { DirectionMode, Instrument } from '../../types/api';
 import { changeDigits, cn, formatDate, formatNumber, formatPercent, formatSignedFixed, toneForNumber } from '../../utils/format';
 import { pricePrecisionFor, minMoveFromMetadata } from '../../utils/precision';
 import { defaultDaysFor, intervalLabel, isIntradayInterval } from '../../utils/timeframes';
 import { instrumentPath } from '../../utils/navigation';
-import { Badge } from '../common/Badge';
 import { Button } from '../common/Button';
 import { Card } from '../common/Card';
-import { Select } from '../common/Field';
 import { Icon } from '../common/Icon';
 import { EmptyState, ErrorState, LoadingPanel, Notice } from '../common/States';
 import { Tabs } from '../common/Tabs';
@@ -56,11 +55,6 @@ function ToggleChip({
   );
 }
 
-function marketLabel(market: string, assetType: string | undefined): string {
-  if (assetType === 'crypto') return 'Crypto';
-  return market === 'india' ? 'India' : 'Global';
-}
-
 export function AnalysisWorkspace({
   directionMode: controlledDirectionMode,
   onDirectionModeChange,
@@ -72,7 +66,7 @@ export function AnalysisWorkspace({
   const [searchParams, setSearchParams] = useSearchParams();
   const selected = useSelectedInstrument();
 
-  const { symbol, name, market, exchange, interval, days, instrumentId, capabilities } = selected;
+  const { symbol, name, market, interval, days, instrumentId } = selected;
 
   const [overlays, setOverlays] = useState<OverlayToggles>({
     sma: false,
@@ -112,12 +106,24 @@ export function AnalysisWorkspace({
   const snapshotError = loadState?.key === snapshotKey && loadState.status === 'error'
     ? loadState.error ?? 'Analytics could not be loaded.'
     : null;
+  const snapshotStale = Boolean(usableSnapshot && (
+    usableSnapshot.analysis?.is_stale === true
+    || usableSnapshot.technical_ratings?.is_stale === true
+    || usableSnapshot.provenance?.data_freshness === 'stale'
+  ));
+  const selectedStrategy = usableSnapshot?.strategy_variants?.[`${directionMode}:NONE`]
+    ?? usableSnapshot?.strategy_variants?.[`${directionMode}:LONG`]
+    ?? usableSnapshot?.strategy_variants?.[`${directionMode}:SHORT`];
   const data = usableSnapshot?.analysis ? {
     ...usableSnapshot.analysis,
-    strategy: usableSnapshot.strategy_variants?.[`${directionMode}:NONE`]
-      ?? usableSnapshot.strategy_variants?.[`${directionMode}:LONG`]
-      ?? usableSnapshot.strategy_variants?.[`${directionMode}:SHORT`],
+    is_stale: snapshotStale,
+    strategy: snapshotStale && selectedStrategy && typeof selectedStrategy === 'object'
+      ? suppressStaleStrategy(selectedStrategy)
+      : selectedStrategy,
   } : null;
+  const visibleWarnings = data?.warnings.filter(
+    (warning: string) => !warning.toLowerCase().startsWith('latest candle is stale for this market'),
+  ) ?? [];
   const technicals = usableSnapshot?.technical_ratings ?? null;
   const indicatorSeries = usableSnapshot?.indicator_series ?? null;
   const currency = selected.currency || (market === 'india' ? 'INR' : market === 'crypto' ? 'USDT' : 'USD');
@@ -285,9 +291,9 @@ export function AnalysisWorkspace({
               {`Refresh issue for ${symbol}; the last complete snapshot remains available. ${error}`}
             </Notice>
           ) : null}
-          {data.warnings.length > 0 ? (
+          {visibleWarnings.length > 0 ? (
             <div className="space-y-1">
-              {data.warnings.map((warning: string) => (
+              {visibleWarnings.map((warning: string) => (
                 <Notice key={warning} tone="warning">
                   {warning}
                 </Notice>
@@ -295,20 +301,13 @@ export function AnalysisWorkspace({
             </div>
           ) : null}
 
-        <div className="tv-instrument-heading flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+        <div className="tv-instrument-heading flex min-w-0 flex-col gap-2">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <h1 className="text-lg font-semibold leading-none tracking-tight text-terminal-text">
                   {symbol}
                 </h1>
                 <span className="truncate text-xs text-terminal-muted">{name}</span>
-                <Badge tone="accent">{exchange}</Badge>
-                <Badge>{marketLabel(market, selected.instrument?.asset_type)}</Badge>
-                {capabilities ? <Badge>{capabilities.provider_key}</Badge> : null}
-                <Badge tone={data.is_adjusted ? 'positive' : 'warning'}>
-                  {data.is_adjusted ? 'Adjusted' : 'Unadjusted'}
-                </Badge>
-                {data.is_stale ? <Badge tone="warning">Stale</Badge> : null}
               </div>
               <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
                 <span className="num text-xl font-semibold leading-none text-terminal-text">
@@ -335,42 +334,32 @@ export function AnalysisWorkspace({
               </div>
             </div>
 
-            <div className="flex flex-wrap items-end gap-2">
-              <Select
-                label="Strategy Direction"
-                value={directionMode}
-                onChange={(event) => setDirectionMode(event.target.value as DirectionMode)}
-                options={[
-                  { value: 'long_only', label: 'Long Only' },
-                  { value: 'short_only', label: 'Short Only' },
-                  { value: 'long_short', label: 'Long + Short' },
-                ]}
-              />
-              <div className="flex items-end gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <div className="min-w-0 flex-1 overflow-x-auto">
                 <TimeframeSelector
-                  className="tv-timeframe-selector"
+                  className="tv-timeframe-selector w-max"
                   options={selected.timeframes}
                   value={interval}
                   onChange={changeTimeframe}
                 />
-                <span
-                  className="self-center whitespace-nowrap text-2xs text-terminal-muted"
-                  role="status"
-                  title={manifest?.last_error ?? ''}
-                >
-                  {manifest?.status ?? 'MISSING'} · {manifest?.candle_count ?? 0} bars
-                </span>
-                <span
-                  role="status"
-                  className={cn(
-                    'self-center inline-flex h-3 w-3 items-center justify-center text-terminal-muted transition-opacity duration-300',
-                    updating ? 'opacity-100' : 'opacity-0',
-                  )}
-                >
-                  <Icon name="refresh" size={12} className="animate-spin" />
-                  {updating ? <span className="sr-only">Updating</span> : null}
-                </span>
               </div>
+              <span
+                className="ml-auto shrink-0 whitespace-nowrap text-2xs text-terminal-muted"
+                role="status"
+                title={manifest?.last_error ?? ''}
+              >
+                {manifest?.status ?? 'MISSING'} · {manifest?.candle_count ?? 0} bars
+              </span>
+              <span
+                role="status"
+                className={cn(
+                  'inline-flex h-3 w-3 shrink-0 items-center justify-center text-terminal-muted transition-opacity duration-300',
+                  updating ? 'opacity-100' : 'opacity-0',
+                )}
+              >
+                <Icon name="refresh" size={12} className="animate-spin" />
+                {updating ? <span className="sr-only">Updating</span> : null}
+              </span>
             </div>
           </div>
 
@@ -476,7 +465,12 @@ export function AnalysisWorkspace({
 
           {technicals ? (
             <div className="tv-strategy-summary">
-              <SignalCard signal={data.strategy} />
+              <SignalCard
+                signal={data.strategy}
+                directionMode={directionMode}
+                onDirectionModeChange={setDirectionMode}
+                isStale={snapshotStale}
+              />
             </div>
           ) : null}
 
@@ -486,12 +480,16 @@ export function AnalysisWorkspace({
 
           {activeTab === 'risk' ? (
             <div className="tv-tab-panel">
-              <RiskCalculator
-                entry={data.strategy.entry_reference ?? data.latest.close}
-                stop={data.strategy.stop_reference}
-                direction={data.strategy.direction ?? 'LONG'}
-                currency={currency}
-              />
+              {snapshotStale ? (
+                <Notice tone="warning">Trade sizing is unavailable for stale reference data. Refresh successfully before using entry, stop, or risk calculations.</Notice>
+              ) : (
+                <RiskCalculator
+                  entry={data.strategy.entry_reference ?? data.latest.close}
+                  stop={data.strategy.stop_reference}
+                  direction={data.strategy.direction ?? 'LONG'}
+                  currency={currency}
+                />
+              )}
             </div>
           ) : null}
 

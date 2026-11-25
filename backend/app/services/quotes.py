@@ -15,6 +15,7 @@ from app.core.instruments import (
     canonical_instrument,
 )
 from app.core.models import Instrument, TradingRules
+from app.providers.base import get_adjustment_status
 from app.core.trading_rules import (
     default_trading_rules,
     tradingview_rules_from_symbol_info,
@@ -158,6 +159,12 @@ def _present_quote(raw: dict[str, Any], now: datetime | None = None) -> dict[str
         "market_status": market_status_for(str(quote.get("market") or ""), now),
         "retrieved_at": quote.get("retrieved_at") or _iso(now),
     })
+    status = quote.get("adjustment_status")
+    if status not in {"adjusted", "unadjusted", "unknown"}:
+        # Previously persisted booleans cannot prove the provider's adjustment behavior.
+        status = "unknown"
+    quote["adjustment_status"] = status
+    quote["is_adjusted"] = True if status == "adjusted" else False if status == "unadjusted" else None
     return quote
 
 
@@ -425,7 +432,8 @@ class QuoteService:
             "age_seconds": round(age.total_seconds(), 3),
             "market_status": market_status_for(market, now),
             "transport": "historical",
-            "is_adjusted": bool(frame.attrs.get("is_adjusted", False)),
+            "is_adjusted": True if get_adjustment_status(frame) == "adjusted" else False if get_adjustment_status(frame) == "unadjusted" else None,
+            "adjustment_status": get_adjustment_status(frame),
             "provider_freshness": frame.attrs.get("freshness"),
             "historical_interval": interval,
             "error": None,
@@ -539,6 +547,7 @@ class QuoteService:
             "age_seconds": None,
             "market_status": market_status_for(payload["market"]),
             "is_adjusted": None,
+            "adjustment_status": "unknown",
             "error": error,
         }
 
@@ -582,7 +591,8 @@ class QuoteService:
             "retrieved_at": _iso(datetime.now(UTC)),
             "quote_type": "delayed" if delayed else "real_time",
             "transport": "bridge",
-            "is_adjusted": False,
+            "is_adjusted": None,
+            "adjustment_status": "unknown",
             "currency": currency,
             "delay_seconds": delay,
             "update_mode": update_mode or None,

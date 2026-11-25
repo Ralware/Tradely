@@ -6,7 +6,7 @@ const identity = 'global:NASDAQ:MSFT';
 function snapshot(overrides: Record<string, unknown> = {}): PreparedSnapshot {
   const fp = 'fingerprint-1';
   return {
-    schema_version: 1,
+    schema_version: 2,
     interval: '1d',
     fingerprint: fp,
     generated_at: '2026-11-22T10:00:00Z',

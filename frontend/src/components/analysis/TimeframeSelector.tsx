@@ -16,7 +16,7 @@ export function TimeframeSelector({
     <div
       role="tablist"
       aria-label="Timeframe"
-      className={cn('flex flex-wrap items-center gap-0.5', className)}
+      className={cn('flex flex-nowrap items-center gap-0.5 whitespace-nowrap', className)}
     >
       {options.map((option) => {
         const active = option.id === value;
@@ -28,7 +28,7 @@ export function TimeframeSelector({
             aria-selected={active}
             onClick={() => onChange(option.id)}
             className={cn(
-              'rounded-md px-2.5 py-1 text-xs transition-colors',
+              'shrink-0 rounded-md px-2.5 py-1 text-xs transition-colors',
               active
                 ? 'bg-terminal-panelAlt font-medium text-terminal-text'
                 : 'text-terminal-muted hover:bg-white/[0.04] hover:text-terminal-text',

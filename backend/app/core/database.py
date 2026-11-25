@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -21,7 +21,7 @@ from app.core.models import (
     WatchlistItem,
 )
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 _CATALOGUE_COLUMNS: dict[str, str] = {
     "display_name": "TEXT NOT NULL DEFAULT ''",
     "base_currency": "TEXT NOT NULL DEFAULT ''",
@@ -39,6 +39,54 @@ _CATALOGUE_COLUMNS: dict[str, str] = {
 
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _parse_utc_datetime(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    try:
+        return parsed.astimezone(UTC)
+    except (ValueError, OverflowError):
+        return None
+
+
+def _timestamp_microseconds(value: Any) -> int | None:
+    parsed = _parse_utc_datetime(value)
+    if parsed is None:
+        return None
+    delta = parsed - datetime(1970, 1, 1, tzinfo=UTC)
+    return (delta.days * 86_400 + delta.seconds) * 1_000_000 + delta.microseconds
+
+
+def _normalized_news_timestamp(value: Any) -> str | None:
+    parsed = _parse_utc_datetime(value)
+    if parsed is not None:
+        return parsed.isoformat()
+    return value if isinstance(value, str) and value else None
+
+
+def _news_date_filters(date_from: str | None, date_to: str | None) -> tuple[str, list[int]]:
+    clauses: list[str] = []
+    values: list[int] = []
+    if date_from:
+        start = _timestamp_microseconds(date_from)
+        if start is None:
+            raise ValueError("Invalid news date_from timestamp")
+        clauses.append("a.published_at_us>=?")
+        values.append(start)
+    if date_to:
+        end = _timestamp_microseconds(date_to)
+        if end is None:
+            raise ValueError("Invalid news date_to timestamp")
+        clauses.append("a.published_at_us<=?")
+        values.append(end)
+    return (" AND " + " AND ".join(clauses) if clauses else ""), values
 
 
 def _instrument_from_row(row: dict[str, Any]) -> Instrument:
@@ -239,6 +287,10 @@ class Database:
                         "SELECT article_id FROM news_articles WHERE canonical_url=? LIMIT 1", (canonical_url,)
                     ).fetchone()
                 article_id = str(existing["article_id"]) if existing else str(article.get("article_id") or "")
+                published_raw = article.get("published_at")
+                published_at = _normalized_news_timestamp(published_raw)
+                published_at_us = _timestamp_microseconds(published_at)
+                timestamp_supplied = published_raw is not None
                 if not article_id:
                     seed = f"yahoo:{yahoo_id}" if yahoo_id else f"url:{canonical_url}" if canonical_url else f"fingerprint:{article.get('fingerprint', '')}"
                     article_id = hashlib.sha256(seed.encode("utf-8")).hexdigest()
@@ -248,25 +300,27 @@ class Database:
                         """UPDATE news_articles SET
                            yahoo_id=COALESCE(yahoo_id,?), title=?,
                            summary=COALESCE(?,summary), publisher=COALESCE(?,publisher),
-                           published_at=COALESCE(?,published_at), article_url=?,
+                           published_at=COALESCE(?,published_at),
+                           published_at_us=CASE WHEN ? THEN ? ELSE published_at_us END,
+                           article_url=?,
                            canonical_url=COALESCE(?,canonical_url),
                            thumbnail_url=COALESCE(?,thumbnail_url), related_symbols_json=?,
                            primary_symbol=COALESCE(primary_symbol,?), source=?, last_updated_at=?
                            WHERE article_id=?""",
                         (yahoo_id, article["title"], article.get("summary"), article.get("publisher"),
-                         article.get("published_at"), article["article_url"], canonical_url,
+                         published_at, int(timestamp_supplied), published_at_us, article["article_url"], canonical_url,
                          article.get("thumbnail_url"), json.dumps(article.get("related_symbols") or []),
                          symbol, article.get("source") or "Yahoo Finance", now, article_id),
                     )
                 else:
                     connection.execute(
                         """INSERT INTO news_articles
-                           (article_id,yahoo_id,title,summary,publisher,published_at,article_url,
+                           (article_id,yahoo_id,title,summary,publisher,published_at,published_at_us,article_url,
                             canonical_url,thumbnail_url,related_symbols_json,primary_symbol,source,
                             first_seen_at,last_updated_at)
-                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                         (article_id, yahoo_id, article["title"], article.get("summary"),
-                         article.get("publisher"), article.get("published_at"), article["article_url"],
+                         article.get("publisher"), published_at, published_at_us, article["article_url"],
                          canonical_url, article.get("thumbnail_url"),
                          json.dumps(article.get("related_symbols") or []), symbol,
                          article.get("source") or "Yahoo Finance", now, now),
@@ -355,13 +409,10 @@ class Database:
             sql += " AND (a.title LIKE ? OR COALESCE(a.summary,'') LIKE ? OR COALESCE(a.publisher,'') LIKE ?)"
             pattern = f"%{query}%"
             values.extend((pattern, pattern, pattern))
-        if date_from:
-            sql += " AND julianday(a.published_at)>=julianday(?)"
-            values.append(date_from)
-        if date_to:
-            sql += " AND julianday(a.published_at)<=julianday(?)"
-            values.append(date_to)
-        sql += " ORDER BY julianday(a.published_at) IS NULL, julianday(a.published_at) DESC, a.first_seen_at DESC LIMIT ? OFFSET ?"
+        date_clause, date_values = _news_date_filters(date_from, date_to)
+        sql += date_clause
+        values.extend(date_values)
+        sql += " ORDER BY a.published_at_us IS NULL ASC, a.published_at_us DESC, a.first_seen_at DESC LIMIT ? OFFSET ?"
         values.extend((limit, offset))
         with self.connect() as connection:
             rows = connection.execute(sql, values).fetchall()
@@ -391,12 +442,9 @@ class Database:
             sql += " AND (a.title LIKE ? OR COALESCE(a.summary,'') LIKE ? OR COALESCE(a.publisher,'') LIKE ?)"
             pattern = f"%{query}%"
             values.extend((pattern, pattern, pattern))
-        if date_from:
-            sql += " AND julianday(a.published_at)>=julianday(?)"
-            values.append(date_from)
-        if date_to:
-            sql += " AND julianday(a.published_at)<=julianday(?)"
-            values.append(date_to)
+        date_clause, date_values = _news_date_filters(date_from, date_to)
+        sql += date_clause
+        values.extend(date_values)
         with self.connect() as connection:
             row = connection.execute(sql, values).fetchone()
         return int(row[0] if row else 0)
@@ -454,6 +502,8 @@ class Database:
                 UNIQUE(instrument_id, interval, ohlcv_fingerprint, strategy_version,
                        strategy_configuration_hash, direction_mode, position_side)
             );
+            CREATE INDEX IF NOT EXISTS idx_strategy_snapshots_parent
+                ON strategy_snapshots(market_snapshot_id, status);
             CREATE TABLE IF NOT EXISTS analytics_jobs (
                 job_id TEXT PRIMARY KEY, instrument_id TEXT NOT NULL, interval TEXT NOT NULL,
                 job_type TEXT NOT NULL, priority INTEGER NOT NULL DEFAULT 0,
@@ -469,7 +519,7 @@ class Database:
                 WHERE status IN ('QUEUED','RUNNING');
             CREATE TABLE IF NOT EXISTS news_articles (
                 article_id TEXT PRIMARY KEY, yahoo_id TEXT UNIQUE, title TEXT NOT NULL,
-                summary TEXT, publisher TEXT, published_at TEXT, article_url TEXT NOT NULL,
+                summary TEXT, publisher TEXT, published_at TEXT, published_at_us INTEGER, article_url TEXT NOT NULL,
                 canonical_url TEXT UNIQUE, thumbnail_url TEXT, related_symbols_json TEXT NOT NULL DEFAULT '[]',
                 primary_symbol TEXT, source TEXT NOT NULL, first_seen_at TEXT NOT NULL,
                 last_updated_at TEXT NOT NULL
@@ -492,6 +542,18 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_news_cache_expiry ON news_symbol_cache(expires_at);
             """
         )
+        self._add_column(connection, "news_articles", "published_at_us", "INTEGER")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_news_published_us ON news_articles(published_at_us DESC)")
+        for row in connection.execute(
+            "SELECT article_id,published_at FROM news_articles WHERE published_at_us IS NULL AND published_at IS NOT NULL"
+        ).fetchall():
+            timestamp_us = _timestamp_microseconds(row["published_at"])
+            if timestamp_us is not None:
+                connection.execute(
+                    "UPDATE news_articles SET published_at_us=? WHERE article_id=?",
+                    (timestamp_us, row["article_id"]),
+                )
+
         for column, definition in _CATALOGUE_COLUMNS.items():
             self._add_column(connection, "instruments", column, definition)
 

@@ -5,7 +5,7 @@ import type { PreparedSnapshot } from './snapshotStore';
 import { isTimestampFresh } from '../utils/freshness';
 
 export function isCompleteSnapshot(value: PreparedSnapshot | undefined): value is PreparedSnapshot {
-  if (!value || value.schema_version !== 1 || !value.fingerprint) return false;
+  if (!value || value.schema_version !== 2 || !value.fingerprint) return false;
   const candles = value.analysis?.candles;
   const series = value.indicator_series?.series;
   const variants = value.strategy_variants;
@@ -56,7 +56,7 @@ export function isSnapshotFresh(
   snapshot: PreparedSnapshot,
   now: Date = new Date(),
 ): boolean {
-  if (!snapshot || snapshot.analysis?.is_stale === true) return false;
+  if (!snapshot || snapshot.analysis?.is_stale === true || snapshot.technical_ratings?.is_stale === true) return false;
   if (snapshot.provenance?.data_freshness === 'stale') return false;
   const interval = String(snapshot.interval ?? snapshot.analysis?.interval ?? '1d');
   const market = String(snapshot.analysis?.market ?? snapshot.market ?? '');

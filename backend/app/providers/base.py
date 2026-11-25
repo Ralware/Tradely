@@ -63,12 +63,31 @@ def normalize_candles(
     return result
 
 
+ADJUSTMENT_STATUSES = {"adjusted", "unadjusted", "unknown"}
+
+
+def get_adjustment_status(frame: pd.DataFrame, fallback: str = "unknown") -> str:
+    """Read verified adjustment provenance without collapsing unknown to false."""
+    status = frame.attrs.get("adjustment_status")
+    if status in ADJUSTMENT_STATUSES:
+        return str(status)
+    legacy = frame.attrs.get("is_adjusted")
+    if isinstance(legacy, (bool, np.bool_)):
+        return "adjusted" if bool(legacy) else "unadjusted"
+    return fallback if fallback in ADJUSTMENT_STATUSES else "unknown"
+
+
 class MarketDataProvider(ABC):
     name: str
 
     @property
-    def is_adjusted(self) -> bool:
-        return False
+    def adjustment_status(self) -> str:
+        return "unknown"
+
+    @property
+    def is_adjusted(self) -> bool | None:
+        status = self.adjustment_status
+        return True if status == "adjusted" else False if status == "unadjusted" else None
 
     @abstractmethod
     def fetch_candles(

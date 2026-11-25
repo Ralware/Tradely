@@ -57,7 +57,8 @@ def test_tradingview_candle_adapter_uses_exchange_symbol_and_split_adjustment(mo
     assert captured["params"]["to"] == int(pd.Timestamp("2026-11-11", tz="UTC").timestamp()) - 1
     assert "count" not in captured["params"]
     assert frame.iloc[-1]["close"] == 104.0
-    assert frame.attrs["is_adjusted"] is True
+    assert frame.attrs["is_adjusted"] is None
+    assert frame.attrs["adjustment_status"] == "unknown"
     assert frame.attrs["provider_symbol"] == "NSE:RELIANCE"
     assert frame.attrs["source"] == TRADINGVIEW_PROVIDER
 
@@ -248,6 +249,14 @@ def test_market_cache_normalizes_identity_and_returns_copies(monkeypatch):
     assert second.iloc[-1]["close"] == 3
     assert second.iloc[0]["close"] == 1
     assert second.attrs["is_adjusted"] is True
+
+
+def test_explicit_unknown_adjustment_status_overrides_legacy_true_boolean():
+    from app.providers.base import get_adjustment_status
+
+    frame = pd.DataFrame({"close": [1.0]})
+    frame.attrs.update({"adjustment_status": "unknown", "is_adjusted": True})
+    assert get_adjustment_status(frame) == "unknown"
 
 
 def test_market_cache_deduplicates_concurrent_provider_requests(monkeypatch):

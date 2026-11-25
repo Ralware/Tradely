@@ -5,7 +5,7 @@ const identity = 'crypto:BINANCE:ALGOUSDT';
 
 function snapshot(candleTime: string, fingerprint: string): PreparedSnapshot {
   return {
-    schema_version: 1,
+    schema_version: 2,
     interval: '1m',
     fingerprint,
     generated_at: candleTime,

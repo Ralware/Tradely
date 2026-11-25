@@ -1,4 +1,5 @@
 export type Market = 'india' | 'global' | 'crypto';
+export type AdjustmentStatus = 'adjusted' | 'unadjusted' | 'unknown';
 
 export type TransactionIntent = 'BUY' | 'SELL' | 'SELL_SHORT' | 'BUY_TO_COVER';
 export type Side = 'BUY' | 'SELL';
@@ -167,6 +168,7 @@ export interface Quote {
   market_status: string;
   transport?: string;
   is_adjusted?: boolean | null;
+  adjustment_status?: AdjustmentStatus;
   provider_freshness?: string | null;
   error: string | null;
 }
@@ -188,7 +190,8 @@ export interface CandlesResponse {
   instrument?: Instrument | null;
   price_metadata?: PriceMetadata | null;
   source: string;
-  is_adjusted: boolean;
+  is_adjusted: boolean | null;
+  adjustment_status?: AdjustmentStatus;
   freshness: string;
   is_stale: boolean;
   history_truncated: boolean;
@@ -245,7 +248,8 @@ export interface AnalysisResponse {
   instrument?: Instrument | null;
   price_metadata?: PriceMetadata | null;
   source: string;
-  is_adjusted: boolean;
+  is_adjusted: boolean | null;
+  adjustment_status?: AdjustmentStatus;
   is_stale: boolean;
   history_truncated: boolean;
   history_pages: number | null;
@@ -278,7 +282,8 @@ export interface IndicatorSeriesResponse {
   instrument?: Instrument | null;
   price_metadata?: PriceMetadata | null;
   source: string;
-  is_adjusted: boolean;
+  is_adjusted: boolean | null;
+  adjustment_status?: AdjustmentStatus;
   is_stale: boolean;
   as_of: string;
   fingerprint: string;
@@ -714,7 +719,8 @@ export interface TechnicalSummaryResponse {
   instrument?: Instrument | null;
   price_metadata?: PriceMetadata | null;
   source: string;
-  is_adjusted: boolean;
+  is_adjusted: boolean | null;
+  adjustment_status?: AdjustmentStatus;
   is_stale: boolean;
   as_of: string;
   fingerprint: string;
@@ -746,7 +752,8 @@ export interface AnalyticsProvenance {
   exchange: string | null;
   interval: string;
   source: string;
-  is_adjusted: boolean;
+  is_adjusted: boolean | null;
+  adjustment_status?: AdjustmentStatus;
   candle_count: number;
   latest_candle_timestamp: string;
   last_candle_confirmed: boolean | null;
@@ -776,7 +783,8 @@ export interface AnalyticsSnapshotResponse {
   exchange: string | null;
   interval: string;
   source: string;
-  is_adjusted: boolean;
+  is_adjusted: boolean | null;
+  adjustment_status?: AdjustmentStatus;
   fingerprint: string;
   price_metadata?: PriceMetadata | null;
   history_truncated?: boolean;

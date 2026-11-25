@@ -351,8 +351,14 @@ class TradingViewProvider(MarketDataProvider):
         self.bridge = TradingViewBridge(settings)
 
     @property
-    def is_adjusted(self) -> bool:
-        return True
+    def adjustment_status(self) -> str:
+        # The bridge accepts an adjustment request but provides no independent
+        # evidence that corporate-action adjustments were applied successfully.
+        return "unknown"
+
+    @property
+    def is_adjusted(self) -> bool | None:
+        return None
 
     def fetch_candles(
         self,
@@ -431,7 +437,8 @@ class TradingViewProvider(MarketDataProvider):
         # ceiling. Never present a capped response as complete history.
         history_truncated = bool(rows) and len(rows) >= max_bars
         frame.attrs["source"] = self.name
-        frame.attrs["is_adjusted"] = True
+        frame.attrs["adjustment_status"] = "unknown"
+        frame.attrs["is_adjusted"] = None
         frame.attrs["freshness"] = _FRESHNESS_NOTE
         frame.attrs["history_truncated"] = history_truncated
         frame.attrs["history_pages"] = math.ceil(len(rows) / 5000) if rows else 0

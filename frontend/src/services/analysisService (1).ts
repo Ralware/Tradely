@@ -55,7 +55,7 @@ let marketCacheBytes = 0;
 
 type MarketDataResponse = {
   source: string;
-  is_adjusted?: boolean;
+  is_adjusted?: boolean | null;
   fingerprint?: string;
   interval?: string;
 };

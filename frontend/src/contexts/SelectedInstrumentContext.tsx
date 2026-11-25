@@ -33,7 +33,7 @@ export interface SelectedQuote {
   source: string;
   asOf: string | null;
   isStale: boolean;
-  isAdjusted: boolean;
+  isAdjusted: boolean | null;
   interval: string;
 }
 
@@ -537,7 +537,7 @@ export function SelectedInstrumentProvider({
       source: live.provider,
       asOf: live.quote_time ?? live.retrieved_at,
       isStale: live.is_stale,
-      isAdjusted: Boolean(live.is_adjusted),
+      isAdjusted: live.is_adjusted ?? null,
       interval,
     };
   }, [interval, live]);

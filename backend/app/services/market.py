@@ -14,7 +14,7 @@ import pandas as pd
 
 from app.core.config import Settings
 from app.core.instruments import instrument_id_for, normalize_symbol, resolve_exchange
-from app.providers.base import MarketDataProvider, ProviderError, normalize_candles
+from app.providers.base import MarketDataProvider, ProviderError, get_adjustment_status, normalize_candles
 from app.providers.tradingview import INTERVAL_SECONDS, TradingViewProvider
 
 logger = logging.getLogger(__name__)
@@ -250,7 +250,9 @@ class MarketService:
                 )
                 frame = normalize_candles(frame)
                 frame.attrs.setdefault("source", adapter.name)
-                frame.attrs.setdefault("is_adjusted", adapter.is_adjusted)
+                status = get_adjustment_status(frame, adapter.adjustment_status)
+                frame.attrs["adjustment_status"] = status
+                frame.attrs["is_adjusted"] = True if status == "adjusted" else False if status == "unadjusted" else None
                 return frame, adapter.name
             except ProviderError:
                 raise
@@ -271,13 +273,15 @@ class MarketService:
             )
             tail = normalize_candles(tail)
             tail.attrs.setdefault("source", adapter.name)
-            tail.attrs.setdefault("is_adjusted", adapter.is_adjusted)
+            status = get_adjustment_status(tail, adapter.adjustment_status)
+            tail.attrs["adjustment_status"] = status
+            tail.attrs["is_adjusted"] = True if status == "adjusted" else False if status == "unadjusted" else None
             return tail, adapter.name
 
         if bypass_cache:
             return fetch()
         cache_key = (
-            canonical_id, interval, adapter.is_adjusted,
+            canonical_id, interval, adapter.adjustment_status,
             (adapter.__class__.__module__, adapter.__class__.__qualname__, adapter.name),
             start, end, max_bars,
         )
