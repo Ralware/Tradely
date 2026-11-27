@@ -134,7 +134,7 @@ export function WatchlistPage() {
               onClick={handleRefreshAll}
               aria-label="Refresh watchlist data"
               title="Refresh watchlist data"
-              className="flex h-7 w-7 items-center justify-center rounded-md border border-terminal-border bg-terminal-panel text-terminal-muted transition-colors hover:bg-terminal-hover hover:text-terminal-text"
+            className="flex h-7 w-7 items-center justify-center rounded-md border border-terminal-border bg-terminal-panel text-terminal-muted transition-all duration-200 hover:-translate-y-px hover:border-terminal-borderStrong hover:bg-terminal-hover hover:text-terminal-text active:translate-y-0"
             >
               <Icon name="refresh" size={14} />
             </button>
@@ -183,7 +183,7 @@ export function WatchlistPage() {
       {/* Add Instrument Modal */}
       {addModalOpen ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-terminal-bg/90 p-4"
+          className="modal-scrim fixed inset-0 z-50 flex items-center justify-center bg-terminal-bg/90 p-4 backdrop-blur-sm"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setAddModalOpen(false);
           }}
@@ -192,7 +192,7 @@ export function WatchlistPage() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="watchlist-dialog-title"
-            className="w-full max-w-md rounded border border-terminal-border bg-terminal-panel p-4"
+            className="modal-panel w-full max-w-md rounded-xl border border-terminal-border bg-terminal-panel p-4"
           >
             <div className="mb-3 flex items-start justify-between gap-3 border-b border-terminal-border pb-2.5">
               <div>

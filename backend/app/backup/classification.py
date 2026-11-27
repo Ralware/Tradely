@@ -59,12 +59,6 @@ ESSENTIAL_TABLES: tuple[TableSpec, ...] = (
         description="Buy/sell/short ledger history with exact financial values.",
     ),
     TableSpec(
-        name="signal_audit",
-        order_by="id",
-        natural_key=("symbol", "market", "strategy", "strategy_version", "state", "as_of"),
-        description="Historical signal audit trail (optional but non-regenerable).",
-    ),
-    TableSpec(
         name="catalogue_meta",
         order_by="key",
         natural_key=("key",),
@@ -86,7 +80,6 @@ TABLE_SPECS: dict[str, TableSpec] = {spec.name: spec for spec in ESSENTIAL_TABLE
 REGENERABLE_TABLES: tuple[str, ...] = (
     "market_bars",
     "market_analytics_snapshots",
-    "strategy_snapshots",
     "analytics_jobs",
     "news_articles",
     "news_article_symbols",

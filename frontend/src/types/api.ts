@@ -5,16 +5,6 @@ export type TransactionIntent = 'BUY' | 'SELL' | 'SELL_SHORT' | 'BUY_TO_COVER';
 export type Side = 'BUY' | 'SELL';
 export type DirectionMode = 'long_only' | 'short_only' | 'long_short';
 export type PositionDirection = 'LONG' | 'SHORT';
-export type SignalState =
-  | 'BUY'
-  | 'SELL'
-  | 'SELL_SHORT'
-  | 'BUY_TO_COVER'
-  | 'WAIT'
-  | 'NO_SIGNAL'
-  | 'INSUFFICIENT_DATA'
-  | 'STALE_DATA'
-  | 'DATA_QUALITY_ERROR';
 
 export type AssetType = 'equity' | 'crypto';
 
@@ -198,36 +188,11 @@ export interface CandlesResponse {
   history_pages: number | null;
   last_candle_confirmed?: boolean | null;
   forming_bar_excluded?: boolean;
+  forming_candle?: Candle | null;
   last_candle_at: string;
   count: number;
   candles: Candle[];
   warnings: string[];
-}
-
-export interface SignalCondition {
-  name: string;
-  passed: boolean;
-  observed: number | string | null;
-  threshold: number | string | null;
-  explanation: string;
-}
-
-export interface StrategySignal {
-  symbol: string;
-  market: Market;
-  instrument_id?: string;
-  strategy: string;
-  strategy_version: string;
-  direction_mode?: DirectionMode;
-  direction?: PositionDirection | null;
-  state: SignalState;
-  as_of: string | null;
-  entry_reference: number | null;
-  stop_reference: number | null;
-  risk_per_unit: number | null;
-  conditions: SignalCondition[];
-  explanation: string;
-  data_source: string | null;
 }
 
 export type IndicatorValues = Record<string, number | null>;
@@ -259,7 +224,6 @@ export interface AnalysisResponse {
   fingerprint: string;
   latest: LatestOhlcv;
   indicators: IndicatorValues;
-  strategy: StrategySignal;
   warnings: string[];
   candles: Candle[];
 }
@@ -289,26 +253,6 @@ export interface IndicatorSeriesResponse {
   fingerprint: string;
   count: number;
   series: IndicatorSeriesRow[];
-}
-
-export type ScannerStrategy = Partial<StrategySignal> & { state: SignalState };
-
-export interface ScannerItem {
-  symbol: string;
-  market: Market;
-  instrument_id?: string;
-  source?: string;
-  last_close?: number;
-  is_adjusted?: boolean;
-  is_stale?: boolean;
-  strategy: ScannerStrategy;
-  error?: string;
-}
-
-export interface ScannerResponse {
-  items: ScannerItem[];
-  count: number;
-  note: string;
 }
 
 export interface WatchlistItem {
@@ -419,26 +363,6 @@ export interface BacktestResult {
   strategy: string;
   strategy_version: string;
   data_adjusted: boolean;
-}
-
-export interface RiskRequest {
-  capital: number;
-  risk_fraction: number;
-  entry: number;
-  stop: number;
-  direction?: PositionDirection;
-  lot_size?: number;
-  max_position_fraction?: number;
-}
-
-export interface RiskResult {
-  risk_budget: number;
-  risk_per_unit: number;
-  quantity: number;
-  position_value: number;
-  planned_loss: number;
-  capital_limited: boolean;
-  direction?: PositionDirection;
 }
 
 export interface Transaction {

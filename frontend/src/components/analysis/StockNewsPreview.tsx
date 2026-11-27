@@ -22,13 +22,23 @@ export function StockNewsPreview({ instrumentId, symbol }: { instrumentId: strin
   useEffect(() => {
     const controller = new AbortController();
     let active = true;
-    setLoading(true);
-    setError(false);
-    void newsService.symbolFeed(instrumentId, symbol, { page: 1, pageSize: 5, signal: controller.signal })
-      .then((result) => { if (active) setFeed(result); })
-      .catch(() => { if (active && !controller.signal.aborted) setError(true); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; controller.abort(); };
+    const load = (initial: boolean) => {
+      if (initial) setLoading(true);
+      setError(false);
+      void newsService.symbolFeed(instrumentId, symbol, { page: 1, pageSize: 5, signal: controller.signal })
+        .then((result) => { if (active) setFeed(result); })
+        .catch(() => { if (active && !controller.signal.aborted) setError(true); })
+        .finally(() => { if (active && initial) setLoading(false); });
+    };
+    load(true);
+    // Headlines are refreshed in the background so the preview stays live
+    // without a full-page reload.
+    const timer = window.setInterval(() => load(false), 10_000);
+    return () => {
+      active = false;
+      controller.abort();
+      window.clearInterval(timer);
+    };
   }, [instrumentId, symbol]);
 
   function viewAll() {

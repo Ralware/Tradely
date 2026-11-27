@@ -45,10 +45,6 @@ _REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {
     "holding_transactions": (
         "symbol", "market", "side", "quantity", "price", "trade_time", "currency",
     ),
-    "signal_audit": (
-        "symbol", "market", "strategy", "strategy_version", "state",
-        "payload_json", "created_at",
-    ),
     "catalogue_meta": ("key", "value", "updated_at"),
 }
 

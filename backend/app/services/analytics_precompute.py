@@ -20,7 +20,6 @@ from app.core.database import Database
 from app.providers.base import get_adjustment_status
 from app.services.freshness import is_candle_stale
 from app.services.indicators import compute_indicators
-from app.services.strategy import STRATEGY_VERSION, evaluate_trend_breakout, suppress_actionable_strategy
 from app.services.tv_technical_rating import (
     DEPENDENCY as RATING_DEPENDENCY,
     SOURCE_VERSION as RATING_VERSION,
@@ -29,10 +28,8 @@ from app.services.tv_technical_rating import (
 )
 
 logger = logging.getLogger(__name__)
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 INDICATOR_VERSION = "tradely-indicators-v1"
-DIRECTIONS = ("long_only", "short_only", "long_short")
-POSITIONS = (None, "LONG", "SHORT")
 # Explicit bounded ranges; provider limits and session availability still apply.
 HISTORY_DAYS = {"1m": 30, "3m": 90, "5m": 180, "15m": 365, "30m": 730,
                 "45m": 730, "1h": 1095, "2h": 1095, "4h": 1825,
@@ -396,7 +393,10 @@ class AnalyticsPrecompute:
                 self._active -= 1
         return True
 
-    def _compute_and_publish(self, instrument_id: str, interval: str, *, bypass_cache: bool = False) -> None:
+    def _compute_and_publish(
+        self, instrument_id: str, interval: str, *, bypass_cache: bool = False,
+        refresh_latest: bool = False,
+    ) -> None:
         instrument = self.db.instrument_for_id(instrument_id)
         if not instrument:
             raise ValueError(f"Unknown instrument: {instrument_id}")
@@ -410,7 +410,8 @@ class AnalyticsPrecompute:
         days = HISTORY_DAYS[interval]
         frame, source = self.market_service.candles(
             instrument["symbol"], market=instrument["market"], exchange=instrument.get("exchange"),
-            interval=interval, days=days, provider="auto", full_history=False, bypass_cache=bypass_cache,
+            interval=interval, days=days, provider="auto", full_history=False,
+            bypass_cache=bypass_cache, refresh_latest=refresh_latest,
         )
         self._provider_requests += 1
         if frame.empty:
@@ -443,12 +444,12 @@ class AnalyticsPrecompute:
         stale = _stale(frame, instrument["market"], interval)
         warnings: list[str] = []
         if stale:
-            warnings.append("Latest candle is stale for this market; actionable signal output is suppressed.")
+            warnings.append("Latest candle is stale for this market; refresh to retrieve current technical data.")
         if instrument["market"] == "india" and adjustment_status != "adjusted":
             if adjustment_status == "unknown":
-                warnings.append("Historical corporate-action adjustment status could not be verified. Indian-equity strategy output is suppressed.")
+                warnings.append("Historical corporate-action adjustment status could not be verified.")
             else:
-                warnings.append("Indian equity candles are known to be unadjusted. Corporate actions can distort long-term indicators; strategy output is suppressed.")
+                warnings.append("Indian equity candles are known to be unadjusted. Corporate actions can distort long-term indicators.")
         history_truncated = bool(frame.attrs.get("history_truncated", False))
         history_pages = frame.attrs.get("history_pages")
         last_bar_confirmed = frame.attrs.get("last_bar_confirmed")
@@ -456,29 +457,11 @@ class AnalyticsPrecompute:
         if history_truncated:
             warnings.append("The provider returned the maximum requested bar count; older history may exist.")
         instrument_view = {**instrument, **price_metadata}
-        strategies: dict[str, Any] = {}
-        for direction in DIRECTIONS:
-            for position in POSITIONS:
-                result = evaluate_trend_breakout(
-                    frame, symbol=instrument["symbol"], market=instrument["market"], source=source,
-                    direction_mode=direction, position_side=position, indicators=indicators,
-                ).model_dump(mode="json")
-                if stale or (instrument["market"] == "india" and adjustment_status != "adjusted"):
-                    result = suppress_actionable_strategy(
-                        result, state="STALE_DATA" if stale else "DATA_QUALITY_ERROR",
-                        explanation=(
-                            "Strategy signal suppressed because fresh market data could not be retrieved."
-                            if stale else
-                            "Strategy signal suppressed because historical corporate-action adjustment status could not be verified."
-                            if adjustment_status == "unknown" else
-                            "Strategy signal suppressed because the Indian-equity history is known to be unadjusted."
-                        ),
-                    )
-                strategies[f"{direction}:{position or 'NONE'}"] = result
         payload = {
             "schema_version": SCHEMA_VERSION,
             "symbol": instrument["symbol"], "market": instrument["market"],
             "exchange": instrument.get("exchange"), "instrument": instrument_view,
+            "forming_candle": frame.attrs.get("forming_candle"),
             "price_metadata": price_metadata,
             "interval": interval, "source": source, "is_adjusted": is_adjusted, "adjustment_status": adjustment_status,
             "fingerprint": fingerprint, "generated_at": now,
@@ -502,7 +485,6 @@ class AnalyticsPrecompute:
                 "instrument": instrument_view, "price_metadata": price_metadata,
                 "is_adjusted": is_adjusted, "adjustment_status": adjustment_status, "is_stale": stale, "as_of": frame.index[-1].isoformat(),
                 "fingerprint": fingerprint, **technical},
-            "strategy_variants": strategies,
             "provenance": {"instrument_id": instrument_id, "source": source, "interval": interval,
                 "is_adjusted": is_adjusted, "adjustment_status": adjustment_status, "ohlcv_fingerprint": fingerprint,
                 "candle_count": len(frame), "latest_candle_timestamp": frame.index[-1].isoformat(),
@@ -538,19 +520,6 @@ class AnalyticsPrecompute:
                  RATING_VERSION,source,source,adjusted,frame.index[-1].isoformat(),len(frame),now,now,
                  SCHEMA_VERSION,"READY",blob,checksum),
             )
-            for key, value in strategies.items():
-                direction, position = key.split(":",1)
-                strategy_blob, strategy_checksum = _encode(value)
-                strategy_id = hashlib.sha256(f"{identity}|{STRATEGY_VERSION}|{direction}|{position}".encode()).hexdigest()[:32]
-                conn.execute(
-                    """INSERT INTO strategy_snapshots VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
-                       ON CONFLICT(instrument_id,interval,ohlcv_fingerprint,strategy_version,
-                         strategy_configuration_hash,direction_mode,position_side) DO UPDATE SET
-                         market_snapshot_id=excluded.market_snapshot_id,generated_at=excluded.generated_at,
-                         status='READY',payload=excluded.payload,payload_checksum=excluded.payload_checksum""",
-                    (strategy_id,identity,instrument_id,interval,fingerprint,STRATEGY_VERSION,
-                     "default-v1",direction,position,now,"READY",strategy_blob,strategy_checksum),
-                )
             conn.commit()
         self._record("snapshot_writes")
         self._record("snapshot_write_seconds", time.perf_counter() - write_started)
@@ -560,8 +529,7 @@ class AnalyticsPrecompute:
         """Bound regenerable snapshot growth for one instrument/interval series.
 
         The newest snapshots are kept as a fallback for ``get_snapshot``; older
-        rows and the strategy variants that reference them are deleted together
-        so no dangling ``market_snapshot_id`` remains.
+        rows are deleted together so the local cache remains bounded.
         """
         if not self.snapshot_retention_enabled:
             return
@@ -581,10 +549,6 @@ class AnalyticsPrecompute:
             if ids:
                 marks = ",".join("?" for _ in ids)
                 connection.execute(
-                    f"DELETE FROM strategy_snapshots WHERE market_snapshot_id IN ({marks})",
-                    ids,
-                )
-                connection.execute(
                     f"DELETE FROM market_analytics_snapshots WHERE snapshot_id IN ({marks})",
                     ids,
                 )
@@ -599,96 +563,6 @@ class AnalyticsPrecompute:
             )
         finally:
             connection.close()
-
-    def get_prepared_daily_signal(
-        self, instrument_id: str, interval: str = "1d"
-    ) -> dict[str, Any] | None:
-        """Return the prepared daily strategy without recomputing indicators.
-
-        The scanner only needs the default long-only signal plus a little
-        metadata. Reading the small strategy payload (instead of decompressing
-        the complete historical analysis bundle) keeps watchlist scans cheap
-        while still reusing the exact same calculation the Analytics page uses.
-        """
-        with self.db.connect() as conn:
-            snapshot = conn.execute(
-                """SELECT snapshot_id,ohlcv_fingerprint,latest_candle_at,candle_count,
-                          generated_at,adjustment_status,source_identity
-                   FROM market_analytics_snapshots
-                   WHERE instrument_id=? AND interval=? AND status='READY'
-                     AND schema_version=? AND indicator_version=?
-                     AND indicator_dependency_version=? AND rating_version=?
-                   ORDER BY generated_at DESC LIMIT 1""",
-                (
-                    instrument_id,
-                    interval,
-                    SCHEMA_VERSION,
-                    INDICATOR_VERSION,
-                    RATING_DEPENDENCY,
-                    RATING_VERSION,
-                ),
-            ).fetchone()
-            if snapshot is None:
-                return None
-            variant = conn.execute(
-                """SELECT payload,payload_checksum FROM strategy_snapshots
-                   WHERE market_snapshot_id=? AND instrument_id=? AND interval=?
-                     AND ohlcv_fingerprint=? AND strategy_version=?
-                     AND strategy_configuration_hash='default-v1'
-                     AND direction_mode='long_only' AND position_side='NONE'
-                     AND status='READY' LIMIT 1""",
-                (
-                    snapshot["snapshot_id"],
-                    instrument_id,
-                    interval,
-                    snapshot["ohlcv_fingerprint"],
-                    STRATEGY_VERSION,
-                ),
-            ).fetchone()
-            if variant is None:
-                return None
-            latest_bar = conn.execute(
-                """SELECT close FROM market_bars
-                   WHERE instrument_id=? AND interval=?
-                   ORDER BY timestamp DESC LIMIT 1""",
-                (instrument_id, interval),
-            ).fetchone()
-        try:
-            strategy = _decode(variant["payload"], variant["payload_checksum"])
-        except (ValueError, OSError, TypeError, json.JSONDecodeError):
-            logger.exception(
-                "[CACHE] invalid prepared strategy skipped instrument=%s interval=%s",
-                instrument_id,
-                interval,
-            )
-            return None
-        instrument = self.db.instrument_for_id(instrument_id) or {}
-        market = str(instrument.get("market") or "")
-        adjustment_status = str(snapshot["adjustment_status"])
-        stale = self._candle_timestamp_is_stale(
-            snapshot["latest_candle_at"], market, interval
-        )
-        return {
-            "instrument_id": instrument_id,
-            "interval": interval,
-            "fingerprint": snapshot["ohlcv_fingerprint"],
-            "snapshot_id": snapshot["snapshot_id"],
-            "generated_at": snapshot["generated_at"],
-            "latest_candle_at": snapshot["latest_candle_at"],
-            "candle_count": int(snapshot["candle_count"]),
-            "source": snapshot["source_identity"],
-            "latest_close": (
-                float(latest_bar["close"]) if latest_bar is not None else None
-            ),
-            "adjustment_status": adjustment_status,
-            "is_adjusted": (
-                True if adjustment_status == "adjusted"
-                else False if adjustment_status == "unadjusted"
-                else None
-            ),
-            "is_stale": stale,
-            "strategy": strategy,
-        }
 
     @staticmethod
     def _candle_timestamp_is_stale(
@@ -710,25 +584,8 @@ class AnalyticsPrecompute:
                        AND status='READY' ORDER BY generated_at DESC""", (instrument_id, interval)
                 )
                 for row in rows:
-                    variants = conn.execute(
-                        "SELECT * FROM strategy_snapshots WHERE market_snapshot_id=? AND status='READY'",
-                        (row["snapshot_id"],),
-                    ).fetchall()
-                    if any(variant["strategy_version"] != STRATEGY_VERSION
-                           or variant["strategy_configuration_hash"] != "default-v1"
-                           or variant["ohlcv_fingerprint"] != row["ohlcv_fingerprint"]
-                           for variant in variants):
-                        logger.warning("[CACHE] strategy version mismatch instrument=%s interval=%s",
-                                       instrument_id, interval)
-                        continue
                     try:
                         payload = _decode(row["payload"], row["payload_checksum"])
-                        variants = {
-                            f"{variant['direction_mode']}:{variant['position_side']}":
-                            _decode(variant["payload"], variant["payload_checksum"])
-                            for variant in variants
-                        }
-                        payload["strategy_variants"] = variants
                         if self._snapshot_complete(payload, instrument_id, interval, row):
                             return payload
                         logger.warning("[CACHE] incomplete snapshot skipped instrument=%s interval=%s", instrument_id, interval)
@@ -751,11 +608,6 @@ class AnalyticsPrecompute:
             candles = payload["analysis"]["candles"]
             series = payload["indicator_series"]["series"]
             ratings = payload["technical_ratings"]
-            variants = payload.get("strategy_variants", {})
-            expected_variants = {
-                f"{direction}:{position or 'NONE'}"
-                for direction in DIRECTIONS for position in POSITIONS
-            }
             if (not fingerprint or not candles or len(series) != len(candles)
                     or payload["indicator_series"].get("count") != len(candles)
                     or payload.get("provenance", {}).get("candle_count") != len(candles)):
@@ -765,8 +617,6 @@ class AnalyticsPrecompute:
             if ratings.get("fingerprint") != fingerprint:
                 return False
             if payload["analysis"].get("fingerprint") != fingerprint:
-                return False
-            if set(variants) != expected_variants:
                 return False
             if ratings.get("summary", {}).get("overall", {}).get("available", 0) <= 0:
                 return False
@@ -783,26 +633,31 @@ class AnalyticsPrecompute:
                 or row["candle_count"] != len(candles)
             ):
                 return False
-            return all(isinstance(value, dict) and value for value in variants.values())
+            return True
         except (KeyError, TypeError, AttributeError):
             return False
 
-    def get_or_compute_snapshot(self, instrument_id: str, interval: str) -> dict[str, Any]:
+    def get_or_compute_snapshot(
+        self, instrument_id: str, interval: str, *, refresh_latest: bool = False,
+    ) -> dict[str, Any]:
         """Load valid local data, or compute/publish one live snapshot on a miss."""
         if interval not in HISTORY_DAYS:
             raise ValueError(f"Unsupported interval: {interval}")
         cached = self.get_snapshot(instrument_id, interval)
-        if cached is not None and not self._snapshot_is_stale(cached):
+        if cached is not None and not self._snapshot_is_stale(cached) and not refresh_latest:
             return cached
         identity = (instrument_id, interval)
         with self._snapshot_load_lock(identity):
             cached = self.get_snapshot(instrument_id, interval)
-            if cached is not None and not self._snapshot_is_stale(cached):
+            if cached is not None and not self._snapshot_is_stale(cached) and not refresh_latest:
                 return cached
             logger.info("[CACHE] %s instrument=%s interval=%s",
                         "stale" if cached is not None else "miss", instrument_id, interval)
             try:
-                self._compute_and_publish(instrument_id, interval, bypass_cache=False)
+                self._compute_and_publish(
+                    instrument_id, interval, bypass_cache=False,
+                    refresh_latest=refresh_latest,
+                )
             except Exception:
                 if cached is None:
                     raise
@@ -816,11 +671,11 @@ class AnalyticsPrecompute:
 
     @staticmethod
     def _stale_reference_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
-        """Return a detached reference-only copy with every cached signal invalidated."""
+        """Return a detached reference-only copy when a refresh fails."""
         result = copy.deepcopy(payload)
         result["is_stale"] = True
-        warning = ("Fresh market data could not be obtained. Strategy output is suppressed; "
-                   "this analytical snapshot is retained for reference only and requires a successful refresh.")
+        warning = ("Fresh market data could not be obtained; this analytical snapshot is retained "
+                   "for reference only and requires a successful refresh.")
         analysis = result.setdefault("analysis", {})
         analysis["is_stale"] = True
         warnings = analysis.get("warnings")
@@ -834,16 +689,6 @@ class AnalyticsPrecompute:
         if isinstance(series, dict):
             series["is_stale"] = True
         result.setdefault("provenance", {})["data_freshness"] = "stale"
-        variants = result.get("strategy_variants")
-        if not isinstance(variants, dict):
-            variants = {}
-            result["strategy_variants"] = variants
-        for key, value in list(variants.items()):
-            variant = value if isinstance(value, dict) else {}
-            variants[key] = suppress_actionable_strategy(
-                variant, state="STALE_DATA",
-                explanation="Strategy signal suppressed because fresh market data could not be retrieved. The displayed analytical snapshot is retained for reference only.",
-            )
         return result
 
     @staticmethod
@@ -940,35 +785,12 @@ class AnalyticsPrecompute:
                 (str(row["instrument_id"]), str(row["interval"])): row
                 for row in job_rows
             }
-            snapshot_ids = [row["snapshot_id"] for row in snapshot_rows]
-            strategy_counts: dict[tuple[str, str], int] = {}
-            if snapshot_ids:
-                id_placeholders = ",".join("?" for _ in snapshot_ids)
-                count_rows = conn.execute(
-                    f"""SELECT market_snapshot_id,ohlcv_fingerprint,COUNT(*) AS count
-                        FROM strategy_snapshots
-                        WHERE status='READY' AND strategy_version=?
-                          AND strategy_configuration_hash='default-v1'
-                          AND market_snapshot_id IN ({id_placeholders})
-                        GROUP BY market_snapshot_id,ohlcv_fingerprint""",
-                    (STRATEGY_VERSION, *snapshot_ids),
-                ).fetchall()
-                strategy_counts = {
-                    (str(row["market_snapshot_id"]), str(row["ohlcv_fingerprint"])): int(row["count"])
-                    for row in count_rows
-                }
-
         result = []
-        expected_strategy_count = len(DIRECTIONS) * len(POSITIONS)
         for identity in identities:
             instrument_id, interval = identity
             snapshot = snapshots.get(identity)
             job = jobs.get(identity)
             if snapshot:
-                strategy_count = strategy_counts.get(
-                    (str(snapshot["snapshot_id"]), str(snapshot["ohlcv_fingerprint"])),
-                    0,
-                )
                 metadata_matches = (
                     snapshot["schema_version"] == SCHEMA_VERSION
                     and snapshot["indicator_version"] == INDICATOR_VERSION
@@ -976,7 +798,7 @@ class AnalyticsPrecompute:
                     and snapshot["rating_version"] == RATING_VERSION
                     and snapshot["adjustment_status"] in {"adjusted", "unadjusted", "unknown"}
                 )
-                if not metadata_matches or strategy_count != expected_strategy_count:
+                if not metadata_matches:
                     snapshot = None
             job_status = str(job["status"]) if job else "MISSING"
             if not snapshot and job_status not in {"QUEUED", "RUNNING", "FAILED"}:

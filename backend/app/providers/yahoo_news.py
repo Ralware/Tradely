@@ -280,16 +280,22 @@ class YahooFinanceNewsProvider:
 
     def get_symbol_articles(self, yahoo_symbol: str, company_name: str) -> list[dict[str, Any]]:
         search_error: YahooNewsError | None = None
-        try:
-            payload = self.search(yahoo_symbol)
-            news = payload.get("news")
-            candidates = [normalize_search_article(item) for item in news[:MAX_ARTICLES]] if isinstance(news, list) else []
-            search_articles = [item for item in candidates if item and self._search_article_relevant(item, yahoo_symbol, company_name)]
-            if search_articles:
-                return self._deduplicate(search_articles)
-        except YahooNewsError as exc:
-            search_error = exc
-            logger.warning("Yahoo Finance search retrieval failed status=%s", exc.status_code)
+        search_articles: list[dict[str, Any]] = []
+        queries = list(dict.fromkeys(query.strip() for query in (yahoo_symbol, company_name) if query.strip()))
+        for query in queries:
+            try:
+                payload = self.search(query)
+                news = payload.get("news")
+                candidates = [normalize_search_article(item) for item in news[:MAX_ARTICLES]] if isinstance(news, list) else []
+                search_articles.extend(
+                    item for item in candidates
+                    if item and self._search_article_relevant(item, yahoo_symbol, company_name)
+                )
+            except YahooNewsError as exc:
+                search_error = search_error or exc
+                logger.warning("Yahoo Finance search retrieval failed query=%s status=%s", query, exc.status_code)
+        if search_articles:
+            return self._deduplicate(search_articles)
 
         try:
             raw = self._get(RSS_URL, {"s": yahoo_symbol, "region": "US", "lang": "en-US"})

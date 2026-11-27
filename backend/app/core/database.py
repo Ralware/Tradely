@@ -21,7 +21,7 @@ from app.core.models import (
     WatchlistItem,
 )
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 _CATALOGUE_COLUMNS: dict[str, str] = {
     "display_name": "TEXT NOT NULL DEFAULT ''",
     "base_currency": "TEXT NOT NULL DEFAULT ''",
@@ -224,17 +224,6 @@ class Database:
                     quote_json TEXT NOT NULL,
                     quote_time TEXT,
                     retrieved_at TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS signal_audit (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    symbol TEXT NOT NULL,
-                    market TEXT NOT NULL,
-                    strategy TEXT NOT NULL,
-                    strategy_version TEXT NOT NULL,
-                    state TEXT NOT NULL,
-                    as_of TEXT,
-                    payload_json TEXT NOT NULL,
-                    created_at TEXT NOT NULL
                 );
                 """
             )
@@ -468,6 +457,9 @@ class Database:
             connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def _migrate(self, connection: sqlite3.Connection) -> None:
+        # Signal generation and audit persistence were removed in schema v7.
+        connection.execute("DROP TABLE IF EXISTS signal_audit")
+        connection.execute("DROP TABLE IF EXISTS strategy_snapshots")
         connection.executescript(
             """
             CREATE TABLE IF NOT EXISTS market_bars (
@@ -492,18 +484,6 @@ class Database:
             );
             CREATE INDEX IF NOT EXISTS idx_analytics_latest
                 ON market_analytics_snapshots(instrument_id, interval, status, generated_at);
-            CREATE TABLE IF NOT EXISTS strategy_snapshots (
-                strategy_snapshot_id TEXT PRIMARY KEY, market_snapshot_id TEXT NOT NULL,
-                instrument_id TEXT NOT NULL, interval TEXT NOT NULL, ohlcv_fingerprint TEXT NOT NULL,
-                strategy_version TEXT NOT NULL, strategy_configuration_hash TEXT NOT NULL,
-                direction_mode TEXT NOT NULL, position_side TEXT NOT NULL,
-                generated_at TEXT NOT NULL, status TEXT NOT NULL, payload BLOB NOT NULL,
-                payload_checksum TEXT NOT NULL,
-                UNIQUE(instrument_id, interval, ohlcv_fingerprint, strategy_version,
-                       strategy_configuration_hash, direction_mode, position_side)
-            );
-            CREATE INDEX IF NOT EXISTS idx_strategy_snapshots_parent
-                ON strategy_snapshots(market_snapshot_id, status);
             CREATE TABLE IF NOT EXISTS analytics_jobs (
                 job_id TEXT PRIMARY KEY, instrument_id TEXT NOT NULL, interval TEXT NOT NULL,
                 job_type TEXT NOT NULL, priority INTEGER NOT NULL DEFAULT 0,
@@ -1409,15 +1389,3 @@ class Database:
         quote.setdefault("retrieved_at", row["retrieved_at"])
         return quote
 
-    # ------------------------------------------------------------------
-    # Signals
-    # ------------------------------------------------------------------
-    def save_signal(self, payload: dict[str, Any]) -> None:
-        with self.connect() as connection:
-            connection.execute(
-                """INSERT INTO signal_audit
-                   (symbol, market, strategy, strategy_version, state, as_of, payload_json, created_at)
-                   VALUES(?,?,?,?,?,?,?,?)""",
-                (payload["symbol"], payload["market"], payload["strategy"], payload["strategy_version"],
-                 payload["state"], payload.get("as_of"), json.dumps(payload, default=str), _utc_now_iso()),
-            )

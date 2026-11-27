@@ -168,16 +168,23 @@ def test_market_candles_route_passes_bounded_days_to_provider(monkeypatch):
     index = pd.date_range(end=pd.Timestamp.now(tz="UTC").floor("D"), periods=2, freq="D")
     frame = pd.DataFrame({"open": [1., 2.], "high": [2., 3.], "low": [.5, 1.5],
                           "close": [1.5, 2.5], "volume": [10., 20.]}, index=index)
+    forming = {"timestamp": index[-1].isoformat(), "open": 2.5, "high": 3.,
+               "low": 2., "close": 2.75, "volume": 7.}
+    frame.attrs["forming_candle"] = forming
     received = {}
     monkeypatch.setattr(app.state.market_service, "candles",
                         lambda *args, **kwargs: received.update(kwargs) or (frame, "test-provider"))
     monkeypatch.setattr(app.state.market_service, "price_metadata", lambda *args, **kwargs: {})
 
-    response = client.get("/api/market/candles", params={"instrument_id": instrument.instrument_id, "days": 7})
+    response = client.get("/api/market/candles", params={
+        "instrument_id": instrument.instrument_id, "days": 7, "refresh_latest": True,
+    })
 
     assert response.status_code == 200
     assert received["days"] == 7
     assert received["full_history"] is False
+    assert received["refresh_latest"] is True
+    assert response.json()["forming_candle"] == forming
 
 
 def test_scanner_reuses_prepared_daily_signal_without_fetching_candles(monkeypatch):

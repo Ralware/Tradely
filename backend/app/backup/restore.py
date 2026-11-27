@@ -111,24 +111,6 @@ def _find_transaction(connection: Any, row: dict[str, Any]) -> dict[str, Any] | 
     return None
 
 
-def _find_signal(connection: Any, row: dict[str, Any]) -> dict[str, Any] | None:
-    found = connection.execute(
-        """SELECT * FROM signal_audit
-           WHERE symbol=? AND market=? AND strategy=? AND strategy_version=?
-             AND state=? AND COALESCE(as_of,'')=COALESCE(?,'') AND payload_json=?""",
-        (
-            row.get("symbol"),
-            row.get("market"),
-            row.get("strategy"),
-            row.get("strategy_version"),
-            row.get("state"),
-            row.get("as_of"),
-            row.get("payload_json"),
-        ),
-    ).fetchone()
-    return dict(found) if found is not None else None
-
-
 def _find_watchlist(connection: Any, row: dict[str, Any]) -> dict[str, Any] | None:
     found = connection.execute(
         "SELECT * FROM watchlist WHERE symbol=? AND market=? AND exchange=?",
@@ -235,23 +217,6 @@ def _restore_transactions(
             stats["skipped"] += 1
 
 
-def _restore_signals(
-    connection: Any, rows: list[dict[str, Any]], *, overwrite: bool, stats: dict[str, int]
-) -> None:
-    for row in rows:
-        existing = _find_signal(connection, row)
-        if existing is None:
-            remapped = _insert_row(connection, "signal_audit", row, id_column="id")
-            stats["inserted"] += 1
-            stats["remapped"] += int(remapped)
-            continue
-        if overwrite:
-            _update_row(connection, "signal_audit", row, key_columns=("id",), id_column="id")
-            stats["updated"] += 1
-        else:
-            stats["skipped"] += 1
-
-
 def _restore_key_value(
     connection: Any,
     table: str,
@@ -319,8 +284,6 @@ def restore_backup(
                 _restore_watchlist(connection, rows, overwrite=overwrite, stats=stats[table])
             elif table == "holding_transactions":
                 _restore_transactions(connection, rows, overwrite=overwrite, stats=stats[table])
-            elif table == "signal_audit":
-                _restore_signals(connection, rows, overwrite=overwrite, stats=stats[table])
             elif table == "catalogue_meta":
                 _restore_key_value(
                     connection, table, rows, overwrite=overwrite, stats=stats[table]

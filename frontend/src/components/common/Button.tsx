@@ -45,7 +45,7 @@ export function Button({
       type="button"
       disabled={disabled || loading}
       className={cn(
-        'inline-flex items-center justify-center whitespace-nowrap rounded font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-terminal-accent disabled:cursor-not-allowed',
+        'inline-flex items-center justify-center whitespace-nowrap rounded font-medium transition-all duration-200 ease-out hover:-translate-y-px active:translate-y-0 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-terminal-accent focus-visible:ring-offset-2 focus-visible:ring-offset-terminal-bg disabled:cursor-not-allowed disabled:hover:translate-y-0',
         variants[variant],
         sizes[size],
         className,

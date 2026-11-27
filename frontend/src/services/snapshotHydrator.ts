@@ -1,5 +1,5 @@
 import { apiRequest } from './api';
-import { isCompleteSnapshot } from './analyticsSnapshotLoader';
+import { ANALYTICS_SCHEMA_VERSION, isCompleteSnapshot } from './analyticsSnapshotLoader';
 import { portfolioService } from './portfolioService';
 import { snapshotDatabase } from './snapshotDatabase';
 import type { PreparedSnapshot, SnapshotManifestItem } from './snapshotStore';
@@ -64,9 +64,11 @@ function download(item: SnapshotManifestItem): Promise<PreparedSnapshot> {
   request = apiRequest<PreparedSnapshot>(
     `/api/analytics/precomputed/${encodeURIComponent(item.instrument_id)}/${encodeURIComponent(item.interval)}`,
     { timeoutMs: 90_000 },
-  )
+    )
     .then((payload) => {
-      if (payload.fingerprint !== item.fingerprint) {
+      if (payload.fingerprint !== item.fingerprint
+        || payload.interval !== item.interval
+        || payload.provenance?.instrument_id !== item.instrument_id) {
         throw new Error('Manifest/snapshot fingerprint mismatch');
       }
       if (!isCompleteSnapshot(payload)) {
@@ -145,7 +147,15 @@ async function synchronize(force: boolean): Promise<void> {
       const key = identityKey(item.instrument_id, item.interval);
       try {
         const local = locals[index];
-        if (local && local.fingerprint === item.fingerprint) {
+        if (
+          local
+          && local.fingerprint === item.fingerprint
+          && local.schemaVersion === ANALYTICS_SCHEMA_VERSION
+          && isCompleteSnapshot(local.payload)
+          && local.payload.fingerprint === item.fingerprint
+          && local.payload.interval === item.interval
+          && local.payload.provenance?.instrument_id === item.instrument_id
+        ) {
           snapshotStore.setSnapshot(item.instrument_id, item.interval, local.payload);
           lastSynced.set(key, item.fingerprint!);
           return;

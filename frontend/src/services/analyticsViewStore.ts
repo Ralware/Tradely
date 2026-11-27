@@ -1,4 +1,3 @@
-import type { DirectionMode } from '../types/api';
 
 export interface ChartOverlayToggles {
   sma: boolean;
@@ -15,8 +14,6 @@ export interface AnalyticsViewState {
   overlays: ChartOverlayToggles;
   showRsi: boolean;
   showMacd: boolean;
-  tab: string;
-  directionMode: DirectionMode;
   /** Last analysis selection, restored when the sidebar reopens Analytics. */
   instrumentId: string;
   interval: string;
@@ -31,8 +28,6 @@ const DEFAULTS: AnalyticsViewState = {
   overlays: { sma: false, ema: false, bollinger: false },
   showRsi: false,
   showMacd: false,
-  tab: 'risk',
-  directionMode: 'long_only',
   instrumentId: '',
   interval: '1d',
   days: 3650,
@@ -59,11 +54,6 @@ function readStorage(): AnalyticsViewState {
       },
       showRsi: parsed.showRsi === true,
       showMacd: parsed.showMacd === true,
-      tab: typeof parsed.tab === 'string' ? parsed.tab : DEFAULTS.tab,
-      directionMode: parsed.directionMode === 'short_only'
-        || parsed.directionMode === 'long_short'
-        ? parsed.directionMode
-        : 'long_only',
       instrumentId: typeof parsed.instrumentId === 'string' ? parsed.instrumentId : '',
       interval: typeof parsed.interval === 'string' ? parsed.interval : DEFAULTS.interval,
       days: typeof parsed.days === 'number' && Number.isFinite(parsed.days)

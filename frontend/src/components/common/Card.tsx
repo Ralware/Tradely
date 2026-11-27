@@ -21,12 +21,12 @@ export function Card({
   padded = true,
 }: CardProps) {
   return (
-    <section className={cn('panel-surface flex min-w-0 flex-col', className)}>
+    <section className={cn('panel-surface enter-reveal flex min-w-0 flex-col overflow-hidden', className)}>
       {title || actions ? (
-        <header className="flex min-h-10 flex-wrap items-center justify-between gap-2 border-b border-terminal-border px-3 py-2 sm:px-4">
+        <header className="flex min-h-11 flex-wrap items-center justify-between gap-2 border-b border-terminal-border bg-white/[0.012] px-3 py-2.5 sm:px-4">
           <div className="min-w-0">
             {title ? (
-              <h2 className="text-xs font-semibold tracking-wide text-terminal-text">{title}</h2>
+              <h2 className="text-xs font-semibold tracking-[0.045em] text-terminal-text">{title}</h2>
             ) : null}
             {subtitle ? <p className="text-2xs text-terminal-muted">{subtitle}</p> : null}
           </div>

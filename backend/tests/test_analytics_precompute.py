@@ -248,6 +248,23 @@ def test_search_miss_is_computed_persisted_and_reused_without_a_second_fetch(tmp
         assert connection.execute("SELECT COUNT(*) FROM analytics_jobs").fetchone()[0] == 0
 
 
+def test_selected_snapshot_forces_incremental_latest_candle_refresh(tmp_path):
+    db = Database(tmp_path / "latest-tail.sqlite3")
+    instrument = db.resolve_instrument("MSFT", "global", exchange="NASDAQ")
+    market = FrameMarket(_valid_frame())
+    engine = AnalyticsPrecompute(db, market)
+
+    initial = engine.get_or_compute_snapshot(instrument.instrument_id, "1d")
+    refreshed = engine.get_or_compute_snapshot(
+        instrument.instrument_id, "1d", refresh_latest=True
+    )
+
+    assert initial["fingerprint"] == refreshed["fingerprint"]
+    assert market.calls == 2
+    assert market.kwargs["refresh_latest"] is True
+    assert market.kwargs["bypass_cache"] is False
+
+
 def test_concurrent_search_cache_misses_coalesce_to_one_calculation(tmp_path):
     db = Database(tmp_path / "concurrent-load.sqlite3")
     instrument = db.resolve_instrument("MSFT", "global", exchange="NASDAQ")

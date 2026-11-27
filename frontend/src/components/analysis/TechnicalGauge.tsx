@@ -74,7 +74,14 @@ export function TechnicalGauge({ label, summary, size = 'default' }: TechnicalGa
             />
           ))}
           {rotation !== null ? (
-            <g className="tv-rating-needle" transform={`rotate(${rotation} ${CX} ${NEEDLE_CY})`}>
+            <g
+              className="tv-rating-needle"
+              style={{
+                transform: `rotate(${rotation}deg)`,
+                transformOrigin: `${CX}px ${NEEDLE_CY}px`,
+                transformBox: 'view-box',
+              }}
+            >
               <path
                 d="M 158 142.5 L 268.5 148.9 L 268.5 152.1 L 158 158.5 Z"
                 fill="#f5f5f5"

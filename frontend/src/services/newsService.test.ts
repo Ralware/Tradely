@@ -15,13 +15,15 @@ const emptyFeed: NewsFeedResponse = {
 describe('newsService', () => {
   beforeEach(() => requestMock.mockReset());
 
-  it('sends canonical identity and date filters and keeps selected-feed caches isolated', async () => {
+  it('sends canonical identity and date filters and always fetches fresh data', async () => {
     requestMock.mockResolvedValue(emptyFeed);
     const instrumentId = 'global:NASDAQ:NEWS-TEST-1';
     const filters = { page: 1, pageSize: 5, dateFrom: '2025-01-01', dateTo: '2025-01-31' };
 
     await newsService.symbolFeed(instrumentId, 'TEST', filters);
+    await newsService.symbolFeed(instrumentId, 'TEST', filters);
 
+    expect(requestMock).toHaveBeenCalledTimes(2);
     expect(requestMock).toHaveBeenCalledWith('/api/news/TEST', expect.objectContaining({
       query: {
         instrument_id: instrumentId, page: 1, page_size: 5,
@@ -31,21 +33,18 @@ describe('newsService', () => {
       },
       timeoutMs: 15_000,
     }));
-    expect(newsService.cachedSymbol(instrumentId, 1, 5, filters)).toEqual(emptyFeed);
-    expect(newsService.cachedSymbol(instrumentId, 1, 5)).toBeUndefined();
   });
 
-  it('uses separate general-feed cache entries for different date ranges', async () => {
+  it('does not cache general feeds for different or repeated date ranges', async () => {
     requestMock.mockResolvedValue(emptyFeed);
     const firstRange = { page: 1, pageSize: 20, dateFrom: '2026-10-23', dateTo: '2026-11-23' };
     const secondRange = { page: 1, pageSize: 20, dateFrom: '2026-09-23', dateTo: '2026-10-23' };
 
     await newsService.generalFeed(firstRange);
     await newsService.generalFeed(secondRange);
+    await newsService.generalFeed(firstRange);
 
-    expect(requestMock).toHaveBeenCalledTimes(2);
-    expect(newsService.cachedGeneral(firstRange)).toEqual(emptyFeed);
-    expect(newsService.cachedGeneral(secondRange)).toEqual(emptyFeed);
+    expect(requestMock).toHaveBeenCalledTimes(3);
   });
 
   it('searches supported Yahoo Finance listings through the backend service', async () => {

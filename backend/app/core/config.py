@@ -67,7 +67,6 @@ class Settings(BaseSettings):
     backup_local_dir: str = "./data/local_backups"
     backup_on_startup: bool = True
     backup_on_shutdown: bool = True
-    backup_include_signal_audit: bool = True
     # Hard repository budget: 100 MB combined, warning from 75 MB, preferred
     # steady state 50-75 MB.
     backup_max_total_bytes: int = 100 * 1024 * 1024

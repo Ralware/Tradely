@@ -41,7 +41,7 @@ export function Sparkline({
     );
   }
 
-  const color = path.rising ? '#268bff' : '#f04444';
+  const color = path.rising ? '#22c55e' : '#f04444';
 
   return (
     <svg

@@ -16,10 +16,6 @@ TransactionIntent = Literal["BUY", "SELL", "SELL_SHORT", "BUY_TO_COVER"]
 Side = TransactionIntent
 DirectionMode = Literal["long_only", "short_only", "long_short"]
 PositionDirection = Literal["LONG", "SHORT"]
-SignalState = Literal[
-    "BUY", "SELL", "SELL_SHORT", "BUY_TO_COVER", "WAIT", "NO_SIGNAL",
-    "INSUFFICIENT_DATA", "STALE_DATA", "DATA_QUALITY_ERROR",
-]
 AssetType = Literal["equity", "crypto"]
 QuoteFreshness = Literal[
     "live", "delayed", "eod", "historical", "cached", "stale", "unavailable",
@@ -28,51 +24,6 @@ QuoteType = Literal[
     "real_time", "delayed", "last_available", "previous_close",
     "end_of_day", "historical", "cached", "stale", "unavailable",
 ]
-
-
-class SignalCondition(BaseModel):
-    name: str
-    passed: bool
-    observed: float | str | None = None
-    threshold: float | str | None = None
-    explanation: str
-
-
-class StrategySignal(BaseModel):
-    symbol: str
-    market: Market
-    strategy: str
-    strategy_version: str
-    direction_mode: DirectionMode = "long_only"
-    direction: PositionDirection | None = None
-    state: SignalState
-    as_of: datetime | None = None
-    entry_reference: float | None = None
-    stop_reference: float | None = None
-    risk_per_unit: float | None = None
-    conditions: list[SignalCondition]
-    explanation: str
-    data_source: str | None = None
-
-
-class RiskRequest(BaseModel):
-    capital: float = Field(gt=0)
-    risk_fraction: float = Field(gt=0, le=0.02)
-    entry: float = Field(gt=0)
-    stop: float = Field(gt=0)
-    direction: PositionDirection = "LONG"
-    lot_size: int = Field(default=1, ge=1)
-    max_position_fraction: float = Field(default=1.0, gt=0, le=1)
-
-
-class RiskResult(BaseModel):
-    risk_budget: float
-    risk_per_unit: float
-    quantity: int
-    position_value: float
-    planned_loss: float
-    capital_limited: bool
-    direction: PositionDirection = "LONG"
 
 
 class Instrument(BaseModel):

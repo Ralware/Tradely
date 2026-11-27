@@ -17,10 +17,7 @@ from app.core.config import get_settings
 from app.core.models import (
     AmountTransactionRequest,
     BacktestRequest,
-    DirectionMode,
     HoldingTransaction,
-    RiskRequest,
-    RiskResult,
     WatchlistItem,
 )
 from app.core.trading_rules import calculate_amount_transaction
@@ -35,7 +32,6 @@ from app.services.backtest import run_trend_breakout_backtest
 from app.services.freshness import is_candle_stale
 from app.services.indicators import compute_indicators
 from app.services.portfolio import build_ledger, detail_view, position_view, summary_view
-from app.services.strategy import STRATEGY_VERSION, evaluate_trend_breakout, position_size, suppress_actionable_strategy
 from app.services.technicals import build_technical_summary as build_conventional_summary
 from app.services.tv_technical_rating import (
     DEPENDENCY as TV_RATING_DEPENDENCY,
@@ -46,6 +42,7 @@ from app.services.tv_technical_rating import (
 from app.services.technical_rating_cache import technical_rating_cache
 
 router = APIRouter(prefix="/api")
+BACKTEST_STRATEGY_VERSION = "trend-donchian-v1.2.0"
 
 
 def _clean_symbol(symbol: str) -> str:
@@ -198,14 +195,17 @@ def precomputed_index(
 
 
 @router.get("/analytics/on-demand/{instrument_id}/{interval}")
-def on_demand_analytics(request: Request, instrument_id: str, interval: str) -> dict[str, Any]:
+def on_demand_analytics(
+    request: Request, instrument_id: str, interval: str,
+    refresh_latest: bool = Query(False),
+) -> dict[str, Any]:
     """Return valid local analytics or compute and persist one selected timeframe on a miss."""
     instrument = request.app.state.instrument_resolver.get(instrument_id)
     if instrument is None:
         raise HTTPException(status_code=404, detail=f"Unknown instrument {instrument_id}")
     try:
         return request.app.state.analytics_precompute.get_or_compute_snapshot(
-            str(instrument["instrument_id"]), interval
+            str(instrument["instrument_id"]), interval, refresh_latest=refresh_latest
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -300,6 +300,7 @@ def candles(
     interval: str = "1d",
     days: int = Query(3650, ge=1, le=3650),
     provider: str = "auto",
+    refresh_latest: bool = False,
 ) -> dict[str, Any]:
     instrument = _market_target(
         request, symbol=symbol, instrument_id=instrument_id, market=market, exchange=exchange
@@ -311,7 +312,7 @@ def candles(
     try:
         frame, source = request.app.state.market_service.candles(
             symbol, market=market, exchange=exchange, interval=interval, days=days,
-            provider=provider, full_history=False,
+            provider=provider, full_history=False, refresh_latest=refresh_latest,
         )
     except (ProviderError, ValueError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -332,81 +333,11 @@ def candles(
         "history_pages": frame.attrs.get("history_pages"),
         "last_candle_confirmed": frame.attrs.get("last_bar_confirmed"),
         "forming_bar_excluded": bool(frame.attrs.get("forming_bar_excluded", False)),
+        "forming_candle": frame.attrs.get("forming_candle"),
         "last_candle_at": latest.isoformat(), "count": len(frame),
         "candles": _to_json_records(frame),
         "warnings": warnings,
     }
-
-
-@router.get("/scanner/watchlist")
-def scan_watchlist(request: Request) -> dict[str, Any]:
-    results = []
-    engine = request.app.state.analytics_precompute
-    for item in request.app.state.db.get_watchlist():
-        try:
-            # Reuse the prepared daily signal when its fingerprint/strategy
-            # version is still current. The scanner therefore does not fetch
-            # candles or rerun indicators for an unchanged watchlist entry.
-            prepared = (
-                engine.get_prepared_daily_signal(str(item["instrument_id"]), "1d")
-                if item.get("instrument_id") else None
-            )
-            if (prepared is not None and not prepared["is_stale"]
-                    and prepared.get("latest_close") is not None):
-                prepared_signal = prepared["strategy"]
-                if (item["market"] == "india"
-                        and prepared["adjustment_status"] != "adjusted"):
-                    reason = (
-                        "Historical corporate-action adjustment status could not be verified."
-                        if prepared["adjustment_status"] == "unknown" else
-                        "Indian-equity history is known to be unadjusted."
-                    )
-                    prepared_signal = suppress_actionable_strategy(
-                        prepared_signal, state="DATA_QUALITY_ERROR",
-                        explanation=f"{reason} Strategy signal suppressed.",
-                    )
-                results.append(_scan_identity(item) | {
-                    "symbol": item["symbol"],
-                    "market": item["market"],
-                    "source": prepared["source"],
-                    "last_close": float(prepared["latest_close"]),
-                    "is_adjusted": prepared["is_adjusted"],
-                    "adjustment_status": prepared["adjustment_status"],
-                    "is_stale": False,
-                    "strategy": prepared_signal,
-                    "cache": "prepared",
-                })
-                continue
-            frame, source = request.app.state.market_service.candles(
-                item["symbol"], market=item["market"], exchange=item["exchange"] or None,
-                interval="1d", days=500, provider="auto",
-            )
-            signal = evaluate_trend_breakout(frame, symbol=item["symbol"], market=item["market"], source=source)
-            stale = _is_stale(frame, item["market"], "1d")
-            adjusted = _is_adjusted(frame)
-            adjustment_status = get_adjustment_status(frame)
-            if stale:
-                signal = suppress_actionable_strategy(
-                    signal, state="STALE_DATA",
-                    explanation="Signal suppressed because the latest candle is stale.",
-                )
-            elif item["market"] == "india" and adjustment_status != "adjusted":
-                reason = ("Historical corporate-action adjustment status could not be verified."
-                          if adjustment_status == "unknown" else
-                          "Indian-equity history is known to be unadjusted.")
-                signal = suppress_actionable_strategy(
-                    signal, state="DATA_QUALITY_ERROR",
-                    explanation=f"{reason} Strategy signal suppressed.",
-                )
-            results.append(_scan_identity(item) | {
-                            "symbol": item["symbol"], "market": item["market"], "source": source,
-                            "last_close": float(frame.iloc[-1]["close"]), "is_adjusted": adjusted, "adjustment_status": get_adjustment_status(frame),
-                            "is_stale": stale, "strategy": signal.model_dump(mode="json")})
-        except Exception as exc:
-            results.append(_scan_identity(item) | {
-                            "symbol": item["symbol"], "market": item["market"], "error": str(exc),
-                            "strategy": {"state": "DATA_QUALITY_ERROR"}})
-    return {"items": results, "count": len(results), "note": "Scanner only evaluates the configured daily strategy on completed daily bars."}
 
 
 @router.post("/sparklines")
@@ -483,7 +414,6 @@ def analyze(
     interval: str = "1d",
     days: int = Query(3650, ge=1, le=3650),
     provider: str = "auto",
-    direction_mode: DirectionMode = Query("long_only"),
 ) -> dict[str, Any]:
     instrument = _market_target(
         request, symbol=symbol, instrument_id=instrument_id, market=market, exchange=exchange
@@ -504,20 +434,6 @@ def analyze(
     for column, value in latest.items():
         if column not in {"open", "high", "low", "close", "volume"}:
             values[column] = None if pd.isna(value) else float(value)
-    position_side = request.app.state.db.position_side_at(
-        instrument["instrument_id"],
-        instrument["currency"],
-        datetime.now(UTC),
-    )
-    signal = evaluate_trend_breakout(
-        frame,
-        symbol=symbol,
-        market=market,
-        source=source,
-        direction_mode=direction_mode,
-        position_side=position_side,
-        indicators=indicators,
-    )
     adjusted = _is_adjusted(frame)
     adjustment_status = get_adjustment_status(frame)
     stale = _is_stale(frame, market, interval)
@@ -526,21 +442,12 @@ def analyze(
     if history_truncated:
         warnings.append("The provider returned the maximum requested bar count; older history may exist.")
     if stale:
-        warnings.append("Latest candle is stale for this market; actionable signal output is suppressed.")
-        signal = suppress_actionable_strategy(
-            signal, state="STALE_DATA",
-            explanation="Signal suppressed because the latest candle exceeds the configured freshness window. Verify the provider and market session.",
-        )
+        warnings.append("Latest candle is stale for this market; refresh to retrieve current technical data.")
     if market == "india" and adjustment_status != "adjusted":
         if adjustment_status == "unknown":
-            warnings.append("Historical corporate-action adjustment status could not be verified; Indian-equity strategy output is suppressed.")
-            explanation = "Signal suppressed because historical corporate-action adjustment status could not be verified."
+            warnings.append("Historical corporate-action adjustment status could not be verified.")
         else:
-            warnings.append("Indian-equity history is known to be unadjusted; strategy output is suppressed.")
-            explanation = "Signal suppressed because this Indian-equity history is known to be unadjusted."
-        signal = suppress_actionable_strategy(signal, state="DATA_QUALITY_ERROR", explanation=explanation)
-    signal_payload = signal.model_dump(mode="json")
-    request.app.state.db.save_signal(signal_payload)
+            warnings.append("Indian-equity history is known to be unadjusted.")
     return {
         "symbol": symbol, "market": market, "exchange": exchange, "interval": interval,
         "instrument": instrument, "price_metadata": price_metadata,
@@ -553,7 +460,6 @@ def analyze(
         "fingerprint": ohlcv_fingerprint(frame),
         "latest": {key: float(latest[key]) for key in ("open", "high", "low", "close", "volume")},
         "indicators": values,
-        "strategy": signal_payload,
         "warnings": warnings,
         "candles": _to_json_records(frame),
     }
@@ -734,15 +640,13 @@ def analytics_snapshot(
     interval: str = "1d",
     days: int = Query(3650, ge=1, le=3650),
     provider: str = "auto",
-    direction_mode: DirectionMode = Query("long_only"),
     refresh: bool = False,
     prefetch: bool = False,
 ) -> dict[str, Any]:
     """One atomic Analytics snapshot for a single instrument/timeframe.
 
     Candle retrieval is shared by all Analytics outputs. The chart series,
-    latest indicators, strategy output and TradingView v3 ratings therefore
-    carry one identical OHLCV fingerprint.
+    latest indicators, and TradingView v3 ratings carry one identical OHLCV fingerprint.
     """
     instrument = _market_target(
         request, symbol=symbol, instrument_id=instrument_id, market=market, exchange=exchange
@@ -770,13 +674,6 @@ def analytics_snapshot(
         for column, value in latest.items()
         if column not in {"open", "high", "low", "close", "volume"}
     }
-    position_side = request.app.state.db.position_side_at(
-        instrument["instrument_id"], instrument["currency"], datetime.now(UTC),
-    )
-    signal = evaluate_trend_breakout(
-        frame, symbol=symbol, market=market, source=source,
-        direction_mode=direction_mode, position_side=position_side, indicators=indicators,
-    )
     adjusted = _is_adjusted(frame)
     adjustment_status = get_adjustment_status(frame)
     stale = _is_stale(frame, market, interval)
@@ -785,19 +682,12 @@ def analytics_snapshot(
     if history_truncated:
         warnings.append("The provider returned the maximum requested bar count; older history may exist.")
     if stale:
-        warnings.append("Latest candle is stale for this market; actionable signal output is suppressed.")
-        signal = suppress_actionable_strategy(
-            signal, state="STALE_DATA",
-            explanation="Signal suppressed because the latest candle exceeds the configured freshness window. Verify the provider and market session.",
-        )
+        warnings.append("Latest candle is stale for this market; refresh to retrieve current technical data.")
     if market == "india" and adjustment_status != "adjusted":
         if adjustment_status == "unknown":
-            warnings.append("Historical corporate-action adjustment status could not be verified; Indian-equity strategy output is suppressed.")
-            explanation = "Signal suppressed because historical corporate-action adjustment status could not be verified."
+            warnings.append("Historical corporate-action adjustment status could not be verified.")
         else:
-            warnings.append("Indian-equity history is known to be unadjusted; strategy output is suppressed.")
-            explanation = "Signal suppressed because this Indian-equity history is known to be unadjusted."
-        signal = suppress_actionable_strategy(signal, state="DATA_QUALITY_ERROR", explanation=explanation)
+            warnings.append("Indian-equity history is known to be unadjusted.")
     technical_payload = _cached_tv_rating_snapshot(
         instrument=instrument, frame=frame, fingerprint=fingerprint,
         source=source, interval=interval, days=days, provider=provider,
@@ -811,9 +701,6 @@ def analytics_snapshot(
         "is_adjusted": adjusted, "adjustment_status": get_adjustment_status(frame), "is_stale": stale,
         "as_of": frame.index[-1].isoformat(), "fingerprint": fingerprint,
     }
-    signal_payload = signal.model_dump(mode="json")
-    if not prefetch:
-        request.app.state.db.save_signal(signal_payload)
     analysis_payload = {
         "symbol": symbol, "market": market, "exchange": exchange,
         "interval": interval, "instrument": instrument,
@@ -825,7 +712,7 @@ def analytics_snapshot(
         "forming_bar_excluded": bool(frame.attrs.get("forming_bar_excluded", False)),
         "as_of": frame.index[-1].isoformat(), "fingerprint": fingerprint,
         "latest": {key: float(latest[key]) for key in ("open", "high", "low", "close", "volume")},
-        "indicators": values, "strategy": signal_payload,
+        "indicators": values,
         "warnings": warnings, "candles": _to_json_records(frame),
     }
     indicator_payload = {
@@ -976,7 +863,7 @@ def backtest_trend_breakout(request: Request, payload: BacktestRequest) -> dict[
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     result.update({"symbol": symbol, "market": market, "instrument": instrument,
                    "source": source,
-                   "strategy": "Trend + Donchian 20 Breakout", "strategy_version": STRATEGY_VERSION,
+                   "strategy": "Trend + Donchian 20 Breakout", "strategy_version": BACKTEST_STRATEGY_VERSION,
                    "data_adjusted": _is_adjusted(frame), "adjustment_status": get_adjustment_status(frame),
                    "date_range": {"start": frame.index[0].isoformat(), "end": frame.index[-1].isoformat()},
                    "executed_at": datetime.now(UTC).isoformat(),
@@ -986,19 +873,6 @@ def backtest_trend_breakout(request: Request, payload: BacktestRequest) -> dict[
                        "commission_bps_per_side": payload.commission_bps_per_side if payload.commission_bps_per_side is not None else payload.cost_bps_per_side,
                        "slippage_bps_per_side": payload.slippage_bps_per_side}})
     return result
-
-
-@router.post("/risk/position-size", response_model=RiskResult)
-def calculate_position_size(request: Request, payload: RiskRequest) -> RiskResult:
-    settings = request.app.state.settings
-    if payload.risk_fraction > settings.max_risk_fraction:
-        raise HTTPException(status_code=422, detail=f"risk_fraction cannot exceed configured limit {settings.max_risk_fraction}")
-    try:
-        result = position_size(**payload.model_dump())
-        return RiskResult(**result)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
 
 # ----------------------------------------------------------------------
 # Instrument identity — one centralized resolver for the whole application

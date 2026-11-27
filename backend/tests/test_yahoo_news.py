@@ -96,11 +96,36 @@ def test_provider_falls_back_to_conservative_rss_and_leaves_missing_fields_null(
         articles = provider.get_symbol_articles("AAPL", "Apple Inc.")
     finally:
         provider.close()
-    assert len(requests) == 2
+    assert len(requests) == 3
     assert len(articles) == 1
     assert articles[0]["publisher"] is None
     assert articles[0]["thumbnail_url"] is None
     assert articles[0]["published_at"] == datetime(2023, 11, 14, 22, 13, 20, tzinfo=UTC).isoformat()
+
+
+def test_provider_searches_both_ticker_and_company_name():
+    requests: list[httpx.Request] = []
+    payload_by_query = {
+        "AAPL": {"news": []},
+        "Apple Inc.": {"news": [{
+            "uuid": "company-name-article", "title": "Apple expands its services business",
+            "publisher": "Wire", "link": "https://example.com/apple-services",
+            "providerPublishTime": 1_700_000_000, "summary": "Apple Inc. announced expansion.",
+        }]},
+    }
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=payload_by_query[request.url.params["q"]], request=request)
+
+    provider = YahooFinanceNewsProvider(client=httpx.Client(transport=httpx.MockTransport(respond)), max_retries=0)
+    try:
+        articles = provider.get_symbol_articles("AAPL", "Apple Inc.")
+    finally:
+        provider.close()
+
+    assert [request.url.params["q"] for request in requests] == ["AAPL", "Apple Inc."]
+    assert [article["title"] for article in articles] == ["Apple expands its services business"]
 
 
 def test_news_cache_persistence_date_and_text_filters(tmp_path: Path):

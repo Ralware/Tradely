@@ -142,6 +142,14 @@ export function NewsPage() {
     return () => { window.clearTimeout(timer); controller.abort(); };
   }, [searchText]);
 
+  // Changing the instrument or date range starts a new feed, so old headlines
+  // must not linger while the replacement request is in flight.
+  useEffect(() => {
+    setFeed(null);
+    setArticles([]);
+    setCanLoadMore(false);
+  }, [selectedId, selectedSymbol, dateFrom, dateTo]);
+
   useEffect(() => {
     let active = true;
     const pageSize = 20;
@@ -153,16 +161,8 @@ export function NewsPage() {
       setLoading(false);
       return () => { active = false; };
     }
-    const cached = selectedId && selectedSymbol
-      ? newsService.cachedSymbol(selectedId, page, pageSize, { dateFrom, dateTo })
-      : !selectedId ? newsService.cachedGeneral({ page, pageSize, dateFrom, dateTo }) : undefined;
-    if (cached && page === 1) {
-      setFeed(cached);
-      setArticles(cached.items);
-      setLoading(false);
-    } else if (page === 1) {
+    if (page === 1) {
       setLoading(true);
-      setArticles([]);
     } else {
       setLoading(false);
     }
@@ -181,6 +181,13 @@ export function NewsPage() {
     }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [selectedId, selectedSymbol, dateFrom, dateTo, dateRangeError, page, reloadToken]);
+
+  // Keep the first page live without disturbing pagination the user is reading.
+  useEffect(() => {
+    if (page !== 1 || dateRangeError) return undefined;
+    const timer = window.setInterval(() => setReloadToken((value) => value + 1), 10_000);
+    return () => window.clearInterval(timer);
+  }, [page, dateRangeError]);
 
   const selectedInstrument = feed?.instrument;
   const heading = useMemo(() => selectedInstrument?.name || selectedSymbol || 'Market feed', [selectedInstrument?.name, selectedSymbol]);

@@ -28,7 +28,7 @@ const fingerprint = 'fp-1';
 
 function snapshot(): PreparedSnapshot {
   return {
-    schema_version: 2,
+    schema_version: 3,
     interval: '1d',
     fingerprint,
     generated_at: '2026-11-24T10:00:00Z',
@@ -120,7 +120,7 @@ describe('snapshotHydrator', () => {
       instrumentId: identity,
       interval: '1d',
       fingerprint,
-      schemaVersion: 2,
+      schemaVersion: 3,
       syncedAt: '2026-11-24T10:00:00Z',
       payload: snapshot(),
     }]);

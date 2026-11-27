@@ -113,6 +113,7 @@ class _CandleCache:
         *,
         refresh_after_seconds: int | None = None,
         refresher: Callable[[pd.DataFrame], tuple[pd.DataFrame, str]] | None = None,
+        force_refresh_latest: bool = False,
     ) -> tuple[pd.DataFrame, str]:
         now = time.monotonic()
         base_frame: pd.DataFrame | None = None
@@ -126,7 +127,7 @@ class _CandleCache:
                 should_refresh = (
                     refresher is not None
                     and refresh_after_seconds is not None
-                    and now - cached.loaded_at >= max(0, refresh_after_seconds)
+                    and (force_refresh_latest or now - cached.loaded_at >= max(0, refresh_after_seconds))
                     and key not in self._refreshing
                 )
                 if not should_refresh:
@@ -295,6 +296,7 @@ class MarketService:
         provider: str = "auto",
         full_history: bool = True,
         bypass_cache: bool = False,
+        refresh_latest: bool = False,
     ) -> tuple[pd.DataFrame, str]:
         if days < 1 or days > 3650:
             raise ValueError("days must be between 1 and 3650")
@@ -370,6 +372,7 @@ class MarketService:
             fetch,
             refresh_after_seconds=self._refresh_after_seconds(interval),
             refresher=refresh_tail,
+            force_refresh_latest=refresh_latest,
         )
 
     def price_metadata(self, symbol: str, exchange: str | None) -> dict[str, Any]:

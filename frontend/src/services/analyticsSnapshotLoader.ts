@@ -5,17 +5,12 @@ import { snapshotStore } from './snapshotStore';
 import type { PreparedSnapshot } from './snapshotStore';
 import { isTimestampFresh } from '../utils/freshness';
 
+export const ANALYTICS_SCHEMA_VERSION = 3;
+
 export function isCompleteSnapshot(value: PreparedSnapshot | undefined): value is PreparedSnapshot {
-  if (!value || value.schema_version !== 2 || !value.fingerprint) return false;
+  if (!value || value.schema_version !== ANALYTICS_SCHEMA_VERSION || !value.fingerprint) return false;
   const candles = value.analysis?.candles;
   const series = value.indicator_series?.series;
-  const variants = value.strategy_variants;
-  const expectedVariants = [
-    'long_only:NONE', 'long_only:LONG', 'long_only:SHORT',
-    'short_only:NONE', 'short_only:LONG', 'short_only:SHORT',
-    'long_short:NONE', 'long_short:LONG', 'long_short:SHORT',
-  ];
-  if (!variants || expectedVariants.some((key) => !variants[key] || typeof variants[key] !== 'object')) return false;
   return Array.isArray(candles) && candles.length > 0
     && Array.isArray(series) && series.length === candles.length
     && Boolean(value.technical_ratings?.summary)
@@ -26,7 +21,7 @@ export function isCompleteSnapshot(value: PreparedSnapshot | undefined): value i
 export interface SnapshotLoadDependencies {
   readLocal: (instrumentId: string, interval: string) => Promise<PreparedSnapshot | undefined>;
   writeLocal: (instrumentId: string, interval: string, snapshot: PreparedSnapshot) => Promise<void>;
-  request: (instrumentId: string, interval: string, signal?: AbortSignal) => Promise<PreparedSnapshot>;
+  request: (instrumentId: string, interval: string, signal?: AbortSignal, refreshLatest?: boolean) => Promise<PreparedSnapshot>;
 }
 
 const defaultDependencies: SnapshotLoadDependencies = {
@@ -45,10 +40,10 @@ const defaultDependencies: SnapshotLoadDependencies = {
       payload,
     });
   },
-  request(instrumentId, interval, signal) {
+  request(instrumentId, interval, signal, refreshLatest) {
     return apiRequest<PreparedSnapshot>(
       `/api/analytics/on-demand/${encodeURIComponent(instrumentId)}/${encodeURIComponent(interval)}`,
-      { signal, timeoutMs: 120_000 },
+      { query: refreshLatest ? { refresh_latest: true } : undefined, signal, timeoutMs: 120_000 },
     );
   },
 };
@@ -113,6 +108,8 @@ export interface LoadAnalyticsSnapshotOptions {
   dependencies?: SnapshotLoadDependencies;
   /** Bypass the local snapshot and the navigation validation window. */
   forceRefresh?: boolean;
+  /** Keep the local snapshot visible, then ask the backend to refresh the latest candle tail. */
+  refreshLatest?: boolean;
   /**
    * Serve a complete local snapshot without revalidating when it was already
    * validated recently. The Analytics workspace enables this; loader tests and
@@ -137,17 +134,22 @@ export async function loadAnalyticsSnapshot(
     console.warn('[CACHE] browser snapshot read failed; continuing to backend', error);
   }
 
-  if (isCompleteSnapshot(local)) {
+  if (
+    isCompleteSnapshot(local)
+    && local.interval === interval
+    && local.provenance?.instrument_id === instrumentId
+  ) {
     options.onCached?.(local);
     if (!options.forceRefresh) {
-      if (isSnapshotFresh(local)) {
+      if (isSnapshotFresh(local) && !options.refreshLatest) {
         lastValidated.set(key, Date.now());
         cacheEvent('hit', { kind: 'snapshot', key, fresh: true });
         return local;
       }
       const validatedAt = lastValidated.get(key) ?? 0;
       if (
-        options.reuseRecentlyValidated
+        !options.refreshLatest
+        && options.reuseRecentlyValidated
         && Date.now() - validatedAt < revalidateAfterMs(interval)
       ) {
         cacheEvent('hit', { kind: 'snapshot', key, fresh: false, recentlyValidated: true });
@@ -174,7 +176,9 @@ export async function loadAnalyticsSnapshot(
     // signal: a component unmount must not discard a response that other
     // consumers (or the next navigation) can reuse from the shared cache.
     let request: Promise<PreparedSnapshot>;
-    request = dependencies.request(instrumentId, interval, undefined)
+    request = (options.refreshLatest
+      ? dependencies.request(instrumentId, interval, undefined, true)
+      : dependencies.request(instrumentId, interval, undefined))
       .then(async (remote) => {
         if (!isCompleteSnapshot(remote) || remote.interval !== interval
           || remote.provenance?.instrument_id !== instrumentId) {

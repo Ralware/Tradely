@@ -1,32 +1,49 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import type { Candle } from '../../types/api';
 import { useSelectedInstrument } from '../../contexts/SelectedInstrumentContext';
 import { apiRequest } from '../../services/api';
 import { analyticsViewStore } from '../../services/analyticsViewStore';
 import { snapshotStore } from '../../services/snapshotStore';
 import { invalidateSnapshotValidation, isCompleteSnapshot, loadAnalyticsSnapshot } from '../../services/analyticsSnapshotLoader';
 import { portfolioService } from '../../services/portfolioService';
-import { suppressStaleStrategy } from '../../services/staleStrategy';
-import type { DirectionMode } from '../../types/api';
+import { marketService } from '../../services/marketService';
 import { changeDigits, cn, formatDate, formatNumber, formatPercent, formatSignedFixed, toneForNumber } from '../../utils/format';
 import { pricePrecisionFor, minMoveFromMetadata } from '../../utils/precision';
 import { defaultDaysFor, intervalLabel, isIntradayInterval } from '../../utils/timeframes';
 import { Button } from '../common/Button';
-import { Card } from '../common/Card';
 import { Icon } from '../common/Icon';
 import { EmptyState, ErrorState, LoadingPanel, Notice } from '../common/States';
-import { Tabs } from '../common/Tabs';
 import { PriceChart } from '../charts/PriceChart';
 import type { OverlayToggles } from '../charts/PriceChart';
-import { IndicatorPanel } from '../charts/IndicatorPanel';
-import { SignalCard } from '../signals/SignalCard';
-import { RiskCalculator } from '../signals/RiskCalculator';
-import { CandleTable } from '../tables/CandleTable';
-import { IndicatorTable } from '../tables/IndicatorTable';
 import { TechnicalGauge } from './TechnicalGauge';
 import { TechnicalTable } from './TechnicalTable';
 import { TimeframeSelector } from './TimeframeSelector';
+
+function technicalRefreshInterval(interval: string): number {
+  switch (interval) {
+    case '1m': return 20_000;
+    case '3m': return 30_000;
+    case '5m': return 45_000;
+    case '15m':
+    case '30m': return 60_000;
+    case '45m':
+    case '1h': return 2 * 60_000;
+    case '2h':
+    case '4h':
+    case '6h':
+    case '8h':
+    case '12h': return 5 * 60_000;
+    case '1d':
+    case '3d': return 15 * 60_000;
+    case '1wk':
+    case '1w': return 30 * 60_000;
+    case '1mo':
+    case '1M': return 60 * 60_000;
+    default: return 5 * 60_000;
+  }
+}
 
 function ToggleChip({
   active,
@@ -54,29 +71,18 @@ function ToggleChip({
   );
 }
 
-export function AnalysisWorkspace({
-  directionMode: controlledDirectionMode,
-  onDirectionModeChange,
-}: {
-  directionMode?: DirectionMode;
-  onDirectionModeChange?: (mode: DirectionMode) => void;
-} = {}) {
+export function AnalysisWorkspace() {
   const [searchParams, setSearchParams] = useSearchParams();
   const selected = useSelectedInstrument();
 
-  const { symbol, name, market, interval, days, instrumentId } = selected;
+  const { symbol, name, market, exchange, interval, days, instrumentId } = selected;
 
   const [overlays, setOverlays] = useState<OverlayToggles>(
     () => analyticsViewStore.get().overlays,
   );
   const [showRsi, setShowRsi] = useState(() => analyticsViewStore.get().showRsi);
   const [showMacd, setShowMacd] = useState(() => analyticsViewStore.get().showMacd);
-  const [localDirectionMode, setLocalDirectionMode] = useState<DirectionMode>(
-    () => analyticsViewStore.get().directionMode,
-  );
-  const directionMode = controlledDirectionMode ?? localDirectionMode;
-  const setDirectionMode = onDirectionModeChange ?? setLocalDirectionMode;
-  const [tab, setTab] = useState(() => analyticsViewStore.get().tab);
+  const [formingCandleState, setFormingCandleState] = useState<{ key: string; candle: Candle | null } | null>(null);
   const [, forceSnapshotRender] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -111,18 +117,29 @@ export function AnalysisWorkspace({
     analyticsViewStore.update({ showMacd });
   }, [showMacd]);
   useEffect(() => {
-    analyticsViewStore.update({ tab });
-  }, [tab]);
-  useEffect(() => {
-    if (!controlledDirectionMode) {
-      analyticsViewStore.update({ directionMode: localDirectionMode });
-    }
-  }, [controlledDirectionMode, localDirectionMode]);
-  useEffect(() => {
     if (instrumentId) {
       analyticsViewStore.setSelection({ instrumentId, interval, days });
     }
   }, [instrumentId, interval, days]);
+
+  // Technical ratings and indicators refresh at a slower, timeframe-aware
+  // cadence from the newest provider-confirmed candle; the chart's forming
+  // OHLCV is polled independently below.
+  useEffect(() => {
+    if (!instrumentId) return undefined;
+    const refreshIfVisible = () => {
+      if (!document.hidden) setLoadAttempt((value) => value + 1);
+    };
+    const timer = window.setInterval(
+      refreshIfVisible,
+      technicalRefreshInterval(interval),
+    );
+    document.addEventListener('visibilitychange', refreshIfVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', refreshIfVisible);
+    };
+  }, [instrumentId, interval]);
 
   const snapshot = instrumentId ? snapshotStore.getSnapshot(instrumentId, interval) : undefined;
   const usableSnapshot = isCompleteSnapshot(snapshot) ? snapshot : undefined;
@@ -136,16 +153,7 @@ export function AnalysisWorkspace({
     || usableSnapshot.technical_ratings?.is_stale === true
     || usableSnapshot.provenance?.data_freshness === 'stale'
   ));
-  const selectedStrategy = usableSnapshot?.strategy_variants?.[`${directionMode}:NONE`]
-    ?? usableSnapshot?.strategy_variants?.[`${directionMode}:LONG`]
-    ?? usableSnapshot?.strategy_variants?.[`${directionMode}:SHORT`];
-  const data = usableSnapshot?.analysis ? {
-    ...usableSnapshot.analysis,
-    is_stale: snapshotStale,
-    strategy: snapshotStale && selectedStrategy && typeof selectedStrategy === 'object'
-      ? suppressStaleStrategy(selectedStrategy)
-      : selectedStrategy,
-  } : null;
+  const data = usableSnapshot?.analysis ? { ...usableSnapshot.analysis, is_stale: snapshotStale } : null;
   const visibleWarnings = data?.warnings.filter(
     (warning: string) => !warning.toLowerCase().startsWith('latest candle is stale for this market'),
   ) ?? [];
@@ -153,12 +161,59 @@ export function AnalysisWorkspace({
   const indicatorSeries = usableSnapshot?.indicator_series ?? null;
   const currency = selected.currency || (market === 'india' ? 'INR' : market === 'crypto' ? 'USDT' : 'USD');
   const quote = selected.quote;
+  const candleKey = `${instrumentId}\u0000${interval}`;
+  const activeFormingCandle = formingCandleState?.key === candleKey ? formingCandleState.candle : null;
+  const activeLiveQuote = quote && !quote.isStale ? quote : null;
   const displayedInterval = data?.interval ?? interval;
   const intraday = isIntradayInterval(displayedInterval);
   const manifest = instrumentId ? snapshotStore.getManifestItem(instrumentId, interval) : undefined;
-  const updating = refreshing;
+  const updating = refreshing || (snapshotLoading && Boolean(usableSnapshot));
   const missing = !usableSnapshot;
   const error = manifest?.last_error ?? null;
+
+  // Provider candle data supplies the authoritative open, accumulated high/low,
+  // close, and cumulative volume. Refresh its tail every second independently
+  // of analytics so the active candle does not wait for indicator recalculation.
+  useEffect(() => {
+    if (!instrumentId || !symbol || !exchange) return undefined;
+    let active = true;
+    let inFlight = false;
+    const key = `${instrumentId}\u0000${interval}`;
+    const query = {
+      instrumentId,
+      symbol,
+      market,
+      exchange,
+      interval,
+      days: 30,
+      refreshLatest: true,
+    };
+    const reconcile = async () => {
+      if (!active || inFlight || document.hidden) return;
+      inFlight = true;
+      try {
+        const response = await marketService.getCandles(query, undefined, {
+          force: true,
+          refreshLatest: true,
+        });
+        if (!active) return;
+        setFormingCandleState({ key, candle: response.forming_candle ?? null });
+      } catch {
+        // Retain the cached live candle on temporary provider/API failures.
+      } finally {
+        inFlight = false;
+      }
+    };
+    void reconcile();
+    const timer = window.setInterval(() => void reconcile(), 1_000);
+    const onVisibilityChange = () => { if (!document.hidden) void reconcile(); };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [instrumentId, symbol, market, exchange, interval]);
 
   useEffect(() => {
     if (!instrumentId) return undefined;
@@ -175,6 +230,7 @@ export function AnalysisWorkspace({
         const payload = await loadAnalyticsSnapshot(identity, timeframe, {
           signal: controller.signal,
           forceRefresh,
+          refreshLatest: true,
           reuseRecentlyValidated: true,
           onCached: (cached) => {
             if (active) snapshotStore.setSnapshot(identity, timeframe, cached);
@@ -200,7 +256,7 @@ export function AnalysisWorkspace({
     };
   }, [instrumentId, interval, loadAttempt]);
 
-  const last = quote?.last ?? data?.latest.close ?? null;
+  const last = activeFormingCandle?.close ?? activeLiveQuote?.last ?? data?.latest.close ?? null;
   const priceMetadata =
     data?.price_metadata
     ?? technicals?.price_metadata
@@ -212,9 +268,11 @@ export function AnalysisWorkspace({
   const previousClose =
     data && data.candles.length > 1 ? data.candles[data.candles.length - 2].close : null;
   const change =
+    activeLiveQuote?.change ??
     quote?.change ??
     (last !== null && previousClose !== null ? last - previousClose : null);
   const changePct =
+    activeLiveQuote?.changePct ??
     quote?.changePct ??
     (change !== null && previousClose ? (change / previousClose) * 100 : null);
   const changeTone = toneForNumber(change);
@@ -263,38 +321,8 @@ export function AnalysisWorkspace({
     }
   }
 
-  const tabs = [
-    { id: 'risk', label: 'Risk' },
-    { id: 'indicators', label: 'Indicators' },
-    { id: 'candles', label: 'Candles' },
-  ];
-  const activeTab = tabs.some((item) => item.id === tab) ? tab : 'risk';
-
   return (
     <div className="tv-technicals space-y-3">
-      <div className="tv-analysis-toolbar panel-surface flex flex-wrap items-center justify-end gap-2 px-2 py-1.5">
-        <div className="flex flex-wrap items-center gap-1.5">
-          {watchState.message ? (
-            <span role="status" className="text-2xs text-terminal-green">{watchState.message}</span>
-          ) : null}
-          {watchState.error ? (
-            <span role="alert" className="text-2xs text-terminal-red">{watchState.error}</span>
-          ) : null}
-          <Button size="sm" icon="refresh" onClick={() => void refreshAll()} loading={refreshing}>
-            Refresh
-          </Button>
-          <Button
-            size="sm"
-            variant="primary"
-            icon="plus"
-            loading={watchState.loading}
-            disabled={!instrumentId}
-            onClick={addToWatchlist}
-          >
-            Watchlist
-          </Button>
-        </div>
-      </div>
 
       {snapshotError && usableSnapshot ? (
         <Notice tone="warning">Refresh failed; showing the last known-good local analytics. {snapshotError}</Notice>
@@ -334,7 +362,7 @@ export function AnalysisWorkspace({
             </div>
           ) : null}
 
-        <div className="tv-instrument-heading flex min-w-0 flex-col gap-2">
+        <div className="tv-instrument-heading flex min-w-0 flex-wrap items-start justify-between gap-x-4 gap-y-2">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <h1 className="text-lg font-semibold leading-none tracking-tight text-terminal-text">
@@ -367,7 +395,29 @@ export function AnalysisWorkspace({
               </div>
             </div>
 
-            <div className="flex min-w-0 items-center gap-2">
+            <div className="ml-auto flex shrink-0 items-center gap-1.5">
+              {watchState.message ? (
+                <span role="status" className="mr-1 text-2xs text-terminal-green">{watchState.message}</span>
+              ) : null}
+              {watchState.error ? (
+                <span role="alert" className="mr-1 text-2xs text-terminal-red">{watchState.error}</span>
+              ) : null}
+              <Button size="sm" icon="refresh" onClick={() => void refreshAll()} loading={refreshing}>
+                Refresh
+              </Button>
+              <Button
+                size="sm"
+                variant="primary"
+                icon="plus"
+                loading={watchState.loading}
+                disabled={!instrumentId}
+                onClick={addToWatchlist}
+              >
+                Watchlist
+              </Button>
+            </div>
+
+            <div className="flex min-w-0 basis-full items-center gap-2">
               <div className="min-w-0 flex-1 overflow-x-auto">
                 <TimeframeSelector
                   className="tv-timeframe-selector w-max"
@@ -405,7 +455,12 @@ export function AnalysisWorkspace({
                   {technicals ? ` · ${technicals.source_name} · ${technicals.source_version}` : ''}
                 </p>
               </div>
-              <span className="tv-rating-overview-asof">As of {formatDate(technicals?.as_of ?? data.as_of)}</span>
+              <span
+                className="tv-rating-overview-asof"
+                title={`Latest completed candle: ${formatDate(technicals?.as_of ?? data.as_of)}`}
+              >
+                Updated {formatDate(technicals?.calculation_timestamp ?? usableSnapshot?.generated_at ?? data.as_of)}
+              </span>
             </header>
             <div className={cn('tv-rating-gauges transition-opacity duration-300', updating ? 'opacity-70' : 'opacity-100')}>
               {technicals ? (
@@ -477,6 +532,8 @@ export function AnalysisWorkspace({
                 pricePrecision={pricePrecision}
                 priceMinMove={priceMinMove}
                 intraday={intraday}
+                formingCandle={activeFormingCandle}
+                livePrice={activeFormingCandle?.close ?? activeLiveQuote?.last ?? null}
                 height={480}
               />
             </div>
@@ -494,56 +551,6 @@ export function AnalysisWorkspace({
                 rows={technicals.oscillators}
                 summary={technicals.summary.oscillators}
               />
-            </div>
-          ) : null}
-
-          {technicals ? (
-            <div className="tv-strategy-summary">
-              <SignalCard
-                signal={data.strategy}
-                directionMode={directionMode}
-                onDirectionModeChange={setDirectionMode}
-                isStale={snapshotStale}
-              />
-            </div>
-          ) : null}
-
-          <div className="tv-analysis-tabs">
-            <Tabs items={tabs} active={activeTab} onChange={setTab} />
-          </div>
-
-          {activeTab === 'risk' ? (
-            <div className="tv-tab-panel">
-              {snapshotStale ? (
-                <Notice tone="warning">Trade sizing is unavailable for stale reference data. Refresh successfully before using entry, stop, or risk calculations.</Notice>
-              ) : (
-                <RiskCalculator
-                  entry={data.strategy.entry_reference ?? data.latest.close}
-                  stop={data.strategy.stop_reference}
-                  direction={data.strategy.direction ?? 'LONG'}
-                  currency={currency}
-                />
-              )}
-            </div>
-          ) : null}
-
-          {activeTab === 'indicators' ? (
-            <div className="tv-tab-panel grid grid-cols-1 gap-3 xl:grid-cols-2">
-              <IndicatorPanel indicators={data.indicators} close={data.latest.close} />
-              <Card title="Indicator Values" subtitle="Latest Completed Bar">
-                <IndicatorTable indicators={data.indicators} />
-              </Card>
-            </div>
-          ) : null}
-
-          {activeTab === 'candles' ? (
-            <div className="tv-tab-panel">
-              <Card
-                title="Recent Candles"
-                subtitle={`Last ${Math.min(30, data.candles.length)} Bars · ${intervalLabel(displayedInterval)}`}
-              >
-                <CandleTable candles={data.candles} limit={30} pricePrecision={pricePrecision} />
-              </Card>
             </div>
           ) : null}
 

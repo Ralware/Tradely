@@ -5,12 +5,13 @@ import type { PreparedSnapshot } from './snapshotStore';
 const identity = 'global:NASDAQ:MSFT';
 function snapshot(overrides: Record<string, unknown> = {}): PreparedSnapshot {
   const fp = 'fingerprint-1';
+  const now = new Date().toISOString();
   return {
-    schema_version: 2,
+    schema_version: 3,
     interval: '1d',
     fingerprint: fp,
-    generated_at: '2026-11-22T10:00:00Z',
-    analysis: { fingerprint: fp, is_stale: false, candles: [{ close: 12 }] },
+    generated_at: now,
+    analysis: { fingerprint: fp, is_stale: false, market: 'global', interval: '1d', as_of: now, candles: [{ close: 12 }] },
     indicator_series: { series: [{ close: 12 }] },
     technical_ratings: { fingerprint: fp, summary: { overall: { available: 1 } } },
     strategy_variants: Object.fromEntries([
@@ -18,7 +19,7 @@ function snapshot(overrides: Record<string, unknown> = {}): PreparedSnapshot {
       'short_only:NONE', 'short_only:LONG', 'short_only:SHORT',
       'long_short:NONE', 'long_short:LONG', 'long_short:SHORT',
     ].map((key) => [key, { state: 'READY' }])),
-    provenance: { instrument_id: identity, data_freshness: 'fresh' },
+    provenance: { instrument_id: identity, data_freshness: 'fresh', latest_candle_timestamp: now },
     ...overrides,
   } as PreparedSnapshot;
 }
@@ -43,6 +44,38 @@ describe('loadAnalyticsSnapshot', () => {
     expect(onCached).toHaveBeenCalledWith(local);
     expect(io.request).not.toHaveBeenCalled();
     expect(io.writeLocal).not.toHaveBeenCalled();
+  });
+
+  it('does not reuse a complete local snapshot for the wrong timeframe', async () => {
+    const wrongTimeframe = snapshot({ interval: '5m' });
+    const latest = snapshot();
+    const io = dependencies({
+      readLocal: vi.fn(async () => wrongTimeframe),
+      request: vi.fn(async () => latest),
+    });
+
+    await expect(loadAnalyticsSnapshot(identity, '1d', { dependencies: io })).resolves.toBe(latest);
+    expect(io.request).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the cached chart visible while requesting the selected stock latest candle', async () => {
+    const local = snapshot({ schema_version: 3 });
+    const latest = snapshot({ schema_version: 3, fingerprint: 'latest-fingerprint' });
+    latest.analysis.fingerprint = 'latest-fingerprint';
+    latest.technical_ratings.fingerprint = 'latest-fingerprint';
+    const io = dependencies({
+      readLocal: vi.fn(async () => local),
+      request: vi.fn(async () => latest),
+    });
+    const onCached = vi.fn();
+
+    await expect(loadAnalyticsSnapshot(identity, '1d', {
+      dependencies: io, onCached, refreshLatest: true,
+    })).resolves.toBe(latest);
+
+    expect(onCached).toHaveBeenCalledWith(local);
+    expect(io.request).toHaveBeenCalledWith(identity, '1d', undefined, true);
+    expect(io.writeLocal).toHaveBeenCalledWith(identity, '1d', latest);
   });
 
   it('shares one backend request between concurrent consumers', async () => {
@@ -129,7 +162,7 @@ describe('loadAnalyticsSnapshot', () => {
   });
 
   it('does not trust an incomplete local record and repairs it via the live path', async () => {
-    const incomplete = snapshot({ strategy_variants: { 'long_only:NONE': {} } });
+    const incomplete = snapshot({ schema_version: 2 });
     const live = snapshot({ fingerprint: 'repaired' });
     live.analysis.fingerprint = 'repaired';
     live.technical_ratings.fingerprint = 'repaired';

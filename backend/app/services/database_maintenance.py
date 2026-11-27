@@ -36,8 +36,6 @@ class MaintenanceReport:
     series: int = 0
     snapshots_before: int = 0
     snapshots_deleted: int = 0
-    strategy_snapshots_deleted: int = 0
-    orphan_strategy_snapshots_deleted: int = 0
     payload_bytes_released: int = 0
     database_bytes_before: int = 0
     database_bytes_after: int = 0
@@ -53,8 +51,6 @@ class MaintenanceReport:
             "series": self.series,
             "snapshots_before": self.snapshots_before,
             "snapshots_deleted": self.snapshots_deleted,
-            "strategy_snapshots_deleted": self.strategy_snapshots_deleted,
-            "orphan_strategy_snapshots_deleted": self.orphan_strategy_snapshots_deleted,
             "payload_bytes_released": self.payload_bytes_released,
             "database_bytes_before": self.database_bytes_before,
             "database_bytes_after": self.database_bytes_after,
@@ -219,24 +215,10 @@ def prune_analytics_snapshots(
                 report.payload_bytes_released = int(row[1])
                 for chunk in _chunks(all_ids):
                     marks = ",".join("?" for _ in chunk)
-                    cursor = connection.execute(
-                        f"DELETE FROM strategy_snapshots WHERE market_snapshot_id IN ({marks})",
-                        chunk,
-                    )
-                    report.strategy_snapshots_deleted += max(0, cursor.rowcount)
                     connection.execute(
                         f"DELETE FROM market_analytics_snapshots WHERE snapshot_id IN ({marks})",
                         chunk,
                     )
-            if prune_orphan_strategy and _table_exists(connection, "strategy_snapshots"):
-                cursor = connection.execute(
-                    """DELETE FROM strategy_snapshots
-                       WHERE NOT EXISTS (
-                           SELECT 1 FROM market_analytics_snapshots m
-                           WHERE m.snapshot_id = strategy_snapshots.market_snapshot_id
-                       )"""
-                )
-                report.orphan_strategy_snapshots_deleted = max(0, cursor.rowcount)
             if dry_run:
                 connection.rollback()
             else:

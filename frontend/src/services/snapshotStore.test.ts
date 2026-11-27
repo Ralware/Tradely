@@ -3,12 +3,12 @@ import { snapshotStore, type PreparedSnapshot } from './snapshotStore';
 
 const identity = 'crypto:BINANCE:ALGOUSDT';
 
-function snapshot(candleTime: string, fingerprint: string): PreparedSnapshot {
+function snapshot(candleTime: string, fingerprint: string, generatedAt = candleTime): PreparedSnapshot {
   return {
     schema_version: 2,
     interval: '1m',
     fingerprint,
-    generated_at: candleTime,
+    generated_at: generatedAt,
     analysis: { as_of: candleTime },
     provenance: { latest_candle_timestamp: candleTime },
   };
@@ -29,6 +29,17 @@ describe('snapshotStore ordering', () => {
     snapshotStore.setSnapshot(identity, '1m', snapshot('2026-11-24T12:00:00Z', 'old'));
 
     expect(snapshotStore.getSnapshot(identity, '1m')?.fingerprint).toBe('new');
+  });
+
+  it('keeps the newer revision when both snapshots share the same candle timestamp', () => {
+    snapshotStore.setSnapshot(identity, '1m', snapshot(
+      '2026-11-24T12:00:00Z', 'new-revision', '2026-11-24T12:02:00Z',
+    ));
+    snapshotStore.setSnapshot(identity, '1m', snapshot(
+      '2026-11-24T12:00:00Z', 'late-old-revision', '2026-11-24T12:01:00Z',
+    ));
+
+    expect(snapshotStore.getSnapshot(identity, '1m')?.fingerprint).toBe('new-revision');
   });
 
   it('isolates snapshots by instrument and timeframe', () => {

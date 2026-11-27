@@ -428,6 +428,17 @@ class TradingViewProvider(MarketDataProvider):
             )
         frame = normalize_candles(frame)
         forming = _final_bar_is_forming(frame, interval, market)
+        forming_candle = None
+        if forming:
+            current = frame.iloc[-1]
+            forming_candle = {
+                "timestamp": frame.index[-1].isoformat(),
+                "open": float(current["open"]),
+                "high": float(current["high"]),
+                "low": float(current["low"]),
+                "close": float(current["close"]),
+                "volume": float(current["volume"]),
+            }
         frame = _drop_incomplete_final_bar(frame, interval, market)
         if frame.empty:
             raise ProviderError(
@@ -451,6 +462,7 @@ class TradingViewProvider(MarketDataProvider):
         # the exclusion is recorded so callers can distinguish the two states.
         frame.attrs["last_bar_confirmed"] = True
         frame.attrs["forming_bar_excluded"] = forming
+        frame.attrs["forming_candle"] = forming_candle
         logger.info(
             "[TV] candles symbol=%s interval=%s rows=%d requested=%d truncated=%s forming=%s",
             tv_symbol, interval, len(frame), max_bars, history_truncated, forming,

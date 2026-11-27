@@ -63,6 +63,30 @@ def test_tradingview_candle_adapter_uses_exchange_symbol_and_split_adjustment(mo
     assert frame.attrs["source"] == TRADINGVIEW_PROVIDER
 
 
+def test_tradingview_keeps_forming_intraday_bar_for_chart_without_adding_it_to_completed_bars(monkeypatch):
+    current_hour = pd.Timestamp.now(tz="UTC").floor("h")
+    completed_hour = current_hour - pd.Timedelta(hours=1)
+    rows = [
+        candle_row(completed_hour, close=100.0),
+        candle_row(current_hour, close=101.0),
+    ]
+
+    def fake_get(_url, params=None, timeout=None):
+        return FakeResponse({"candles": rows})
+
+    monkeypatch.setattr("app.providers.tradingview.httpx.get", fake_get)
+    frame = TradingViewProvider(Settings(_env_file=None)).fetch_candles(
+        "BTCUSDT", market="crypto", exchange="BINANCE", interval="1h",
+        start=current_hour.date(), end=current_hour.date(),
+    )
+
+    assert len(frame) == 1
+    assert frame.index[-1] == completed_hour
+    assert frame.attrs["forming_bar_excluded"] is True
+    assert frame.attrs["forming_candle"]["timestamp"] == current_hour.isoformat()
+    assert frame.attrs["forming_candle"]["close"] == 101.0
+
+
 def test_tradingview_candle_adapter_bounds_history_request_when_no_range(monkeypatch):
     captured = {}
 

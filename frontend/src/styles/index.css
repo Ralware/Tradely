@@ -18,6 +18,8 @@
     --terminal-neutral: #626262;
     --terminal-candle-up: #1685ff;
     --terminal-candle-down: #f5f5f5;
+    --terminal-glow: rgba(22, 133, 255, 0.14);
+    --terminal-glow-strong: rgba(22, 133, 255, 0.28);
   }
 
   html {
@@ -38,7 +40,9 @@
     min-height: 100vh;
     margin: 0;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
-    background: var(--terminal-bg);
+    background:
+      radial-gradient(circle at 50% -30%, rgba(22, 133, 255, 0.09), transparent 38rem),
+      var(--terminal-bg);
   }
 
   button:not(:disabled),
@@ -164,6 +168,8 @@
 
   .panel-surface {
     @apply rounded border border-terminal-border bg-terminal-panel;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+    transition: border-color 180ms ease, background-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
   }
 
   .app-page {
@@ -171,11 +177,16 @@
   }
 
   .app-main {
-    background: var(--terminal-bg);
+    background:
+      linear-gradient(rgba(255, 255, 255, 0.012) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.009) 1px, transparent 1px),
+      var(--terminal-bg);
+    background-size: 36px 36px;
   }
 
   .app-topbar {
-    background: var(--terminal-bg);
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(20px);
   }
 
   .skeleton-block {
@@ -218,6 +229,26 @@
   .data-table tbody tr:last-child td {
     @apply border-b-0;
   }
+
+  .data-table tbody tr {
+    transition: background-color 160ms ease, transform 160ms ease;
+  }
+
+  .data-table tbody tr:hover {
+    background: rgba(255, 255, 255, 0.025);
+  }
+
+  .enter-reveal {
+    animation: enter-reveal 440ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .enter-reveal > * {
+    animation: enter-reveal 440ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .enter-reveal > :nth-child(2) { animation-delay: 55ms; }
+  .enter-reveal > :nth-child(3) { animation-delay: 110ms; }
+  .enter-reveal > :nth-child(4) { animation-delay: 165ms; }
 }
 
 @keyframes wave-flow {
@@ -227,6 +258,16 @@
   to {
     transform: translateX(280%);
   }
+}
+
+@keyframes enter-reveal {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -296,7 +337,7 @@
   }
 
   .tv-technicals > .tv-strategy-summary {
-    order: 4;
+    display: none;
   }
 
   .tv-technicals > .tv-analysis-tabs {
@@ -479,7 +520,10 @@
   }
 
   .tv-rating-needle {
-    transition: none;
+    transform-box: view-box;
+    transform-origin: 158px 150.5px;
+    transition: transform 780ms cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: transform;
   }
 
   .tv-rating-gauge-title {
@@ -884,7 +928,12 @@ body,
 
 .panel-surface {
   border-radius: var(--radius-panel);
-  background-color: #000000;
+  background: linear-gradient(145deg, rgba(18, 18, 18, 0.88), rgba(4, 4, 4, 0.96));
+}
+
+.panel-surface:hover {
+  border-color: #2d2d2d;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 12px 30px rgba(0, 0, 0, 0.18);
 }
 
 select,
@@ -894,17 +943,51 @@ textarea {
 }
 
 .tradely-nav-shell {
-  border: 1px solid var(--border-subtle);
+  border: 1px solid #292929;
   border-radius: var(--radius-pill);
-  background: #000000;
+  background: rgba(8, 8, 8, 0.82);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(16px);
   padding: 5px 6px 5px 8px;
 }
 
 .tradely-nav-search input {
   border: 1px solid #252525;
   border-radius: var(--radius-pill);
-  background-color: #000000;
+  background-color: rgba(0, 0, 0, 0.65);
+  transition: width 180ms ease, border-color 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
 }
+
+.tradely-nav-search input:focus {
+  border-color: rgba(22, 133, 255, 0.65);
+  box-shadow: 0 0 0 3px var(--terminal-glow);
+  background-color: #050505;
+}
+
+.app-page {
+  animation: enter-reveal 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.app-sidebar-link::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 3px;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0;
+  transform: translateX(-50%) scale(0);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.app-sidebar-link[aria-current="page"]::after { opacity: 1; transform: translateX(-50%) scale(1); }
+
+.modal-scrim { animation: fade-in 180ms ease both; }
+.modal-panel { animation: modal-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both; box-shadow: 0 24px 90px rgba(0, 0, 0, 0.72), 0 0 0 1px rgba(255,255,255,0.025) inset; }
+
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
 .tv-analysis-page {
   gap: 0;

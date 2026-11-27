@@ -3,7 +3,6 @@ import { cacheEvent } from './cacheDiagnostics';
 import type {
   CandlesResponse,
   Market,
-  ScannerResponse,
 } from '../types/api';
 
 export interface CandleQuery {
@@ -14,6 +13,7 @@ export interface CandleQuery {
   interval?: string;
   days?: number;
   provider?: string;
+  refreshLatest?: boolean;
 }
 
 const LONG_TIMEOUT = 120_000;
@@ -35,6 +35,7 @@ function candleKey(query: CandleQuery): string {
     query.interval ?? '1d',
     query.days ?? 365,
     query.provider ?? 'auto',
+    Boolean(query.refreshLatest),
   ]);
 }
 
@@ -79,6 +80,7 @@ function normalizeQuery(query: CandleQuery) {
     interval: query.interval ?? '1d',
     days: query.days ?? 365,
     provider: query.provider ?? 'auto',
+    refresh_latest: query.refreshLatest ?? false,
   };
 }
 
@@ -91,11 +93,12 @@ export const marketService = {
   getCandles(
     query: CandleQuery,
     signal?: AbortSignal,
-    options: { force?: boolean } = {},
+    options: { force?: boolean; refreshLatest?: boolean } = {},
   ): Promise<CandlesResponse> {
     void signal;
-    const key = candleKey(query);
-    const interval = query.interval ?? '1d';
+    const requestQuery = { ...query, refreshLatest: options.refreshLatest ?? query.refreshLatest };
+    const key = candleKey(requestQuery);
+    const interval = requestQuery.interval ?? '1d';
     const cached = candleCache.get(key);
     if (!options.force && cached && Date.now() - cached.fetchedAt < candleTtl(interval)) {
       cacheEvent('hit', { kind: 'candles', key });
@@ -111,7 +114,7 @@ export const marketService = {
     cacheEvent('request', { kind: 'candles', key, force: Boolean(options.force) });
     let request: Promise<CandlesResponse>;
     request = apiRequest<CandlesResponse>('/api/market/candles', {
-      query: normalizeQuery(query),
+      query: normalizeQuery(requestQuery),
       timeoutMs: LONG_TIMEOUT,
     }).then((data) => {
       if (generation === candleGeneration) {
@@ -141,10 +144,4 @@ export const marketService = {
     cacheEvent('invalidate', { kind: 'candles' });
   },
 
-  getScanner(signal?: AbortSignal): Promise<ScannerResponse> {
-    return apiRequest<ScannerResponse>('/api/scanner/watchlist', {
-      signal,
-      timeoutMs: LONG_TIMEOUT,
-    });
-  },
 };

@@ -109,7 +109,7 @@ class NewsService:
                 instrument = self.resolver.get(instrument_id) if instrument_id else None
                 if not instrument:
                     continue
-                if self.request_refresh(instrument, force=False, respect_cooldown=True):
+                if self.request_refresh(instrument, force=True, respect_cooldown=True):
                     scheduled += 1
         except Exception:
             logger.exception("Unable to schedule cached news refresh for watchlist")
@@ -208,15 +208,8 @@ class NewsService:
             return False
         now = _now()
         state = self.db.news_cache_state(instrument_id)
-        expires_at = state.get("expires_at") if state else None
-        fresh = False
-        if expires_at:
-            try:
-                fresh = datetime.fromisoformat(str(expires_at)).astimezone(UTC) > now
-            except ValueError:
-                fresh = False
-        if fresh and not force:
-            return False
+        # News is intentionally not cached. The cooldown below only prevents a
+        # burst of identical provider requests from multiple open tabs.
         cooldown = max(5, int(getattr(self.settings, "news_refresh_cooldown_seconds", 30)))
         if respect_cooldown and state and state.get("last_attempt_at"):
             try:
@@ -253,7 +246,9 @@ class NewsService:
             articles = self.provider.get_symbol_articles(yahoo_symbol, str(instrument.get("name") or symbol))
             for article in articles:
                 article["primary_symbol"] = symbol
-            ttl = max(30, int(getattr(self.settings, "news_cache_seconds", 300)))
+            # The expiry only marks when the next forced refresh is expected;
+            # feeds always schedule a refresh regardless of this timestamp.
+            ttl = max(5, int(getattr(self.settings, "news_refresh_cooldown_seconds", 30)))
             self.db.save_news_refresh(
                 instrument_id=instrument_id, symbol=symbol, articles=articles,
                 attempted_at=_iso(attempted), expires_at=_iso(attempted + timedelta(seconds=ttl)),
@@ -292,7 +287,7 @@ class NewsService:
         self, instrument: dict[str, Any], *, page: int = 1, page_size: int = 10,
         query: str | None = None, date_from: str | None = None, date_to: str | None = None,
     ) -> dict[str, Any]:
-        self.request_refresh(instrument, force=False, respect_cooldown=True)
+        self.request_refresh(instrument, force=True, respect_cooldown=True)
         instrument_id = str(instrument["instrument_id"])
         state = self.db.news_cache_state(instrument_id)
         now = _now()

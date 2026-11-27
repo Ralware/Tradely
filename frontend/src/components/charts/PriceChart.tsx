@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CandlestickSeries,
   ColorType,
@@ -6,13 +6,18 @@ import {
   HistogramSeries,
   LineSeries,
   LineStyle,
+  TickMarkType,
   createChart,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
   type MouseEventParams,
+  type Time,
   type UTCTimestamp,
 } from 'lightweight-charts';
 import type { Candle, IndicatorSeriesRow } from '../../types/api';
+import { isPlausibleLiveCandle as isPlausibleCandle, replaceFormingCandle } from './liveCandleUtils';
+import { getCachedLiveCandles, setCachedLiveCandles } from './liveCandleStore';
 import { analyticsViewStore } from '../../services/analyticsViewStore';
 import { formatNumber } from '../../utils/format';
 import { EmptyState } from '../common/States';
@@ -35,6 +40,10 @@ interface PriceChartProps {
   symbol?: string;
   pricePrecision?: number | null;
   priceMinMove?: number | null;
+  /** Provider's current in-progress candle, kept separate from completed analytics bars. */
+  formingCandle?: Candle | null;
+  /** Current-price marker only; never merged into candle OHLCV. */
+  livePrice?: number | null;
   height?: number;
 }
 
@@ -163,10 +172,80 @@ function fallbackPrecision(value: number | null | undefined): number {
   return 10;
 }
 
+const IST_TIME_ZONE = 'Asia/Kolkata';
+const IST_YEAR_FORMAT = new Intl.DateTimeFormat('en-IN', {
+  timeZone: IST_TIME_ZONE,
+  year: 'numeric',
+});
+const IST_MONTH_FORMAT = new Intl.DateTimeFormat('en-IN', {
+  timeZone: IST_TIME_ZONE,
+  month: 'short',
+});
+const IST_DAY_FORMAT = new Intl.DateTimeFormat('en-IN', {
+  timeZone: IST_TIME_ZONE,
+  day: '2-digit',
+});
+const IST_TIME_FORMAT = new Intl.DateTimeFormat('en-IN', {
+  timeZone: IST_TIME_ZONE,
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+});
+const IST_TIME_SECONDS_FORMAT = new Intl.DateTimeFormat('en-IN', {
+  timeZone: IST_TIME_ZONE,
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+});
+const IST_STAMP_FORMAT = new Intl.DateTimeFormat('en-IN', {
+  timeZone: IST_TIME_ZONE,
+  dateStyle: 'medium',
+  timeStyle: 'short',
+});
+
+function timeToDate(time: Time): Date | null {
+  if (typeof time === 'number') {
+    return new Date(time * 1000);
+  }
+  if (typeof time === 'string') {
+    const parsed = Date.parse(time);
+    return Number.isNaN(parsed) ? null : new Date(parsed);
+  }
+  if (typeof time === 'object' && time !== null) {
+    return new Date(Date.UTC(time.year, time.month - 1, time.day));
+  }
+  return null;
+}
+
+function istTickMark(time: Time, tickMarkType: TickMarkType): string {
+  const date = timeToDate(time);
+  if (!date) return '';
+  switch (tickMarkType) {
+    case TickMarkType.Year:
+      return IST_YEAR_FORMAT.format(date);
+    case TickMarkType.Month:
+      return IST_MONTH_FORMAT.format(date);
+    case TickMarkType.DayOfMonth:
+      return IST_DAY_FORMAT.format(date);
+    case TickMarkType.Time:
+      return IST_TIME_FORMAT.format(date);
+    case TickMarkType.TimeWithSeconds:
+      return IST_TIME_SECONDS_FORMAT.format(date);
+    default:
+      return IST_STAMP_FORMAT.format(date);
+  }
+}
+
+function istTimeLabel(time: Time): string {
+  const date = timeToDate(time);
+  return date ? `${IST_STAMP_FORMAT.format(date)} IST` : '';
+}
+
 function candleStamp(timestamp: string): string {
   const parsed = Date.parse(timestamp);
   if (Number.isNaN(parsed)) return timestamp;
-  return `${new Date(parsed).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+  return `${IST_STAMP_FORMAT.format(new Date(parsed))} IST`;
 }
 
 function indicatorValueAt(series: IndicatorSeriesRow[] | null, field: string, timestamp: string | null): number | null {
@@ -196,11 +275,14 @@ export function PriceChart({
   symbol = '',
   pricePrecision = null,
   priceMinMove = null,
+  formingCandle = null,
+  livePrice = null,
   height = 380,
 }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const livePriceLineRef = useRef<IPriceLine | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const overlaySeriesRef = useRef<ISeriesApi<'Line'>[]>([]);
   const indicatorSeriesRef = useRef<Array<ISeriesApi<'Line'> | ISeriesApi<'Histogram'>>>([]);
@@ -214,20 +296,97 @@ export function PriceChart({
   // Hover time is kept in React state so the HTML legend re-renders on
   // crosshair movement; the values themselves always come from `candles`.
   const [hoveredTime, setHoveredTime] = useState<UTCTimestamp | null>(null);
+  const chartIdentity = `${instrumentId || symbol}\u0000${timeframe}`;
+  const [liveCandleState, setLiveCandleState] = useState<{ key: string; candles: Candle[] } | null>(() => {
+    const cached = getCachedLiveCandles(chartIdentity);
+    return cached ? { key: chartIdentity, candles: cached } : null;
+  });
+
+  useEffect(() => {
+    const cached = getCachedLiveCandles(chartIdentity);
+    setLiveCandleState(cached ? { key: chartIdentity, candles: cached } : null);
+  }, [chartIdentity]);
+
+  useEffect(() => {
+    if (!liveCandleState || !liveCandleState.candles.length) return;
+    setCachedLiveCandles(liveCandleState.key, liveCandleState.candles);
+  }, [liveCandleState]);
+
+  useEffect(() => {
+    const referenceClose = candles[candles.length - 1]?.close;
+    const validProviderCandle = formingCandle && isPlausibleCandle(formingCandle, referenceClose)
+      ? formingCandle
+      : null;
+    if (!validProviderCandle) return;
+    const timestampSeconds = toSeconds(validProviderCandle.timestamp);
+    if (timestampSeconds === null) return;
+    const latestCompletedSeconds = candles.length
+      ? toSeconds(candles[candles.length - 1].timestamp)
+      : null;
+    // Some analytics snapshots include a bar at the same opening time as the
+    // provider's forming candle. In that case the API snapshot is authoritative
+    // and must replace it; only an older timestamp is stale.
+    if (latestCompletedSeconds !== null && timestampSeconds < latestCompletedSeconds) return;
+
+    setLiveCandleState((previousState) => {
+      const liveBars = previousState?.key === chartIdentity ? previousState.candles : [];
+      const newestCachedSeconds = liveBars.length ? toSeconds(liveBars[liveBars.length - 1].timestamp) : null;
+      if (newestCachedSeconds !== null && timestampSeconds < newestCachedSeconds) return previousState;
+      const nextBars = replaceFormingCandle(liveBars, validProviderCandle);
+      if (nextBars.length === liveBars.length
+        && nextBars.every((bar, index) => bar === liveBars[index])) return previousState;
+      return { key: chartIdentity, candles: nextBars };
+    });
+  }, [candles, chartIdentity, formingCandle]);
+
+  // The current in-progress bar is replaced by each provider OHLCV snapshot;
+  // quote ticks are never used to synthesize or mutate its candle values.
+  const chartCandles = useMemo(() => {
+    const byTime = new Map<number, Candle>();
+    for (const candle of candles) {
+      const time = toSeconds(candle.timestamp);
+      if (time !== null) byTime.set(time, candle);
+    }
+    const liveBars = liveCandleState?.key === chartIdentity ? liveCandleState.candles : [];
+    const referenceClose = candles[candles.length - 1]?.close;
+    const validFormingCandle = formingCandle && isPlausibleCandle(formingCandle, referenceClose)
+      ? formingCandle
+      : null;
+    const displayBars = [...liveBars];
+    let activeBarTime = liveBars.length ? toSeconds(liveBars[liveBars.length - 1].timestamp) : null;
+    if (validFormingCandle) {
+      const formingTime = toSeconds(validFormingCandle.timestamp);
+      const latestCompletedTime = candles.length ? toSeconds(candles[candles.length - 1].timestamp) : null;
+      if (formingTime !== null && (latestCompletedTime === null || formingTime >= latestCompletedTime)) {
+        displayBars.push(validFormingCandle);
+        activeBarTime = formingTime;
+      }
+    }
+    for (const candle of displayBars) {
+      const time = toSeconds(candle.timestamp);
+      const isActiveBar = time !== null && time === activeBarTime;
+      if (time !== null && Number.isFinite(candle.close) && (isActiveBar || !byTime.has(time))) {
+        byTime.set(time, candle);
+      }
+    }
+    return [...byTime.entries()].sort(([left], [right]) => left - right).map(([, candle]) => candle);
+  }, [candles, formingCandle, liveCandleState, chartIdentity]);
 
   const digits =
     typeof pricePrecision === 'number' && Number.isFinite(pricePrecision)
       ? Math.max(0, Math.min(12, Math.trunc(pricePrecision)))
-      : fallbackPrecision(candles.length ? candles[candles.length - 1].close : null);
+      : fallbackPrecision(
+        chartCandles.length ? chartCandles[chartCandles.length - 1].close : null,
+      );
   const minMove =
     typeof priceMinMove === 'number' && Number.isFinite(priceMinMove) && priceMinMove > 0
       ? priceMinMove
       : 10 ** -digits;
-  const latestCandle = candles.length ? candles[candles.length - 1] : null;
+  const latestCandle = chartCandles.length ? chartCandles[chartCandles.length - 1] : null;
   const hoveredCandle =
     hoveredTime === null
       ? null
-      : candles.find((candle) => toSeconds(candle.timestamp) === hoveredTime) ?? null;
+      : chartCandles.find((candle) => toSeconds(candle.timestamp) === hoveredTime) ?? null;
   const displayCandle = hoveredCandle ?? latestCandle;
 
   // The chart is created once and kept alive across data changes. Timeframe
@@ -252,11 +411,15 @@ export function PriceChart({
         horzLines: { color: CHART_COLORS.grid },
       },
       rightPriceScale: { borderColor: CHART_COLORS.border, scaleMargins: { top: 0.08, bottom: 0.08 } },
+      localization: {
+        timeFormatter: istTimeLabel,
+      },
       timeScale: {
         borderColor: CHART_COLORS.border,
         timeVisible: intraday,
         secondsVisible: false,
         rightOffset: 4,
+        tickMarkFormatter: istTickMark,
       },
       crosshair: {
         mode: CrosshairMode.Normal,
@@ -272,6 +435,7 @@ export function PriceChart({
       wickUpColor: CHART_COLORS.candleUp,
       wickDownColor: CHART_COLORS.candleDown,
       priceLineVisible: false,
+      lastValueVisible: false,
     });
 
     const volumeSeries = chart.addSeries(
@@ -329,6 +493,7 @@ export function PriceChart({
       chart.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
+      livePriceLineRef.current = null;
       volumeSeriesRef.current = null;
       overlaySeriesRef.current = [];
       indicatorSeriesRef.current = [];
@@ -345,6 +510,31 @@ export function PriceChart({
   }, [digits, minMove]);
 
   useEffect(() => {
+    const candleSeries = candleSeriesRef.current;
+    if (!candleSeries) return;
+    const currentPrice = livePrice ?? latestCandle?.close;
+    if (typeof currentPrice !== 'number' || !Number.isFinite(currentPrice) || currentPrice <= 0) {
+      if (livePriceLineRef.current) {
+        candleSeries.removePriceLine(livePriceLineRef.current);
+        livePriceLineRef.current = null;
+      }
+      return;
+    }
+    if (livePriceLineRef.current) {
+      livePriceLineRef.current.applyOptions({ price: currentPrice });
+      return;
+    }
+    livePriceLineRef.current = candleSeries.createPriceLine({
+      price: currentPrice,
+      color: CHART_COLORS.accent,
+      lineWidth: 1,
+      lineStyle: LineStyle.Dashed,
+      axisLabelVisible: true,
+      title: '',
+    });
+  }, [livePrice, latestCandle, digits]);
+
+  useEffect(() => {
     setHoveredTime(null);
   }, [symbol, timeframe]);
 
@@ -359,7 +549,7 @@ export function PriceChart({
     const chart = chartRef.current;
     const candleSeries = candleSeriesRef.current;
     const volumeSeries = volumeSeriesRef.current;
-    if (!chart || !candleSeries || !volumeSeries || candles.length === 0) {
+    if (!chart || !candleSeries || !volumeSeries || chartCandles.length === 0) {
       return;
     }
 
@@ -378,8 +568,8 @@ export function PriceChart({
     const previousRange = timeScale.getVisibleLogicalRange();
     const storedRange = analyticsViewStore.getRange(instrumentId || symbol, timeframe);
 
-    candleSeries.setData(candlePoints(candles));
-    volumeSeries.setData(volumePoints(candles));
+    candleSeries.setData(candlePoints(chartCandles));
+    volumeSeries.setData(volumePoints(chartCandles));
 
     // A routine refresh appends bars at the same logical indices, so keep the
     // user's zoom and scroll position instead of snapping back to fitContent.
@@ -397,7 +587,11 @@ export function PriceChart({
       return;
     }
 
-    timeScale.fitContent();
+    const lastIndex = chartCandles.length - 1;
+    timeScale.setVisibleLogicalRange({
+      from: Math.max(0, lastIndex - 70),
+      to: lastIndex + 4,
+    });
 
     const targetRange = timeScale.getVisibleLogicalRange();
     if (!timeframeChanged || !previousRange || !targetRange) {
@@ -432,7 +626,7 @@ export function PriceChart({
       }
     };
     timeRangeAnimationRef.current = requestAnimationFrame(animateRange);
-  }, [candles, instrumentId, timeframe, symbol]);
+  }, [chartCandles, instrumentId, timeframe, symbol]);
 
   useEffect(() => {
     const chart = chartRef.current;

@@ -4,8 +4,7 @@ import { useSelectedInstrument } from "../contexts/SelectedInstrumentContext";
 import { AnalysisWorkspace } from "../components/analysis/AnalysisWorkspace";
 import { AnalysisWatchlist } from "../components/analysis/AnalysisWatchlist";
 import { StockNewsPreview } from "../components/analysis/StockNewsPreview";
-import { analyticsViewStore } from "../services/analyticsViewStore";
-import type { DirectionMode, WatchlistItem } from "../types/api";
+import type { WatchlistItem } from "../types/api";
 import { instrumentPath } from "../utils/navigation";
 import { Icon } from "../components/common/Icon";
 
@@ -13,9 +12,6 @@ export function AnalysisPage() {
   const navigate = useNavigate();
   const selected = useSelectedInstrument();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [directionMode, setDirectionMode] = useState<DirectionMode>(
-    () => analyticsViewStore.get().directionMode,
-  );
 
   useEffect(() => {
     if (!drawerOpen) return undefined;
@@ -64,13 +60,7 @@ export function AnalysisPage() {
           </button>
         </div>
 
-        <AnalysisWorkspace
-          directionMode={directionMode}
-          onDirectionModeChange={(mode) => {
-            setDirectionMode(mode);
-            analyticsViewStore.update({ directionMode: mode });
-          }}
-        />
+        <AnalysisWorkspace />
         {selected.instrumentId ? (
           <div className="mt-3 w-full">
             <StockNewsPreview instrumentId={selected.instrumentId} symbol={selected.symbol} />

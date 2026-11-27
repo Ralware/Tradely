@@ -129,7 +129,6 @@ class BackupManager:
         local_dir: str | Path | None = None,
         limits: BackupLimits | None = None,
         app_version: str | None = None,
-        include_signal_audit: bool | None = None,
     ) -> None:
         self.db = db
         self.settings = settings
@@ -141,11 +140,6 @@ class BackupManager:
         )
         self.limits = limits or self._limits_from_settings(settings)
         self.app_version = app_version or application_version()
-        if include_signal_audit is None:
-            include_signal_audit = bool(
-                getattr(settings, "backup_include_signal_audit", True)
-            )
-        self.include_signal_audit = include_signal_audit
         self._thread_lock = threading.RLock()
         self._lock_path = self.local_dir / ".backup.lock"
 
@@ -337,8 +331,6 @@ class BackupManager:
             excluded = excluded_record_counts(connection)
         finally:
             connection.close()
-        if not self.include_signal_audit and "signal_audit" in data:
-            excluded["signal_audit"] = len(data.pop("signal_audit"))
         return data, excluded
 
     def _build_document(self) -> tuple[dict[str, Any], bytes, int]:
@@ -801,7 +793,7 @@ def storage_classification() -> dict[str, list[str]]:
     return {
         "essential": [
             "instruments", "instrument_aliases", "watchlist",
-            "holding_transactions", "signal_audit", "catalogue_meta",
+            "holding_transactions", "catalogue_meta",
         ],
         "regenerable": list(REGENERABLE_TABLES),
         "temporary": ["*.sqlite3-wal", "*.sqlite3-shm", "*.sqlite3-journal", "*.tmp", "*.log"],

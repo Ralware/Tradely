@@ -55,28 +55,11 @@ export interface NewsSearchResponse {
   provider: string;
 }
 
-interface Cached<T> { value: T; storedAt: number }
-const CACHE_MS = 25_000;
-const feedCache = new Map<string, Cached<NewsFeedResponse>>();
+// News is intentionally uncached: every consumer polls the backend, and the
+// backend schedules a fresh Yahoo Finance refresh for each feed request.
 const inFlight = new Map<string, Promise<NewsFeedResponse>>();
-const searchCache = new Map<string, Cached<NewsSearchResponse>>();
-
-function getFresh<T>(cache: Map<string, Cached<T>>, key: string): T | undefined {
-  const entry = cache.get(key);
-  if (entry && Date.now() - entry.storedAt < CACHE_MS) return entry.value;
-  return undefined;
-}
-
-function cached<T>(cache: Map<string, Cached<T>>, key: string, value: T): T {
-  cache.set(key, { value, storedAt: Date.now() });
-  return value;
-}
 
 export const newsService = {
-  cachedSymbol(instrumentId: string, page = 1, pageSize = 10, filters: { q?: string; dateFrom?: string; dateTo?: string } = {}): NewsFeedResponse | undefined {
-    return feedCache.get(symbolKey(instrumentId, page, pageSize, filters))?.value;
-  },
-
   symbolFeed(
     instrumentId: string,
     symbol: string,
@@ -85,8 +68,6 @@ export const newsService = {
     const page = options.page ?? 1;
     const pageSize = options.pageSize ?? 10;
     const key = symbolKey(instrumentId, page, pageSize, options);
-    const fresh = getFresh(feedCache, key);
-    if (fresh) return Promise.resolve(fresh);
     const existing = inFlight.get(key);
     if (existing) return existing;
     const request = apiRequest<NewsFeedResponse>(`/api/news/${encodeURIComponent(symbol)}`, {
@@ -96,22 +77,15 @@ export const newsService = {
         date_to: options.dateTo ? localDateToApiBound(options.dateTo, true) : undefined,
       },
       timeoutMs: 15_000,
-    }).then((value) => cached(feedCache, key, value)).finally(() => inFlight.delete(key));
+    }).finally(() => inFlight.delete(key));
     inFlight.set(key, request);
     return request;
-  },
-
-  cachedGeneral(params: { page?: number; pageSize?: number; q?: string; dateFrom?: string; dateTo?: string }): NewsFeedResponse | undefined {
-    const key = generalKey(params);
-    return feedCache.get(key)?.value;
   },
 
   generalFeed(
     params: { page?: number; pageSize?: number; q?: string; dateFrom?: string; dateTo?: string; signal?: AbortSignal },
   ): Promise<NewsFeedResponse> {
     const key = generalKey(params);
-    const fresh = getFresh(feedCache, key);
-    if (fresh) return Promise.resolve(fresh);
     const existing = inFlight.get(key);
     if (existing) return existing;
     const request = apiRequest<NewsFeedResponse>('/api/news', {
@@ -124,18 +98,15 @@ export const newsService = {
         sort: 'newest',
       },
       timeoutMs: 15_000,
-    }).then((value) => cached(feedCache, key, value)).finally(() => inFlight.delete(key));
+    }).finally(() => inFlight.delete(key));
     inFlight.set(key, request);
     return request;
   },
 
   search(query: string, signal?: AbortSignal): Promise<NewsSearchResponse> {
-    const key = `search:${query.trim().toLocaleLowerCase()}`;
-    const fresh = getFresh(searchCache, key);
-    if (fresh) return Promise.resolve(fresh);
     return apiRequest<NewsSearchResponse>('/api/news/search', {
       query: { q: query.trim() }, signal, timeoutMs: 12_000,
-    }).then((value) => cached(searchCache, key, value));
+    });
   },
 
   refresh(symbol: string, instrumentId: string, signal?: AbortSignal): Promise<{ status: string }> {

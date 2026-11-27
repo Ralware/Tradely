@@ -3,7 +3,6 @@ export type PreparedSnapshot = Record<string, any> & {
   interval: string;
   fingerprint: string;
   generated_at: string;
-  strategy_variants?: Record<string, unknown>;
 };
 
 export type SnapshotManifestItem = {
@@ -38,12 +37,15 @@ function snapshotTime(snapshot: PreparedSnapshot | undefined): number {
   return typeof value === 'string' ? Date.parse(value) : Number.NaN;
 }
 
+function generatedTime(snapshot: PreparedSnapshot | undefined): number {
+  return typeof snapshot?.generated_at === 'string'
+    ? Date.parse(snapshot.generated_at)
+    : Number.NaN;
+}
+
 export const snapshotStore = {
   getSnapshot(instrumentId: string, interval: string): PreparedSnapshot | undefined {
     return snapshots.get(key(instrumentId, interval));
-  },
-  getStrategyVariant(instrumentId: string, interval: string, directionMode: string, positionSide: string | null): unknown {
-    return snapshots.get(key(instrumentId, interval))?.strategy_variants?.[`${directionMode}:${positionSide ?? 'NONE'}`];
   },
   setSnapshot(instrumentId: string, interval: string, snapshot: PreparedSnapshot): void {
     const itemKey = key(instrumentId, interval);
@@ -51,10 +53,16 @@ export const snapshotStore = {
     // A late/queued response must never roll the chart back to older candles.
     const incomingTime = snapshotTime(snapshot);
     const existingTime = snapshotTime(existing);
+    const incomingGenerated = generatedTime(snapshot);
+    const existingGenerated = generatedTime(existing);
     if (
       Number.isFinite(incomingTime)
       && Number.isFinite(existingTime)
-      && incomingTime < existingTime
+      && (incomingTime < existingTime
+        || (incomingTime === existingTime
+          && Number.isFinite(incomingGenerated)
+          && Number.isFinite(existingGenerated)
+          && incomingGenerated < existingGenerated))
     ) {
       return;
     }
