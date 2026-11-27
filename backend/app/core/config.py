@@ -57,6 +57,39 @@ class Settings(BaseSettings):
     default_account_currency: str = "INR"
     max_risk_fraction: float = 0.02
 
+    # ------------------------------------------------------------------
+    # Portable backups (essential user data only).
+    # ------------------------------------------------------------------
+    backup_enabled: bool = True
+    # The only backup directory that is intentionally tracked by Git.
+    backup_git_dir: str = "./backups/portable"
+    # Local-only snapshots and restore safety copies; never committed.
+    backup_local_dir: str = "./data/local_backups"
+    backup_on_startup: bool = True
+    backup_on_shutdown: bool = True
+    backup_include_signal_audit: bool = True
+    # Hard repository budget: 100 MB combined, warning from 75 MB, preferred
+    # steady state 50-75 MB.
+    backup_max_total_bytes: int = 100 * 1024 * 1024
+    backup_warning_bytes: int = 75 * 1024 * 1024
+    backup_max_single_bytes: int = 90 * 1024 * 1024
+    backup_local_max_total_bytes: int = 400 * 1024 * 1024
+    backup_git_retention: int = 2
+    backup_local_retention: int = 10
+    backup_lock_timeout_seconds: float = 30.0
+    backup_lock_stale_seconds: float = 600.0
+    backup_temp_stale_seconds: float = 3600.0
+
+    # ------------------------------------------------------------------
+    # SQLite maintenance.  Analytics snapshots are regenerable caches and are
+    # bounded per instrument/interval; market bars are never pruned.
+    # ------------------------------------------------------------------
+    analytics_snapshot_retention_per_series: int = 2
+    analytics_snapshot_retention_enabled: bool = True
+    maintenance_checkpoint_on_shutdown: bool = True
+    maintenance_vacuum_on_startup: bool = False
+    maintenance_vacuum_min_free_bytes: int = 64 * 1024 * 1024
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @property

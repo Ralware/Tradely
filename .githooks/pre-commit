@@ -1,0 +1,11 @@
+#!/bin/sh
+# Reject oversized backups, secrets and generated files before they are
+# committed. Install once with: git config core.hooksPath .githooks
+set -e
+
+PYTHON=python
+if ! command -v "$PYTHON" >/dev/null 2>&1; then
+    PYTHON=python3
+fi
+
+exec "$PYTHON" scripts/check_backup_limits.py --staged

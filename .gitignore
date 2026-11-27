@@ -6,16 +6,45 @@ __pycache__/
 .coverage*
 htmlcov/
 .venv/
+
+# Secrets and local configuration must never be committed.
+.env
+.env.*
+!.env.example
+
 frontend/node_modules/.vite/
 frontend/node_modules/.vitest-cache/
 frontend/node_modules/.tmp/
 
 # Generated work directories, dependencies, archives, and bundles stay local.
 .work/
+.manus/
 node_modules/
 *.zip
 *.bundle
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.sqlite3-journal
 
-# Local market database, journal files, and generated backups stay on this machine.
+# Local market database, journal files, and generated full-database backups
+# stay on this machine. Only backups/portable/ is intentionally tracked.
 data/*.sqlite3*
-data/backups/*.sqlite3*
+data/backups/
+data/local_backups/
+data/*.tmp
+data/*.lock
+
+# Large research datasets and checkpoints are local-only.
+research/data/
+research/optimization/**/checkpoints/
+research/results/
+research/**/*.csv
+research/**/*.jsonl
+
+# Portable backup transient files (the compressed snapshots themselves are
+# tracked on purpose).
+backups/portable/.*.tmp
+backups/portable/*.tmp
+backups/portable/.backup.lock
+backups/local/

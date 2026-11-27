@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -9,9 +10,12 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router
 from app.api.news_routes import router as news_router
+from app.api.backup_routes import router as backup_router
+from app.backup.manager import BackupManager
 from app.core.config import get_settings
 from app.core.database import Database
 from app.instruments.resolver import InstrumentResolver
+from app.services.database_maintenance import checkpoint, optimize_database
 from app.services.market import MarketService
 from app.services.quotes import QuoteService
 from app.services.analytics_precompute import AnalyticsPrecompute
@@ -26,6 +30,20 @@ if settings.host not in {"127.0.0.1", "localhost", "::1"}:
 async def lifespan(app: FastAPI):
     # The durable queue survives restarts; only one bounded worker is started
     # in this process. Expired leases are recovered when jobs are claimed.
+    if settings.analytics_snapshot_retention_enabled:
+        try:
+            optimize_database(
+                app.state.db,
+                keep_per_series=settings.analytics_snapshot_retention_per_series,
+                vacuum_enabled=settings.maintenance_vacuum_on_startup,
+                min_free_bytes=settings.maintenance_vacuum_min_free_bytes,
+            )
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "Startup database maintenance failed"
+            )
+    if settings.backup_on_startup:
+        app.state.backup_manager.maybe_backup("startup", targets=("git",))
     app.state.analytics_precompute.enqueue_watchlist()
     app.state.analytics_precompute.start()
     app.state.news_service.start()
@@ -34,6 +52,13 @@ async def lifespan(app: FastAPI):
     finally:
         app.state.analytics_precompute.stop()
         app.state.news_service.close()
+        if settings.maintenance_checkpoint_on_shutdown:
+            try:
+                checkpoint(app.state.db)
+            except Exception:
+                pass
+        if settings.backup_on_shutdown:
+            app.state.backup_manager.maybe_backup("shutdown", targets=("local", "git"))
     try:
         app.state.quote_service.shutdown()
     except Exception:
@@ -55,8 +80,10 @@ app.state.market_service = MarketService(settings)
 app.state.quote_service = QuoteService(settings, app.state.market_service, app.state.db)
 app.state.analytics_precompute = AnalyticsPrecompute(app.state.db, app.state.market_service)
 app.state.news_service = NewsService(app.state.db, app.state.instrument_resolver, settings)
+app.state.backup_manager = BackupManager(app.state.db, settings)
 app.include_router(router)
 app.include_router(news_router)
+app.include_router(backup_router)
 
 FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets", check_dir=False), name="assets")

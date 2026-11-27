@@ -88,6 +88,12 @@ class AnalyticsPrecompute:
         self.poll_seconds = max(
             0.1, float(getattr(settings, "analytics_worker_poll_seconds", 2.0))
         )
+        self.snapshot_retention_enabled = bool(
+            getattr(settings, "analytics_snapshot_retention_enabled", True)
+        )
+        self.snapshot_retention = max(
+            1, int(getattr(settings, "analytics_snapshot_retention_per_series", 2))
+        )
         self._worker_ids = [
             self.worker_id if index == 0 else f"{self.worker_id}-{index}"
             for index in range(self.worker_concurrency)
@@ -548,6 +554,51 @@ class AnalyticsPrecompute:
             conn.commit()
         self._record("snapshot_writes")
         self._record("snapshot_write_seconds", time.perf_counter() - write_started)
+        self._prune_series_snapshots(instrument_id, interval)
+
+    def _prune_series_snapshots(self, instrument_id: str, interval: str) -> None:
+        """Bound regenerable snapshot growth for one instrument/interval series.
+
+        The newest snapshots are kept as a fallback for ``get_snapshot``; older
+        rows and the strategy variants that reference them are deleted together
+        so no dangling ``market_snapshot_id`` remains.
+        """
+        if not self.snapshot_retention_enabled:
+            return
+        connection = self.db.connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            ids = [
+                str(row[0])
+                for row in connection.execute(
+                    """SELECT snapshot_id FROM market_analytics_snapshots
+                       WHERE instrument_id=? AND interval=?
+                       ORDER BY generated_at DESC, updated_at DESC, snapshot_id DESC
+                       LIMIT -1 OFFSET ?""",
+                    (instrument_id, interval, self.snapshot_retention),
+                )
+            ]
+            if ids:
+                marks = ",".join("?" for _ in ids)
+                connection.execute(
+                    f"DELETE FROM strategy_snapshots WHERE market_snapshot_id IN ({marks})",
+                    ids,
+                )
+                connection.execute(
+                    f"DELETE FROM market_analytics_snapshots WHERE snapshot_id IN ({marks})",
+                    ids,
+                )
+            connection.commit()
+        except sqlite3.Error:
+            connection.rollback()
+            logger.warning(
+                "[CACHE] snapshot retention failed instrument=%s interval=%s",
+                instrument_id,
+                interval,
+                exc_info=True,
+            )
+        finally:
+            connection.close()
 
     def get_prepared_daily_signal(
         self, instrument_id: str, interval: str = "1d"

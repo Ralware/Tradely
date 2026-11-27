@@ -196,8 +196,13 @@ in `.env`, which is git-ignored and never sent to the browser.
   long and short lots, fees, realised/unrealised P&L and currency-separated
   summaries are calculated by the backend. No currency conversion, order
   execution, borrowing or paper trading is implied.
-- **Backups.** The SQLite database is user data. Keep copies outside this
-  repository; the app never deletes or recreates it.
+- **Backups.** Essential user data (watchlists, ledger, instruments, aliases,
+  signal audit and catalogue metadata) is exported to a versioned, compressed,
+  checksummed portable snapshot under `backups/portable/`. Market bars, analytics
+  snapshots, news and quote caches are regenerable and stay local. See
+  [`docs/BACKUP_AND_STORAGE.md`](docs/BACKUP_AND_STORAGE.md) for the format,
+  limits, restore procedure and SQLite maintenance workflow. The active SQLite
+  database is never deleted or recreated.
 
 ## Tests and builds
 

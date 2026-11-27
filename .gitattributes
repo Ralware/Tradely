@@ -1,1 +1,7 @@
 run.sh text eol=lf
+.githooks/* text eol=lf
+
+*.gz binary
+*.sqlite3 binary
+*.sqlite3-wal binary
+*.sqlite3-shm binary
