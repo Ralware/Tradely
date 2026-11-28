@@ -88,7 +88,7 @@ class HoldingTransaction(BaseModel):
     price: float = Field(gt=0)
     trade_time: datetime
     currency: str = "INR"
-    fees: float = Field(default=0, ge=0)
+    fees: float = Field(default=0, ge=0, allow_inf_nan=False)
     notes: str | None = None
     # Canonical identity supplied by instrument resolution. Optional for
     # backwards compatibility with previously recorded ledger rows.
@@ -138,12 +138,14 @@ class AmountTransactionRequest(BaseModel):
 
     instrument_id: str = Field(min_length=3, max_length=120)
     intent: TransactionIntent = Field(validation_alias=AliasChoices("intent", "side"))
-    amount: float = Field(gt=0)
+    amount: float = Field(gt=0, allow_inf_nan=False)
     currency: str | None = None
-    fees: float = Field(default=0, ge=0)
+    fees: float = Field(default=0, ge=0, allow_inf_nan=False)
     trade_time: datetime
     notes: str | None = Field(default=None, max_length=2000)
-    idempotency_key: str | None = Field(default=None, max_length=120)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=120)
+    execution_price: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    preview_id: str | None = Field(default=None, min_length=1, max_length=160)
 
     @property
     def side(self) -> TransactionIntent:

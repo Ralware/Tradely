@@ -57,7 +57,7 @@ export function TopNav() {
             end={item.end}
             className={({ isActive }) =>
               cn(
-                'relative flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs transition-colors focus-visible:outline-none',
+                'relative flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-terminal-accent',
                 isActive
                   ? 'bg-[#101b29] text-terminal-accent'
                   : 'text-terminal-muted hover:bg-[#101010] hover:text-terminal-text',

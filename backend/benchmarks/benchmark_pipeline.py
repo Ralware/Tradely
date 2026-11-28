@@ -2,7 +2,7 @@
 
 Run from the repository root:
 
-    .venv\\Scripts\\python.exe backend/benchmarks/benchmark_pipeline.py
+    .venv\\Scripts\\python.exe -m backend.benchmarks.benchmark_pipeline
 
 The benchmark uses synthetic OHLCV data and a temporary SQLite database. It
 never contacts TradingView, so request counts and timings are deterministic and
@@ -10,6 +10,7 @@ safe to compare across revisions.
 """
 from __future__ import annotations
 
+import gzip
 import json
 import statistics
 import tempfile
@@ -23,10 +24,11 @@ import pandas as pd
 from app.core.config import Settings
 from app.core.database import Database
 from app.core.models import WatchlistItem
-from app.services.analytics_precompute import AnalyticsPrecompute
+from app.services.analytics_precompute import (AnalyticsPrecompute, SCHEMA_VERSION, INDICATOR_VERSION,
+                                                RATING_DEPENDENCY, RATING_VERSION)
 from app.services.indicators import compute_indicators
 from app.services.market import MarketService
-from app.services.strategy import evaluate_trend_breakout
+from app.services.portfolio import build_ledger
 from app.services.tv_technical_rating import build_technical_summary
 
 
@@ -92,21 +94,9 @@ def seed_manifest(db: Database, count: int) -> list[tuple[str, str]]:
                     provider_identity,source_identity,adjustment_status,latest_candle_at,
                     candle_count,generated_at,updated_at,schema_version,status,payload,
                     payload_checksum) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (snapshot_id, instrument_id, interval, f"fp-{index}", "v", "d", "r",
-                 "p", "s", "adjusted", now, 100, now, now, 2, "READY", b"", "checksum"),
+                (snapshot_id, instrument_id, interval, f"fp-{index}", INDICATOR_VERSION, RATING_DEPENDENCY, RATING_VERSION,
+                 "p", "s", "adjusted", now, 100, now, now, SCHEMA_VERSION, "READY", b"", "checksum"),
             )
-            for direction in ("long_only", "short_only", "long_short"):
-                for position in ("NONE", "LONG", "SHORT"):
-                    connection.execute(
-                        """INSERT INTO strategy_snapshots
-                           (strategy_snapshot_id,market_snapshot_id,instrument_id,interval,
-                            ohlcv_fingerprint,strategy_version,strategy_configuration_hash,
-                            direction_mode,position_side,generated_at,status,payload,
-                            payload_checksum) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                        (f"{snapshot_id}-{direction}-{position}", snapshot_id, instrument_id,
-                         interval, f"fp-{index}", "bench", "default-v1", direction,
-                         position, now, "READY", b"", "checksum"),
-                    )
     return identities
 
 
@@ -129,15 +119,8 @@ def legacy_manifest(db: Database, identities: list[tuple[str, str]]) -> dict[str
                 (instrument_id, interval),
             ).fetchone()
             if snapshot:
-                count = connection.execute(
-                    """SELECT COUNT(*) FROM strategy_snapshots
-                       WHERE market_snapshot_id=? AND status='READY' AND strategy_version=?
-                         AND strategy_configuration_hash='default-v1'
-                         AND ohlcv_fingerprint=?""",
-                    (snapshot["snapshot_id"], "bench", snapshot["ohlcv_fingerprint"]),
-                ).fetchone()[0]
                 result.append({"instrument_id": instrument_id, "interval": interval,
-                               "status": "READY" if count == 9 else "MISSING"})
+                               "status": "READY"})
     return {"items": result}
 
 
@@ -206,45 +189,44 @@ def benchmark_candles() -> dict[str, Any]:
     }
 
 
-def benchmark_compute_and_reads(db: Database) -> dict[str, Any]:
-    frame = synthetic_frame(600)
-    settings = Settings(_env_file=None)
-    market = FrameMarket(frame, settings)
+def benchmark_compute_and_reads(db: Database, periods: int) -> dict[str, Any]:
+    frame = synthetic_frame(periods)
+    market = FrameMarket(frame, Settings(_env_file=None))
     engine = AnalyticsPrecompute(db, market)
-    instrument = db.resolve_instrument("BENCH", "global", exchange="NASDAQ")
-
-    publish_ms = timed(lambda: engine._compute_and_publish(instrument.instrument_id, "1d"), repeats=1)
-    read_ms = timed(lambda: engine.get_snapshot(instrument.instrument_id, "1d"))
-    prepared_ms = timed(lambda: engine.get_prepared_daily_signal(instrument.instrument_id, "1d"))
-
-    def full_recompute() -> None:
-        indicators = compute_indicators(frame)
-        build_technical_summary(frame)
-        for direction in ("long_only", "short_only", "long_short"):
-            for position in (None, "LONG", "SHORT"):
-                evaluate_trend_breakout(
-                    frame, symbol="BENCH", market="global", source="benchmark",
-                    direction_mode=direction, position_side=position, indicators=indicators,
-                )
-
-    compute_ms = timed(full_recompute, repeats=3)
+    instrument = db.resolve_instrument(f"BENCH{periods}", "global", exchange="NASDAQ")
+    publish_ms = timed(lambda: engine._compute_and_publish(instrument.instrument_id, "1d"), repeats=3)
+    read = lambda: engine.get_snapshot(instrument.instrument_id, "1d")
+    payload = read()
+    assert payload is not None and len(payload["analysis"]["candles"]) == periods
+    encoded = json.dumps(payload, separators=(",", ":"), allow_nan=False).encode()
     return {
-        "publish_snapshot_ms": round(publish_ms, 3),
-        "read_snapshot_ms": read_ms,
-        "prepared_signal_ms": prepared_ms,
-        "full_indicator_strategy_recompute_ms": compute_ms,
-        "snapshot_candle_count": len(
-            engine.get_snapshot(instrument.instrument_id, "1d")["analysis"]["candles"]
-        ),
+        "candles": periods,
+        "publish_snapshot_ms": publish_ms,
+        "read_snapshot_ms": timed(read, repeats=3),
+        "indicator_ms": timed(lambda: compute_indicators(frame), repeats=3),
+        "rating_ms": timed(lambda: build_technical_summary(frame), repeats=3),
+        "json_bytes": len(encoded),
+        "gzip_bytes": len(gzip.compress(encoded, compresslevel=3)),
         "market_provider_calls": market.calls,
     }
+
+
+def benchmark_portfolio(count: int) -> dict[str, Any]:
+    transactions = [
+        {"id": i, "symbol": "BENCH", "market": "global", "exchange": "NASDAQ",
+         "currency": "USD", "intent": "BUY" if i % 2 == 0 else "SELL",
+         "price": 100 + i % 17, "quantity": 0.25, "fees": 0.01,
+         "trade_time": "2026-01-01T00:00:00+00:00"}
+        for i in range(count)
+    ]
+    return {"transactions": count, "fifo_ms": timed(lambda: build_ledger(transactions))}
 
 
 def benchmark_queue(db: Database, jobs: int = 40) -> dict[str, Any]:
     engine = AnalyticsPrecompute(db, FrameMarket(synthetic_frame(10), Settings(_env_file=None)))
     for index in range(jobs):
         engine.enqueue(f"global:NASDAQ:QUEUE{index}", "1d", job_type="WATCHLIST_PREFETCH")
-    claim_ms = timed(lambda: [engine._claim(f"worker-{index % 2}") for index in range(jobs)], repeats=3)
+    claim_ms = timed(lambda: [engine._claim(f"worker-{index % 2}") for index in range(jobs)], repeats=1)
     with db.connect() as connection:
         claimed = connection.execute(
             "SELECT COUNT(*) FROM analytics_jobs WHERE status='RUNNING'"
@@ -261,7 +243,8 @@ def main() -> None:
         results = {
             "manifest": benchmark_manifest(db, identities),
             "candles": benchmark_candles(),
-            "compute": benchmark_compute_and_reads(db),
+            "compute": [benchmark_compute_and_reads(db, n) for n in (600, 5000, 20000)],
+            "portfolio": [benchmark_portfolio(n) for n in (100, 1000, 10000)],
             "queue": benchmark_queue(db),
         }
         print(json.dumps(results, indent=2, default=str))

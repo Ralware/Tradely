@@ -110,7 +110,7 @@ def api(tmp_path, monkeypatch):
     quotes = FakeQuoteService()
     app.state.db = db
     app.state.quote_service = quotes
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     try:
         yield SimpleNamespace(client=client, db=db, quotes=quotes)
     finally:
@@ -433,3 +433,83 @@ def test_market_quotes_endpoint(api):
     quotes = response.json()["quotes"]
     assert len(quotes) == 1
     assert quotes[0]["price"] == 120
+
+
+def confirmation_request(**changes):
+    payload = {"instrument_id": "india:NSE:RELIANCE", "intent": "BUY", "amount": 1200,
+               "currency": "INR", "trade_time": BASE.isoformat(), "fees": 1,
+               "idempotency_key": str(uuid.uuid4())}
+    return {**payload, **changes}
+
+
+def confirm(api, payload):
+    response = api.client.post("/api/portfolio/transactions/preview", json=payload)
+    assert response.status_code == 200 and response.json()["valid"]
+    return {**payload, "preview_id": response.json()["preview_id"]}
+
+
+def test_preview_binds_price_quantity_fields_and_ledger(api):
+    path = "/api/portfolio/transactions"
+    payload = confirm(api, confirmation_request())
+    api.quotes.prices[payload["instrument_id"]] += 1
+    changed = api.client.post(path, json=payload)
+    assert changed.status_code == 409 and changed.json()["detail"]["code"] == "preview_changed"
+    assert api.db.list_transactions() == []
+    api.quotes.prices[payload["instrument_id"]] -= 1
+    assert api.client.post(path, json={**payload, "notes": "changed"}).status_code == 409
+    assert trade(api.client).status_code == 200
+    assert api.client.post(path, json=payload).status_code == 409
+    renewed = confirm(api, payload)
+    saved = api.client.post(path, json=renewed)
+    assert saved.status_code == 200 and saved.json()["transaction"]["quantity"] == 10
+
+
+def test_expired_preview_and_exact_execution_price(api, monkeypatch):
+    path = "/api/portfolio/transactions"
+    api.quotes.fail = True
+    payload = confirm(api, confirmation_request(execution_price=113.25))
+    import app.services.transaction_confirmation as protocol
+    from types import SimpleNamespace
+    issued = int(payload["preview_id"].partition(".")[0])
+    with monkeypatch.context() as patch:
+        patch.setattr(protocol, "time", SimpleNamespace(time=lambda: issued + 120))
+        expired = api.client.post(path, json=payload)
+        assert expired.status_code == 409 and expired.json()["detail"]["code"] == "preview_expired"
+    recorded = api.client.post(path, json=payload).json()
+    assert recorded["transaction"]["price"] == 113.25
+    assert recorded["transaction"]["quote_type"] == "execution"
+    assert recorded["position"]["current_price"] is None
+    assert api.quotes.transaction_times == []
+
+
+def test_concurrent_retry_and_conflicting_reuse(api):
+    from concurrent.futures import ThreadPoolExecutor
+
+    payload = confirm(api, confirmation_request(execution_price=120))
+    path = "/api/portfolio/transactions"
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        replies = list(pool.map(lambda _: api.client.post(path, json=payload), range(5)))
+    assert [r.status_code for r in replies] == [200] * 5
+    assert sum(r.json()["duplicate"] for r in replies) == 4
+    assert len(api.db.list_transactions()) == 1
+    for changed in ({"amount": 1500}, {"fees": 2}, {"notes": "different"}, {"execution_price": 122},
+                    {"currency": "USD"}, {"preview_id": "different"}):
+        conflict = api.client.post(path, json={**payload, **changed})
+        assert conflict.status_code == 409
+        assert conflict.json()["detail"]["code"] == "idempotency_conflict"
+
+
+def test_ledger_snapshot_reused_across_valuations_and_invalidated_after_mutations(api):
+    first = trade(api.client).json()
+    revision, ledger, _ = api.db.ledger_snapshot()
+    path = "/api/portfolio/snapshot"
+    api.quotes.prices["india:NSE:RELIANCE"] = 125
+    valued = api.client.get(path, params={"force": True}).json()
+    assert valued["ledger_revision"] == revision
+    assert valued["summary"]["ledger_revision"] == revision
+    assert valued["positions"][0]["current_price"] == 125
+    assert api.db.ledger_snapshot()[1] is ledger
+    assert api.client.delete(f"/api/portfolio/transactions/{first['transaction']['id']}").status_code == 200
+    empty = api.client.get(path).json()
+    assert empty["ledger_revision"] > revision
+    assert empty["positions"] == []

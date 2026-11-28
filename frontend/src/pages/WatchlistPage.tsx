@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuotes } from '../hooks/useQuotes';
 import { useWatchlist } from '../hooks/useWatchlist';
@@ -27,13 +27,17 @@ export function WatchlistPage() {
   const [addingError, setAddingError] = useState<string | null>(null);
   const [watchlistSort, setWatchlistSort] = useState<WatchlistSort | null>(null);
 
-  useEffect(() => {
-    if (!addModalOpen) return undefined;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') setAddModalOpen(false);
-    }
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const opener = useRef<HTMLButtonElement | null>(null);
+  useLayoutEffect(() => {
+    if (!addModalOpen) return;
+    const dialog = dialogRef.current;
+    dialog?.showModal();
+    dialog?.querySelector('input')?.focus();
+    return () => {
+      dialog?.close();
+      opener.current?.focus();
+    };
   }, [addModalOpen]);
 
   const watchlistItems = useMemo(() => watchlist.data?.items ?? [], [watchlist.data]);
@@ -143,7 +147,8 @@ export function WatchlistPage() {
               size="sm"
               variant="secondary"
               icon="plus"
-              onClick={() => {
+              onClick={(event) => {
+                opener.current = event.currentTarget;
                 setAddingError(null);
                 setAddModalOpen(true);
               }}
@@ -182,18 +187,18 @@ export function WatchlistPage() {
 
       {/* Add Instrument Modal */}
       {addModalOpen ? (
-        <div
-          className="modal-scrim fixed inset-0 z-50 flex items-center justify-center bg-terminal-bg/90 p-4 backdrop-blur-sm"
+        <dialog
+          ref={dialogRef}
+          aria-labelledby="watchlist-dialog-title"
+          onCancel={(event) => { event.preventDefault(); setAddModalOpen(false); }}
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setAddModalOpen(false);
+            if (event.target !== event.currentTarget) return;
+            const bounds = event.currentTarget.getBoundingClientRect();
+            if (event.clientX < bounds.left || event.clientX > bounds.right
+                || event.clientY < bounds.top || event.clientY > bounds.bottom) setAddModalOpen(false);
           }}
+          className="modal-panel m-auto w-[calc(100%-2rem)] max-w-md overflow-visible rounded-xl border border-terminal-border bg-terminal-panel p-4 text-terminal-text backdrop:bg-terminal-bg/90"
         >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="watchlist-dialog-title"
-            className="modal-panel w-full max-w-md rounded-xl border border-terminal-border bg-terminal-panel p-4"
-          >
             <div className="mb-3 flex items-start justify-between gap-3 border-b border-terminal-border pb-2.5">
               <div>
                 <h3 id="watchlist-dialog-title" className="text-sm font-semibold text-terminal-text">
@@ -232,8 +237,7 @@ export function WatchlistPage() {
                 Cancel
               </Button>
             </div>
-          </div>
-        </div>
+        </dialog>
       ) : null}
     </div>
   );

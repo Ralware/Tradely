@@ -66,7 +66,8 @@ function download(item: SnapshotManifestItem): Promise<PreparedSnapshot> {
     { timeoutMs: 90_000 },
     )
     .then((payload) => {
-      if (payload.fingerprint !== item.fingerprint
+      if ((item.snapshot_id && payload.snapshot_id !== item.snapshot_id)
+        || payload.fingerprint !== item.fingerprint
         || payload.interval !== item.interval
         || payload.provenance?.instrument_id !== item.instrument_id) {
         throw new Error('Manifest/snapshot fingerprint mismatch');
@@ -114,7 +115,7 @@ async function synchronize(force: boolean): Promise<void> {
       // Already synchronized this exact fingerprint and still in memory.
       if (
         !force
-        && lastSynced.get(key) === item.fingerprint
+        && lastSynced.get(key) === (item.snapshot_id ?? item.fingerprint)
         && snapshotStore.getSnapshot(item.instrument_id, item.interval)
       ) {
         completed += 1;
@@ -149,6 +150,7 @@ async function synchronize(force: boolean): Promise<void> {
         const local = locals[index];
         if (
           local
+          && (!item.snapshot_id || local.payload.snapshot_id === item.snapshot_id)
           && local.fingerprint === item.fingerprint
           && local.schemaVersion === ANALYTICS_SCHEMA_VERSION
           && isCompleteSnapshot(local.payload)
@@ -157,7 +159,7 @@ async function synchronize(force: boolean): Promise<void> {
           && local.payload.provenance?.instrument_id === item.instrument_id
         ) {
           snapshotStore.setSnapshot(item.instrument_id, item.interval, local.payload);
-          lastSynced.set(key, item.fingerprint!);
+          lastSynced.set(key, item.snapshot_id ?? item.fingerprint!);
           return;
         }
         if (item.status === 'READY' && item.fingerprint) {
@@ -170,9 +172,10 @@ async function synchronize(force: boolean): Promise<void> {
             syncedAt: new Date().toISOString(),
             payload,
           };
-          await snapshotDatabase.put(bundle);
+          if (currentGeneration !== generation) return;
           snapshotStore.setSnapshot(item.instrument_id, item.interval, payload);
-          lastSynced.set(key, item.fingerprint);
+          lastSynced.set(key, item.snapshot_id ?? item.fingerprint);
+          await snapshotDatabase.put(bundle);
         }
       } catch (error) {
         errors.push(

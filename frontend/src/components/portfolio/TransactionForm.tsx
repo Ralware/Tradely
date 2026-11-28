@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useQuotes } from '../../hooks/useQuotes';
+import { ApiError } from '../../services/api';
 import { portfolioService } from '../../services/portfolioService';
 import type {
   AddTransactionResponse,
@@ -9,6 +10,7 @@ import type {
   Quote,
   TransactionIntent,
   TransactionPreviewResponse,
+  TransactionRequest,
 } from '../../types/api';
 import { cn, formatDateTime, formatNumber } from '../../utils/format';
 import {
@@ -118,7 +120,7 @@ function PriceCard({
     <div className="rounded-md border border-terminal-border bg-terminal-panelAlt px-2.5 py-2">
       <div className="flex items-center justify-between gap-2">
         <p className="text-2xs font-medium text-terminal-muted">
-          {historical ? 'Historical Reference Price' : 'Current Market Price'}
+          {quote?.quote_type === 'execution' ? 'Recorded Execution Price' : historical ? 'Historical Reference Price' : 'Current Market Price'}
         </p>
         <Badge tone={quoteTone(quote)} dot title={quote?.provider ?? 'No quote'}>
           {quoteLabel(quote)}
@@ -178,6 +180,12 @@ export function TransactionForm({
   const [notes, setNotes] = useState('');
   const [resolution, setResolution] = useState<Instrument | null>(null);
   const [preview, setPreview] = useState<TransactionPreviewResponse | null>(null);
+  const [executionPrice, setExecutionPrice] = useState('');
+  const [editingInstrument, setEditingInstrument] = useState(false);
+  const [confirmedInputs, setConfirmedInputs] = useState('');
+  const [previewVersion, setPreviewVersion] = useState(0);
+  const submission = useRef(false);
+  const retry = useRef<{ inputs: string; request: TransactionRequest } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -190,7 +198,9 @@ export function TransactionForm({
   const tradeDate = new Date(tradeTime);
   const tradeTimeValid = !Number.isNaN(tradeDate.getTime());
   const canonicalTradeTime = tradeTimeValid ? tradeDate.toISOString() : null;
-  const instrumentId = resolution?.instrument_id ?? null;
+  const instrumentId = editingInstrument ? null : resolution?.instrument_id ?? null;
+  const execution = executionPrice.trim() ? Number(executionPrice) : null;
+  const executionValid = execution === null || (Number.isFinite(execution) && execution > 0);
   const currency = resolution?.currency ?? '';
   const amountValid = Number.isFinite(parsedAmount) && parsedAmount > 0;
   const feesValid = Number.isFinite(parsedFees) && parsedFees >= 0;
@@ -206,13 +216,13 @@ export function TransactionForm({
   // A new market tick changes the derived quantity, so the preview refreshes
   // when the selected instrument's live quote moves. Backdated entries ignore
   // live ticks because their reference price comes from provider history.
-  const livePriceSignal = historical
+  const livePriceSignal = historical || execution !== null
     ? ''
     : `${hubQuote?.price ?? ''}:${hubQuote?.quote_time ?? ''}`;
 
   // Editing the transaction intent clears the previous estimate immediately;
   // quote-driven refreshes keep the last estimate visible while recalculating.
-  const intentSignature = [
+  const intentSignature = JSON.stringify([
     instrumentId,
     side,
     parsedAmount,
@@ -220,8 +230,8 @@ export function TransactionForm({
     parsedFees,
     currency,
     amountValid,
-    feesValid,
-  ].join('|');
+    feesValid, execution, notes.trim(),
+  ]);
   useEffect(() => {
     setPreview(null);
   }, [intentSignature]);
@@ -229,6 +239,8 @@ export function TransactionForm({
   useEffect(() => {
     if (!closeRequest) return;
     const { position } = closeRequest;
+    setEditingInstrument(false);
+    setExecutionPrice('');
     const isShort = position.position_side === 'SHORT' || position.quantity < 0;
     const referencePrice = position.current_price ?? position.average_cost;
     setResolution({
@@ -252,7 +264,7 @@ export function TransactionForm({
   // Server-authoritative amount-to-quantity preview. React renders this result
   // and never calculates the accounting quantity itself.
   useEffect(() => {
-    if (!instrumentId || !currency || !canonicalTradeTime || !amountValid || !feesValid) {
+    if (!instrumentId || !currency || !canonicalTradeTime || !amountValid || !feesValid || !executionValid) {
       setPreviewLoading(false);
       return;
     }
@@ -269,12 +281,14 @@ export function TransactionForm({
             currency,
             fees: parsedFees,
             trade_time: canonicalTradeTime,
-            notes: null,
+            execution_price: execution,
+            notes: notes.trim() || null,
           },
           controller.signal,
         )
         .then((response) => {
           if (active) {
+            setConfirmedInputs(intentSignature);
             setPreview(response);
           }
         })
@@ -295,13 +309,23 @@ export function TransactionForm({
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [instrumentId, side, parsedAmount, canonicalTradeTime, parsedFees, currency, amountValid, feesValid, livePriceSignal]);
+  }, [instrumentId, side, parsedAmount, canonicalTradeTime, parsedFees, currency, amountValid, feesValid, livePriceSignal, execution, executionValid, notes, intentSignature, previewVersion]);
 
   // A changed intent is a new transaction; an unchanged retry keeps its key so
   // repeated submissions cannot duplicate the ledger row.
   useEffect(() => {
     setIdempotencyKey(newIdempotencyKey());
-  }, [instrumentId, side, parsedAmount, canonicalTradeTime]);
+    retry.current = null;
+  }, [intentSignature]);
+
+  useEffect(() => {
+    if (!preview?.expires_at) return;
+    const timer = window.setTimeout(() => {
+      setPreview(null);
+      setPreviewVersion((version) => version + 1);
+    }, Math.max(0, Date.parse(preview.expires_at) - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [preview?.expires_at]);
 
   async function recordTrade(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -323,15 +347,16 @@ export function TransactionForm({
       setError('Enter a valid transaction time');
       return;
     }
-    if (!preview?.valid) {
+    if (submission.current || !canSubmit) {
       setError(preview?.error ?? 'A usable quote is required before recording');
       return;
     }
 
+    submission.current = true;
     setSaving(true);
     try {
       const instrument = resolution;
-      const saved = await portfolioService.addTransaction({
+      const request = retry.current?.inputs === intentSignature ? retry.current.request : {
         instrument_id: instrument.instrument_id,
         intent: side,
         amount: parsedAmount,
@@ -340,7 +365,12 @@ export function TransactionForm({
         trade_time: canonicalTradeTime,
         notes: notes.trim() || null,
         idempotency_key: idempotencyKey,
-      });
+        execution_price: execution,
+        preview_id: preview?.preview_id,
+      };
+      retry.current = { inputs: intentSignature, request };
+      const saved = await portfolioService.addTransaction(request);
+      retry.current = null;
 
       const unit = assetUnit(instrument.symbol, instrument.market, instrument.currency);
       const transaction = saved.transaction;
@@ -356,13 +386,20 @@ export function TransactionForm({
           }`;
 
       setAmount('');
+      setExecutionPrice('');
       setFees('0');
       setNotes('');
       setIdempotencyKey(newIdempotencyKey());
       onRecorded(saved, message);
     } catch (caught) {
+      if (caught instanceof ApiError && caught.status >= 400 && caught.status < 500) {
+        retry.current = null;
+        setPreview(null);
+        setPreviewVersion((version) => version + 1);
+      }
       setError(messageOf(caught));
     } finally {
+      submission.current = false;
       setSaving(false);
     }
   }
@@ -370,9 +407,11 @@ export function TransactionForm({
   const unit = assetUnit(resolution?.symbol, resolution?.market, resolution?.currency);
   const previewQuote = preview?.valid ? preview.quote ?? null : null;
   // A backdated entry must never display (or imply) the current market price.
-  const referenceQuote = historical ? previewQuote : hubQuote ?? previewQuote;
-  const referenceLoading = historical ? previewLoading : previewLoading;
-  const canSubmit = Boolean(resolution) && preview?.valid === true && !saving;
+  const referenceQuote = previewQuote ?? (historical || execution !== null ? null : hubQuote);
+  const referenceLoading = previewLoading;
+  const canSubmit = Boolean(instrumentId) && !saving && !previewLoading && amountValid && feesValid
+    && executionValid && confirmedInputs === intentSignature && preview?.valid === true
+    && Boolean(preview.preview_id && preview.expires_at && Date.parse(preview.expires_at) > Date.now());
   // Show the owner's recorded holdings even before an amount is entered; the
   // preview substitutes its server-computed availability once it is ready.
   const heldQuantity =
@@ -419,7 +458,10 @@ export function TransactionForm({
             <label className="mb-1 block text-2xs font-medium text-terminal-muted">Instrument</label>
             <InstrumentSearch
               value={resolution?.symbol ?? ''}
+              onQueryEdit={() => setEditingInstrument(true)}
               onSelect={(instrument) => {
+                setEditingInstrument(false);
+                setExecutionPrice('');
                 setResolution(instrument);
                 setError(null);
               }}
@@ -525,6 +567,9 @@ export function TransactionForm({
           </Field>
         </div>
 
+        <Input label="Execution price (optional)" type="number" min={0} step="any"
+          value={executionPrice} onChange={(event) => setExecutionPrice(event.target.value)}
+          hint="Use the price from your trade confirmation, or leave blank for a provider reference." />
         <PriceCard
           quote={referenceQuote}
           historical={historical}

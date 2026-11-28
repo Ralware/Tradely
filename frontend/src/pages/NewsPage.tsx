@@ -127,11 +127,12 @@ export function NewsPage() {
       return undefined;
     }
     const controller = new AbortController();
+    setSearching(true);
+    setSuggestions([]);
+    setSearchError(null);
     const timer = window.setTimeout(() => {
-      setSearching(true);
-      setSearchError(null);
       void newsService.search(value, controller.signal)
-        .then((result) => setSuggestions(result.items))
+        .then((result) => { if (!controller.signal.aborted) setSuggestions(result.items); })
         .catch((caught: unknown) => {
           if (controller.signal.aborted) return;
           setSuggestions([]);
@@ -268,8 +269,7 @@ export function NewsPage() {
                 onChange={(event) => setSearchText(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === 'Escape') {
-                    setSuggestions([]);
-                    setSearchError(null);
+                    clearSearch();
                   }
                 }}
                 placeholder="Search ticker or company · AAPL, RELIANCE.NS, BTC-USD"

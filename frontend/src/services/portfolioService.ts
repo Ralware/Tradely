@@ -70,7 +70,9 @@ function cachedQuery<T>(
     cacheEvent('hit', { kind: 'portfolio', key });
     return Promise.resolve(cached.data);
   }
-  const pending = inFlight.get(key);
+  const refreshKey = key + '\u0000refresh';
+  const requestKey = force ? refreshKey : key;
+  const pending = inFlight.get(refreshKey) ?? (!force && inFlight.get(key));
   if (pending) {
     cacheEvent('dedupe', { kind: 'portfolio', key });
     return pending;
@@ -81,16 +83,17 @@ function cachedQuery<T>(
   let request: Promise<T>;
   request = load()
     .then((data) => {
-      if (generation === portfolioGeneration) {
+      if (generation === portfolioGeneration && inFlight.get(requestKey) === request) {
         cache.set(key, { data, fetchedAt: Date.now() });
         cacheEvent('store', { kind: 'portfolio', key });
       }
       return data;
     })
     .finally(() => {
-      if (inFlight.get(key) === request) inFlight.delete(key);
+      if (inFlight.get(requestKey) === request) inFlight.delete(requestKey);
     });
-  inFlight.set(key, request);
+  if (force) inFlight.delete(key);
+  inFlight.set(requestKey, request);
   return request;
 }
 
@@ -364,6 +367,13 @@ export const portfolioService = {
       removeWatchlistItem(payload);
       return response;
     });
+  },
+
+  invalidateValuations() {
+    positionsCache.clear();
+    summaryCache.clear();
+    positionsInFlight.clear();
+    summaryInFlight.clear();
   },
 
   invalidatePortfolioCaches,

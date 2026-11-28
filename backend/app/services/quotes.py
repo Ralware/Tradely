@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from concurrent.futures import Future
+import logging
 import threading
 import time
 from dataclasses import dataclass
@@ -229,7 +231,7 @@ class QuoteService:
         self.db = db
         self._cache: dict[str, _CacheEntry] = {}
         self._failures: dict[str, _FailureState] = {}
-        self._locks: dict[str, threading.Lock] = {}
+        self._inflight: dict[str, Future[dict[str, Any]]] = {}
         self._rules: dict[str, tuple[float, TradingRules]] = {}
         self._lock = threading.RLock()
 
@@ -257,9 +259,10 @@ class QuoteService:
         output: dict[str, dict[str, Any]] = {}
         due: list[dict[str, Any]] = []
         now_monotonic = time.monotonic()
+        waiting: dict[str, Future[dict[str, Any]]] = {}
         for payload in payloads:
             instrument_id = payload["instrument_id"]
-            with self._lock_for(instrument_id):
+            with self._lock:
                 entry = self._cache.get(instrument_id)
                 failure = self._failures.get(instrument_id)
                 if entry and not force and entry.expires_at > now_monotonic:
@@ -270,43 +273,65 @@ class QuoteService:
                 ):
                     output[instrument_id] = self._fallback(payload, failure.message)
                     continue
-                due.append(payload)
+                pending = self._inflight.get(instrument_id)
+                if pending is None:
+                    pending = Future()
+                    self._inflight[instrument_id] = pending
+                    due.append(payload)
+                waiting[instrument_id] = pending
 
         if due:
-            raw_quotes: dict[str, dict[str, Any]] = {}
-            errors: dict[str, str] = {}
-            batch_error: Exception | None = None
             try:
-                raw_quotes, errors = self.market_service.quotes(
-                    [payload["provider_symbol"] for payload in due]
-                )
-            except Exception as exc:  # bridge/network/provider failure
-                batch_error = exc
-            for payload in due:
-                provider_symbol = payload["provider_symbol"]
-                raw = raw_quotes.get(provider_symbol)
-                error_message = errors.get(provider_symbol)
-                if raw is None:
-                    message = error_message or (
-                        str(batch_error) if batch_error is not None else
-                        f"TradingView returned no quote for {provider_symbol}"
-                    )
-                    exc = QuoteError(message)
-                    self._record_failure(payload, exc)
-                    output[payload["instrument_id"]] = self._fallback(payload, message)
-                    continue
-                try:
-                    quote = _present_quote(self._quote_from_tradingview(payload, raw))
-                except Exception as exc:
-                    self._record_failure(payload, exc)
-                    output[payload["instrument_id"]] = self._fallback(
-                        payload, str(exc) or exc.__class__.__name__
-                    )
-                    continue
-                self._store(payload, quote)
-                output[payload["instrument_id"]] = quote
-
+                fetched = self._fetch_batch(due)
+            except BaseException as exc:
+                for payload in due:
+                    waiting[payload["instrument_id"]].set_exception(exc)
+                raise
+            else:
+                for instrument_id, quote in fetched.items():
+                    waiting[instrument_id].set_result(quote)
+            finally:
+                with self._lock:
+                    for payload in due:
+                        self._inflight.pop(payload["instrument_id"], None)
+        output.update((key, pending.result()) for key, pending in waiting.items())
         return [output[payload["instrument_id"]] for payload in payloads]
+
+    def _fetch_batch(self, due: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        output: dict[str, dict[str, Any]] = {}
+        raw_quotes: dict[str, dict[str, Any]] = {}
+        errors: dict[str, str] = {}
+        batch_error: Exception | None = None
+        try:
+            raw_quotes, errors = self.market_service.quotes(
+                [payload["provider_symbol"] for payload in due]
+            )
+        except Exception as exc:  # bridge/network/provider failure
+            batch_error = exc
+        for payload in due:
+            provider_symbol = payload["provider_symbol"]
+            raw = raw_quotes.get(provider_symbol)
+            error_message = errors.get(provider_symbol)
+            if raw is None:
+                message = error_message or (
+                    str(batch_error) if batch_error is not None else
+                    f"TradingView returned no quote for {provider_symbol}"
+                )
+                exc = QuoteError(message)
+                self._record_failure(payload, exc)
+                output[payload["instrument_id"]] = self._fallback(payload, message)
+                continue
+            try:
+                quote = _present_quote(self._quote_from_tradingview(payload, raw))
+            except Exception as exc:
+                self._record_failure(payload, exc)
+                output[payload["instrument_id"]] = self._fallback(
+                    payload, str(exc) or exc.__class__.__name__
+                )
+                continue
+            output[payload["instrument_id"]] = self._store(payload, quote)
+
+        return output
 
     def quote_for_transaction(
         self,
@@ -388,18 +413,18 @@ class QuoteService:
         if frame is None or frame.empty:
             raise QuoteError("Historical price unavailable: provider returned no candles")
 
-        eligible = frame
+        # TradingView indexes bars by their opening time. Daily UTC-midnight
+        # labels identify the trading date even on exchanges west of UTC.
         if interval == "1d" and market in _EQUITY_SESSIONS:
             zone, close_minute = _EQUITY_SESSIONS[market]
-            local_at = trade_time.astimezone(zone)
-            candle_dates = frame.index.tz_convert(zone)
-            local_minutes = local_at.hour * 60 + local_at.minute
-            if local_minutes < close_minute:
-                eligible = frame[candle_dates.date < local_at.date()]
-            else:
-                eligible = frame[candle_dates.date <= local_at.date()]
+            dates = frame.index.tz_convert("UTC").tz_localize(None).normalize()
+            closes = (dates + timedelta(minutes=close_minute)).tz_localize(zone)
         else:
-            eligible = frame[frame.index <= trade_time]
+            duration = {"1m": timedelta(minutes=1), "1h": timedelta(hours=1),
+                        "1d": timedelta(days=1)}[interval]
+            closes = frame.index + duration
+        completed = closes <= trade_time
+        eligible = frame.loc[completed]
 
         if eligible.empty:
             raise QuoteError(
@@ -424,7 +449,7 @@ class QuoteService:
             "day_high": _as_float(row.get("high")),
             "day_low": _as_float(row.get("low")),
             "volume": _as_float(row.get("volume")),
-            "quote_time": _iso(eligible.index[-1].to_pydatetime()),
+            "quote_time": _iso(closes[completed][-1].to_pydatetime()),
             "retrieved_at": _iso(now),
             "quote_type": "historical",
             "freshness": "historical",
@@ -449,12 +474,6 @@ class QuoteService:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-    def _lock_for(self, instrument_id: str) -> threading.Lock:
-        with self._lock:
-            if instrument_id not in self._locks:
-                self._locks[instrument_id] = threading.Lock()
-            return self._locks[instrument_id]
-
     def _ttl(self, market: str) -> int:
         if market == "crypto":
             return self.settings.quote_crypto_ttl_seconds
@@ -468,7 +487,7 @@ class QuoteService:
         quote: dict[str, Any],
         *,
         ttl_seconds: int | None = None,
-    ) -> None:
+    ) -> dict[str, Any]:
         ttl = ttl_seconds if ttl_seconds is not None else self._ttl(payload["market"])
         with self._lock:
             existing = self._cache.get(payload["instrument_id"])
@@ -476,7 +495,7 @@ class QuoteService:
                 old_time = _parse_time(existing.quote.get("quote_time"))
                 new_time = _parse_time(quote.get("quote_time"))
                 if old_time and new_time and new_time < old_time:
-                    return
+                    return _present_quote(existing.quote)
             self._cache[payload["instrument_id"]] = _CacheEntry(
                 quote=quote, expires_at=time.monotonic() + max(1, ttl)
             )
@@ -484,8 +503,8 @@ class QuoteService:
         try:
             self.db.save_quote_snapshot(payload["instrument_id"], quote)
         except Exception:
-            # Persisting a last-known quote must never break the portfolio.
-            pass
+            logging.getLogger(__name__).warning("Failed to persist quote snapshot")
+        return quote
 
     def _record_failure(self, payload: dict[str, Any], exc: Exception) -> None:
         instrument_id = payload["instrument_id"]

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import hashlib
 import sqlite3
+from contextlib import closing
+from threading import Lock
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -14,6 +16,7 @@ from app.core.instruments import (
     instrument_id_for,
     parse_instrument_id,
 )
+from app.services.portfolio import Ledger, build_ledger
 from app.core.models import (
     HOLDING_QUANTITY_TOLERANCE,
     HoldingTransaction,
@@ -21,7 +24,7 @@ from app.core.models import (
     WatchlistItem,
 )
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 _CATALOGUE_COLUMNS: dict[str, str] = {
     "display_name": "TEXT NOT NULL DEFAULT ''",
     "base_currency": "TEXT NOT NULL DEFAULT ''",
@@ -104,6 +107,10 @@ def _instrument_from_row(row: dict[str, Any]) -> Instrument:
 
 
 
+class LedgerRevisionChanged(ValueError):
+    """A confirmed preview was made against a different ledger."""
+
+
 class Database:
     """SQLite persistence for the private single-owner installation.
 
@@ -112,6 +119,8 @@ class Database:
     """
 
     def __init__(self, file_path: Path):
+        self._ledger_lock = Lock()
+        self._ledger_cache: tuple[int, Ledger, list[dict[str, Any]]] | None = None
         self.file_path = file_path
         self.file_path.parent.mkdir(parents=True, exist_ok=True)
         self.initialize()
@@ -228,6 +237,14 @@ class Database:
                 """
             )
             self._migrate(connection)
+            connection.execute("CREATE TABLE IF NOT EXISTS portfolio_revision "
+                               "(singleton INTEGER PRIMARY KEY CHECK(singleton=1), revision INTEGER NOT NULL)")
+            connection.execute("INSERT OR IGNORE INTO portfolio_revision VALUES(1,0)")
+            for operation in ("INSERT", "DELETE", "UPDATE"):
+                connection.execute(f"""CREATE TRIGGER IF NOT EXISTS ledger_revision_{operation}
+                    AFTER {operation} ON holding_transactions BEGIN
+                    UPDATE portfolio_revision SET revision = revision + 1 WHERE singleton=1;
+                    END""")
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _backup_before_migration(self, previous_version: int) -> Path:
@@ -563,6 +580,7 @@ class Database:
             "quote_status": "TEXT NOT NULL DEFAULT ''",
             "quote_currency": "TEXT NOT NULL DEFAULT ''",
             "idempotency_key": "TEXT NOT NULL DEFAULT ''",
+            "request_fingerprint": "TEXT NOT NULL DEFAULT ''",
             "resolution_status": "TEXT NOT NULL DEFAULT 'resolved'",
             "intent": "TEXT NOT NULL DEFAULT ''",
         }
@@ -1240,8 +1258,27 @@ class Database:
         row, _ = self.add_transaction_once(transaction)
         return row
 
+    def ledger_snapshot(self) -> tuple[int, Ledger, list[dict[str, Any]]]:
+        """Read revision and rows from one WAL snapshot, sharing one FIFO replay."""
+        with self._ledger_lock:
+            with closing(self.connect()) as connection:
+                connection.execute("BEGIN")
+                revision = connection.execute("SELECT revision FROM portfolio_revision").fetchone()[0]
+                if self._ledger_cache is not None and self._ledger_cache[0] == revision:
+                    return self._ledger_cache
+                rows = [dict(row) for row in connection.execute(
+                    "SELECT * FROM holding_transactions ORDER BY trade_time, id"
+                )]
+            self._ledger_cache = revision, build_ledger(rows), rows
+            return self._ledger_cache
+
+    def portfolio_revision(self) -> int:
+        with closing(self.connect()) as connection:
+            return connection.execute("SELECT revision FROM portfolio_revision").fetchone()[0]
+
     def add_transaction_once(
-        self, transaction: HoldingTransaction,
+        self, transaction: HoldingTransaction, *, request_fingerprint: str = "",
+        expected_revision: int | None = None,
     ) -> tuple[dict[str, Any], bool]:
         """Insert one ledger row, returning ``(row, was_duplicate)``.
 
@@ -1266,6 +1303,10 @@ class Database:
                 ).fetchone()
                 if existing:
                     return dict(existing), True
+            if expected_revision is not None and expected_revision != connection.execute(
+                "SELECT revision FROM portfolio_revision"
+            ).fetchone()[0]:
+                raise LedgerRevisionChanged("Portfolio changed. Review the updated preview.")
             if currency != instrument.currency:
                 raise ValueError(
                     f"Currency {currency} does not match instrument currency {instrument.currency}"
@@ -1284,8 +1325,8 @@ class Database:
                    (symbol, market, side, intent, quantity, price, trade_time, currency, fees, notes,
                     instrument_id, instrument_name, exchange, asset_type, provider, provider_symbol,
                     amount, actual_amount, quote_provider, quote_time, quote_type, quote_status,
-                    quote_currency, idempotency_key)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    quote_currency, idempotency_key, request_fingerprint)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (instrument.symbol, instrument.market, legacy_side, side,
                  transaction.quantity, transaction.price, transaction.trade_time.isoformat(),
                  instrument.currency, transaction.fees, transaction.notes,
@@ -1294,7 +1335,7 @@ class Database:
                  amount, actual_amount, transaction.quote_provider or "",
                  transaction.quote_time.isoformat() if transaction.quote_time else None,
                  transaction.quote_type or "", transaction.quote_status or "",
-                 transaction.quote_currency or "", transaction.idempotency_key or ""),
+                 transaction.quote_currency or "", transaction.idempotency_key or "", request_fingerprint),
             )
             row = connection.execute(
                 "SELECT * FROM holding_transactions WHERE id=?", (cursor.lastrowid,)

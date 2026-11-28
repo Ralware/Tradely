@@ -102,7 +102,7 @@ def test_ohlcv_fingerprint_changes_on_any_input_mutation():
 
 
 def test_technicals_api_with_tv_v3_method(monkeypatch):
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     frame = _sample_ohlcv(300)
     frame.attrs["is_adjusted"] = True
 
@@ -133,7 +133,7 @@ def test_technicals_api_with_tv_v3_method(monkeypatch):
 
 
 def test_cache_bypass_flag_passed_to_service(monkeypatch):
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     frame = _sample_ohlcv(300)
     frame.attrs["is_adjusted"] = True
 
@@ -205,7 +205,7 @@ def test_analytics_snapshot_is_atomic_and_exposes_provenance(monkeypatch):
         return original(frame_arg)
 
     monkeypatch.setattr(routes, "build_tv_technical_summary", counted)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
 
     first = client.get(
         "/api/instruments/TEST/analytics-snapshot?market=india&interval=1d&days=3650"
@@ -252,7 +252,7 @@ def test_analytics_snapshot_refresh_bypasses_market_cache_and_rating_cache(monke
         return original(frame_arg)
 
     monkeypatch.setattr(routes, "build_tv_technical_summary", counted)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     url = "/api/instruments/TEST/analytics-snapshot?market=india&interval=1d&days=3650"
     assert client.get(url).status_code == 200
     assert client.get(url + "&refresh=true").status_code == 200

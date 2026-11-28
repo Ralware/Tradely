@@ -24,7 +24,7 @@ router = APIRouter(prefix="/api/backup", tags=["backup"])
 
 
 class CreateRequest(BaseModel):
-    targets: Literal["local", "git", "both"] = "both"
+    targets: Literal["local", "git", "both"] = "local"
     force: bool = False
     reason: str = Field(default="api", max_length=120)
 

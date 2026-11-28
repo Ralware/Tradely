@@ -1072,20 +1072,25 @@ textarea {
 
 @media (max-width: 520px) {
   .app-topbar {
-    height: 60px !important;
-    padding-left: 8px;
-    padding-right: 8px;
+    height: auto !important;
+    padding: 6px 8px;
+  }
+  .tradely-nav-shell {
+    flex-direction: column;
+    border-radius: var(--radius-panel);
+  }
+  .tradely-nav-shell nav, .tradely-nav-search {
+    width: 100%;
   }
   .tradely-nav-shell nav a {
-    gap: 4px;
-    padding-left: 7px;
-    padding-right: 7px;
+    flex: 1;
+    flex-direction: column;
+    gap: 1px;
+    justify-content: center;
+    padding: 0 2px;
   }
   .tradely-nav-shell nav a span {
     font-size: 10px;
-  }
-  .tradely-nav-search {
-    width: 112px;
   }
   .tv-technicals {
     padding: 9px;

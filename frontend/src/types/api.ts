@@ -18,6 +18,7 @@ export type QuoteFreshness =
   | 'unavailable';
 
 export type QuoteType =
+  | 'execution'
   | 'real_time'
   | 'delayed'
   | 'last_available'
@@ -412,6 +413,8 @@ export interface TransactionRequest {
   intent: TransactionIntent;
   side?: Side;
   amount: number;
+  execution_price?: number | null;
+  preview_id?: string;
   currency: string;
   fees: number;
   trade_time: string;
@@ -430,6 +433,10 @@ export interface TradingRules {
 }
 
 export interface TransactionPreviewResponse {
+  preview_id?: string;
+  expires_at?: string;
+  created_at?: string;
+  ledger_revision?: number;
   valid: boolean;
   error: string | null;
   side?: Side;

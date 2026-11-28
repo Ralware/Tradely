@@ -114,6 +114,10 @@ class TradingViewBridge:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.base_url = settings.tradingview_bridge_url.rstrip("/")
+        self._client = httpx.Client(trust_env=False)
+
+    def close(self) -> None:
+        self._client.close()
 
     def _request(
         self,
@@ -128,7 +132,7 @@ class TradingViewBridge:
 
         for attempt in range(1, attempts + 1):
             try:
-                response = httpx.get(
+                response = self._client.get(
                     f"{self.base_url}{path}",
                     params=params,
                     timeout=timeout,
@@ -151,7 +155,7 @@ class TradingViewBridge:
                 retry_after = headers.get("retry-after") if hasattr(headers, "get") else None
                 delay = backoff * (2 ** (attempt - 1))
                 try:
-                    delay = max(delay, float(retry_after))
+                    delay = min(30.0, max(delay, float(retry_after)))
                 except (TypeError, ValueError):
                     pass
                 logger.warning(

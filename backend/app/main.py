@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -43,7 +45,7 @@ async def lifespan(app: FastAPI):
                 "Startup database maintenance failed"
             )
     if settings.backup_on_startup:
-        app.state.backup_manager.maybe_backup("startup", targets=("git",))
+        app.state.backup_manager.maybe_backup("startup")
     app.state.analytics_precompute.enqueue_watchlist()
     app.state.analytics_precompute.start()
     app.state.news_service.start()
@@ -58,11 +60,9 @@ async def lifespan(app: FastAPI):
             except Exception:
                 pass
         if settings.backup_on_shutdown:
-            app.state.backup_manager.maybe_backup("shutdown", targets=("local", "git"))
-    try:
+            app.state.backup_manager.maybe_backup("shutdown")
         app.state.quote_service.shutdown()
-    except Exception:
-        pass
+        app.state.market_service.tradingview.bridge.close()
 
 
 app = FastAPI(
@@ -71,12 +71,31 @@ app = FastAPI(
     description="Private, single-user quantitative market analysis. No AI, paper trading or order execution.",
     lifespan=lifespan,
 )
+_LOCAL_AUTHORITY = re.compile(r"(?:localhost|127\.0\.0\.1|\[::1\])(?::[0-9]{1,5})?", re.I)
+
+
+@app.middleware("http")
+async def local_access(request: Request, call_next):
+    hosts = request.headers.getlist("host")
+    if len(hosts) != 1 or not _LOCAL_AUTHORITY.fullmatch(hosts[0]):
+        return JSONResponse({"detail": "Local host required"}, status_code=400)
+    origins = request.headers.getlist("origin")
+    if origins:
+        scheme, _, authority = origins[0].partition("://")
+        if len(origins) != 1 or scheme not in {"http", "https"} or not _LOCAL_AUTHORITY.fullmatch(authority):
+            return JSONResponse({"detail": "Local browser origin required"}, status_code=403)
+    if request.method not in {"GET", "HEAD", "OPTIONS"} and request.headers.get("sec-fetch-site") == "cross-site":
+        return JSONResponse({"detail": "Cross-site mutation refused"}, status_code=403)
+    return await call_next(request)
+
+
+app.add_middleware(GZipMiddleware, minimum_size=4096, compresslevel=3)
 app.state.settings = settings
 app.state.db = Database(settings.database_file)
 app.state.db.backfill_tradingview_metadata()
-app.state.instrument_resolver = InstrumentResolver(settings, app.state.db)
-app.state.instrument_resolver.ensure_catalogue()
 app.state.market_service = MarketService(settings)
+app.state.instrument_resolver = InstrumentResolver(settings, app.state.db, app.state.market_service.tradingview.bridge)
+app.state.instrument_resolver.ensure_catalogue()
 app.state.quote_service = QuoteService(settings, app.state.market_service, app.state.db)
 app.state.analytics_precompute = AnalyticsPrecompute(app.state.db, app.state.market_service)
 app.state.news_service = NewsService(app.state.db, app.state.instrument_resolver, settings)

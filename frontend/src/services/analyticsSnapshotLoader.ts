@@ -14,6 +14,8 @@ export function isCompleteSnapshot(value: PreparedSnapshot | undefined): value i
   return Array.isArray(candles) && candles.length > 0
     && Array.isArray(series) && series.length === candles.length
     && Boolean(value.technical_ratings?.summary)
+    && value.indicator_series?.fingerprint === value.fingerprint
+    && value.provenance?.ohlcv_fingerprint === value.fingerprint
     && value.analysis?.fingerprint === value.fingerprint
     && value.technical_ratings?.fingerprint === value.fingerprint;
 }

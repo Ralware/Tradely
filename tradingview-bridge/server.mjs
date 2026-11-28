@@ -64,6 +64,9 @@ function loadEnvFile() {
 loadEnvFile();
 
 const HOST = process.env.TRADINGVIEW_BRIDGE_HOST || "127.0.0.1";
+if (!["127.0.0.1", "localhost", "::1"].includes(HOST)) {
+  throw new Error("TradingView bridge requires a loopback bind address");
+}
 const PORT = Number(process.env.TRADINGVIEW_BRIDGE_PORT || 8010);
 const MAX_CONCURRENCY = Math.max(
   1,
@@ -457,6 +460,13 @@ function sendJson(response, status, payload) {
 }
 
 async function route(request, response) {
+  const localAuthority = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::[0-9]{1,5})?$/i;
+  if (!localAuthority.test(request.headers.host ?? "")) {
+    throw new BridgeError(400, "INVALID_HOST", "Local host required");
+  }
+  if (request.headers.origin || request.headers["sec-fetch-site"] === "cross-site") {
+    throw new BridgeError(403, "INVALID_ORIGIN", "Use the local Tradely API");
+  }
   const url = new URL(
     request.url || "/",
     `http://${request.headers.host || "localhost"}`,
@@ -505,9 +515,7 @@ const server = http.createServer((request, response) => {
   route(request, response)
     .then((payload) => {
       sendJson(response, 200, payload);
-      console.log(
-        `${request.method} ${request.url} 200 ${Date.now() - started}ms`,
-      );
+
     })
     .catch((error) => {
       const status = error instanceof BridgeError ? error.status : 502;
@@ -517,7 +525,7 @@ const server = http.createServer((request, response) => {
         error: { code, message, details: error?.details ?? null },
         source: "TradingView (unofficial)",
       });
-      console.error(`${request.method} ${request.url} ${status} ${message}`);
+      console.error(`Bridge request failed ${status} ${code} ${Date.now() - started}ms`);
     });
 });
 

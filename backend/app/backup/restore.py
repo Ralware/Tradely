@@ -79,17 +79,16 @@ def _same_decimal(left: Any, right: Any) -> bool:
         return False
 
 
-def _find_transaction(connection: Any, row: dict[str, Any]) -> dict[str, Any] | None:
+def _find_transaction(connection: Any, row: dict[str, Any], matched: set[int]) -> dict[str, Any] | None:
     key = str(row.get("idempotency_key") or "")
     if key:
         found = connection.execute(
             "SELECT * FROM holding_transactions WHERE idempotency_key=?", (key,)
         ).fetchone()
-        if found is not None:
-            return dict(found)
+        return dict(found) if found is not None else None
     candidates = connection.execute(
         """SELECT * FROM holding_transactions
-           WHERE symbol=? AND market=? AND trade_time=? AND currency=?""",
+           WHERE symbol=? AND market=? AND trade_time=? AND currency=? AND idempotency_key='' ORDER BY id""",
         (
             row.get("symbol"),
             row.get("market"),
@@ -100,7 +99,9 @@ def _find_transaction(connection: Any, row: dict[str, Any]) -> dict[str, Any] | 
     for candidate in candidates:
         existing = dict(candidate)
         if (
-            str(existing.get("side") or "") == str(row.get("side") or "")
+            existing["id"] not in matched
+            and existing["instrument_id"] == row.get("instrument_id")
+            and str(existing.get("side") or "") == str(row.get("side") or "")
             and str(existing.get("intent") or "") == str(row.get("intent") or "")
             and _same_decimal(existing.get("quantity"), row.get("quantity"))
             and _same_decimal(existing.get("price"), row.get("price"))
@@ -200,16 +201,19 @@ def _restore_watchlist(
 def _restore_transactions(
     connection: Any, rows: list[dict[str, Any]], *, overwrite: bool, stats: dict[str, int]
 ) -> None:
+    matched: set[int] = set()
     for row in rows:
-        existing = _find_transaction(connection, row)
+        existing = _find_transaction(connection, row, matched)
         if existing is None:
             remapped = _insert_row(connection, "holding_transactions", row, id_column="id")
+            matched.add(connection.execute("SELECT last_insert_rowid()").fetchone()[0])
             stats["inserted"] += 1
             stats["remapped"] += int(remapped)
             continue
+        matched.add(existing["id"])
         if overwrite:
             _update_row(
-                connection, "holding_transactions", row,
+                connection, "holding_transactions", {**row, "id": existing["id"]},
                 key_columns=("id",), id_column="id",
             )
             stats["updated"] += 1

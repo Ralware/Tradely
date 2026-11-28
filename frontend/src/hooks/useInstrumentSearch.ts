@@ -1,144 +1,42 @@
-import { useCallback, useEffect, useState } from "react";
-import { instrumentService } from "../services/instrumentService";
-import type {
-  Instrument,
-  InstrumentCandidate,
-  InstrumentRecognitionStatus,
-  RecognizedAsset,
-} from "../types/api";
+import { useEffect, useState } from 'react';
+import { instrumentService } from '../services/instrumentService';
+import type { InstrumentSearchResponse } from '../types/api';
 
-const DEBOUNCE_MS = 220;
-
-export interface InstrumentSearchState {
+interface SearchOutcome {
   query: string;
-  setQuery: (value: string) => void;
-  reset: () => void;
-  loading: boolean;
-  error: string | null;
-  status: InstrumentRecognitionStatus | null;
-  message: string | null;
-  instrument: Instrument | null;
-  candidates: InstrumentCandidate[];
-  recognized: RecognizedAsset | null;
-  run: (value: string) => Promise<void>;
+  result?: InstrumentSearchResponse;
+  error?: string;
 }
 
-function toMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Instrument search failed";
-}
-
-function isAbort(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
-}
-
-/**
- * Debounced recognition against the single backend instrument catalogue. The
- * UI never guesses a market, exchange or provider from the typed text.
- */
-export function useInstrumentSearch(initialQuery = ""): InstrumentSearchState {
-  const [query, setQuery] = useState(initialQuery);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<InstrumentRecognitionStatus | null>(
-    null,
-  );
-  const [message, setMessage] = useState<string | null>(null);
-  const [instrument, setInstrument] = useState<Instrument | null>(null);
-  const [candidates, setCandidates] = useState<InstrumentCandidate[]>([]);
-  const [recognized, setRecognized] = useState<RecognizedAsset | null>(null);
-
-  const run = useCallback(async (value: string) => {
-    const clean = value.trim();
-    if (!clean) {
-      return;
-    }
-    const result = await instrumentService.search(clean);
-    setStatus(result.status);
-    setMessage(result.message);
-    setInstrument(result.status === "resolved" ? result.instrument : null);
-    setCandidates(result.candidates ?? []);
-    setRecognized(result.recognized ?? null);
-  }, []);
+export function useInstrumentSearch(query: string, enabled: boolean) {
+  const [outcome, setOutcome] = useState<SearchOutcome | null>(null);
+  const term = enabled ? query.trim() : '';
 
   useEffect(() => {
-    const clean = query.trim();
-    if (!clean) {
-      setLoading(false);
-      setError(null);
-      setStatus(null);
-      setMessage(null);
-      setInstrument(null);
-      setCandidates([]);
-      setRecognized(null);
-      return;
-    }
-
+    setOutcome(null);
+    if (!term) return;
     const controller = new AbortController();
-    let active = true;
-    setLoading(true);
-    setError(null);
-    const timer = window.setTimeout(() => {
-      instrumentService
-        .search(clean, controller.signal)
-        .then((result) => {
-          if (!active) {
-            return;
-          }
-          setStatus(result.status);
-          setMessage(result.message);
-          setInstrument(
-            result.status === "resolved" ? result.instrument : null,
-          );
-          setCandidates(result.candidates ?? []);
-          setRecognized(result.recognized ?? null);
-        })
-        .catch((caught: unknown) => {
-          if (!active || isAbort(caught)) {
-            return;
-          }
-          setError(toMessage(caught));
-          setStatus(null);
-          setMessage(null);
-          setInstrument(null);
-          setCandidates([]);
-          setRecognized(null);
-        })
-        .finally(() => {
-          if (active) {
-            setLoading(false);
-          }
-        });
-    }, DEBOUNCE_MS);
-
+    const timer = window.setTimeout(async () => {
+      try {
+        const result = await instrumentService.search(term, controller.signal);
+        if (!controller.signal.aborted) setOutcome({ query: term, result });
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setOutcome({ query: term, error: error instanceof Error ? error.message : 'Instrument search failed' });
+        }
+      }
+    }, 220);
     return () => {
-      active = false;
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [query]);
+  }, [term]);
 
-  const reset = useCallback(() => {
-    setQuery("");
-    setStatus(null);
-    setMessage(null);
-    setInstrument(null);
-    setCandidates([]);
-    setRecognized(null);
-    setError(null);
-    setLoading(false);
-  }, []);
-
+  // Input and the last completed response change on different renders.
+  const current = term && outcome?.query === term ? outcome : null;
   return {
-    query,
-    setQuery,
-    reset,
-    loading,
-    error,
-    status,
-    message,
-    instrument,
-    candidates,
-    recognized,
-    run,
+    result: current?.result,
+    loading: Boolean(term && !current),
+    error: current?.error,
   };
 }

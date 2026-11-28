@@ -5,13 +5,14 @@ import json
 import re
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pandas as pd
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
+from app.core.database import LedgerRevisionChanged
 from app.core.instruments import canonical_instrument, parse_instrument_id
 from app.core.config import get_settings
 from app.core.models import (
@@ -31,7 +32,10 @@ from app.providers.base import ProviderError, get_adjustment_status
 from app.services.backtest import run_trend_breakout_backtest
 from app.services.freshness import is_candle_stale
 from app.services.indicators import compute_indicators
-from app.services.portfolio import build_ledger, detail_view, position_view, summary_view
+from app.services.transaction_confirmation import (
+    PREVIEW_LIFETIME_SECONDS, matches_saved_request, preview_identity, preview_problem, request_fingerprint,
+)
+from app.services.portfolio import detail_view, position_view, summary_view
 from app.services.technicals import build_technical_summary as build_conventional_summary
 from app.services.tv_technical_rating import (
     DEPENDENCY as TV_RATING_DEPENDENCY,
@@ -726,7 +730,7 @@ def analytics_snapshot(
     generated_at = datetime.now(UTC).isoformat()
     snapshot_identity = "|".join((
         str(instrument.get("instrument_id") or ""), interval, fingerprint,
-        TV_RATING_SOURCE_VERSION, direction_mode,
+        source, TV_RATING_SOURCE_VERSION,
     ))
     import hashlib
     snapshot_id = hashlib.sha256(snapshot_identity.encode("utf-8")).hexdigest()[:24]
@@ -1147,10 +1151,9 @@ async def quote_stream(
 # ----------------------------------------------------------------------
 # Portfolio ledger
 # ----------------------------------------------------------------------
-def _portfolio_views(request: Request, *, force_quotes: bool = False) -> tuple[Any, list[dict[str, Any]], dict[str, Any]]:
+def _portfolio_views(request: Request, *, force_quotes: bool = False) -> tuple[Any, list[dict[str, Any]], dict[str, Any], list[dict[str, Any]]]:
     db = request.app.state.db
-    transactions = db.list_transactions()
-    ledger = build_ledger(transactions)
+    revision, ledger, transactions = db.ledger_snapshot()
     open_accounts = [account for account in ledger.accounts.values() if account.is_open]
     quotes = request.app.state.quote_service.quotes_for(
         [account.__dict__ for account in open_accounts], force=force_quotes
@@ -1163,7 +1166,8 @@ def _portfolio_views(request: Request, *, force_quotes: bool = False) -> tuple[A
         base_currency=request.app.state.settings.default_account_currency,
         transactions_count=len(transactions),
     )
-    return ledger, positions, summary
+    summary["ledger_revision"] = revision
+    return ledger, positions, summary, transactions
 
 
 @router.get("/portfolio/transactions")
@@ -1181,14 +1185,38 @@ def portfolio_transactions(request: Request) -> dict[str, Any]:
     }
 
 
+def _check_saved_request(transaction: AmountTransactionRequest, saved: dict[str, Any]) -> None:
+    if not matches_saved_request(transaction, saved):
+        raise HTTPException(status_code=409, detail={
+            "code": "idempotency_conflict",
+            "message": "This request key was already used for a different transaction.",
+        })
+
+
+def _preview_conflict(code: str) -> HTTPException:
+    return HTTPException(status_code=409, detail={
+        "code": code, "message": "Review the latest transaction preview and confirm again.",
+    })
+
+
 @router.post("/portfolio/transactions")
 def add_portfolio_transaction(request: Request, transaction: AmountTransactionRequest) -> dict[str, Any]:
     db = request.app.state.db
     existing = db.get_transaction_by_idempotency_key(transaction.idempotency_key or "")
     if existing is not None:
+        _check_saved_request(transaction, existing)
         return _transaction_saved_response(request, existing, duplicate=True)
 
+    revision = db.portfolio_revision()
     instrument, quote, rules, calculation = _prepare_amount_transaction(request, transaction)
+    problem = preview_problem(transaction, instrument["currency"], revision, quote, calculation)
+    if problem:
+        # A concurrent retry may have committed while the quote was being resolved.
+        existing = db.get_transaction_by_idempotency_key(transaction.idempotency_key or "")
+        if existing:
+            _check_saved_request(transaction, existing)
+            return _transaction_saved_response(request, existing, duplicate=True)
+        raise _preview_conflict(problem)
     quote_time = _quote_datetime(quote)
     try:
         saved, duplicate = db.add_transaction_once(HoldingTransaction(
@@ -1215,7 +1243,13 @@ def add_portfolio_transaction(request: Request, transaction: AmountTransactionRe
             quote_status=quote.get("freshness"),
             quote_currency=quote.get("currency") or instrument["currency"],
             idempotency_key=transaction.idempotency_key,
-        ))
+        ), request_fingerprint=request_fingerprint(transaction, instrument["currency"]),
+            expected_revision=revision if transaction.preview_id else None)
+        if duplicate:
+            _check_saved_request(transaction, saved)
+            return _transaction_saved_response(request, saved, duplicate=True)
+    except LedgerRevisionChanged as exc:
+        raise _preview_conflict("preview_changed") from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not duplicate and (saved.get("intent") or saved["side"]) in {"BUY", "SELL_SHORT"}:
@@ -1299,9 +1333,14 @@ def _prepare_amount_transaction(
             ),
         )
     try:
-        quote = request.app.state.quote_service.quote_for_transaction(
-            instrument, payload.trade_time, force=fresh_quote
-        )
+        if payload.execution_price is not None:
+            quote = {**instrument, "price": payload.execution_price, "provider": "User-entered execution",
+                     "quote_type": "execution", "freshness": "historical",
+                     "quote_time": payload.trade_time.isoformat()}
+        else:
+            quote = request.app.state.quote_service.quote_for_transaction(
+                instrument, payload.trade_time, force=fresh_quote
+            )
     except Exception as exc:
         raise HTTPException(
             status_code=422,
@@ -1376,9 +1415,11 @@ def _transaction_saved_response(
 ) -> dict[str, Any]:
     db = request.app.state.db
     instrument = instrument or db.get_instrument(saved.get("instrument_id") or "") or {}
-    _, positions, summary = _portfolio_views(request)
-    account = build_ledger(db.list_transactions()).accounts.get(saved.get("instrument_id") or "")
-    position = position_view(account, quote) if account else None
+    ledger, positions, summary, transactions = _portfolio_views(request)
+    account = ledger.accounts.get(saved.get("instrument_id") or "")
+    position = next((row for row in positions if row["instrument_id"] == saved["instrument_id"]), None)
+    if position is None and account:
+        position = position_view(account, quote)
     return {
         "transaction": {
             **saved,
@@ -1398,7 +1439,7 @@ def _transaction_saved_response(
         "summary": summary,
         "transactions": [
             {**row, "intent": row.get("intent") or row.get("side")}
-            for row in db.list_transactions()
+            for row in transactions
         ],
         "accounting_method": "FIFO with fees allocated per unit",
         "mode": "manual-research-exposure-ledger",
@@ -1422,6 +1463,7 @@ def preview_amount_transaction(
     React. Invalid input is returned as ``valid: false`` so the preview does not
     create console noise while the owner types.
     """
+    revision = request.app.state.db.portfolio_revision()
     try:
         instrument, quote, rules, calculation = _prepare_amount_transaction(
             request, transaction, fresh_quote=False
@@ -1456,7 +1498,13 @@ def preview_amount_transaction(
             "This market is not streaming real-time prices in the configured feed. "
             "The quote timestamp and status are shown above."
         )
+    issued = int(datetime.now(UTC).timestamp())
+    created = datetime.fromtimestamp(issued, UTC)
     return {
+        "preview_id": preview_identity(transaction, instrument["currency"], revision, issued, quote, calculation),
+        "ledger_revision": revision, "created_at": created.isoformat(),
+        "expires_at": (created + timedelta(seconds=PREVIEW_LIFETIME_SECONDS)).isoformat(),
+        "instrument_id": instrument["instrument_id"], "currency": instrument["currency"],
         "valid": True,
         "error": None,
         "side": (
@@ -1488,14 +1536,14 @@ def delete_portfolio_transaction(request: Request, transaction_id: int) -> dict[
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     request.app.state.quote_service.invalidate(removed.get("instrument_id") or "")
-    _, positions, summary = _portfolio_views(request)
+    _, positions, summary, transactions = _portfolio_views(request)
     return {
         "removed": removed,
         "positions": positions,
         "summary": summary,
         "transactions": [
             {**row, "intent": row.get("intent") or row.get("side")}
-            for row in db.list_transactions()
+            for row in transactions
         ],
         "purpose": "research/manual exposure tracking only",
         "order_execution": False,
@@ -1505,14 +1553,17 @@ def delete_portfolio_transaction(request: Request, transaction_id: int) -> dict[
 
 @router.get("/portfolio/summary")
 def portfolio_summary(request: Request, force: bool = False) -> dict[str, Any]:
-    _, _, summary = _portfolio_views(request, force_quotes=force)
+    _, _, summary, _ = _portfolio_views(request, force_quotes=force)
     return summary
 
 
+@router.get("/portfolio/snapshot")
 @router.get("/portfolio/positions")
 def portfolio_positions(request: Request, force: bool = False) -> dict[str, Any]:
-    _, positions, summary = _portfolio_views(request, force_quotes=force)
+    _, positions, summary, _ = _portfolio_views(request, force_quotes=force)
     return {
+        "ledger_revision": summary["ledger_revision"],
+        "valued_at": datetime.now(UTC).isoformat(),
         "positions": positions,
         "summary": summary,
         "accounting_method": "FIFO with fees allocated per unit",
@@ -1535,7 +1586,7 @@ def portfolio_position_detail(
     days: int = Query(365, ge=30, le=3650),
 ) -> dict[str, Any]:
     db = request.app.state.db
-    ledger = build_ledger(db.list_transactions())
+    revision, ledger, _ = db.ledger_snapshot()
     account = ledger.accounts.get(instrument_id)
     if account is None:
         parsed = parse_instrument_id(instrument_id)
@@ -1554,7 +1605,7 @@ def portfolio_position_detail(
     try:
         frame, candle_source = request.app.state.market_service.candles(
             account.symbol, market=account.market, exchange=account.exchange or None,
-            interval="1d", days=days, provider="auto", full_history=False,
+            interval="1d", days=days, provider="auto", full_history=False, bypass_cache=force,
         )
         candles = _to_json_records(frame.tail(500))
     except (ProviderError, ValueError) as exc:
@@ -1562,6 +1613,7 @@ def portfolio_position_detail(
     detail.update({
         "candles": candles,
         "candle_source": candle_source,
+        "ledger_revision": revision,
         "candle_error": candle_error,
         "currency_conversion": "unavailable",
         "accounting_method": "FIFO with fees allocated per unit",

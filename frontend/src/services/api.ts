@@ -11,7 +11,7 @@ export const API_BASE_URL = configuredBase.replace(/\/+$/, '');
 export class ApiError extends Error {
   readonly status: number;
 
-  constructor(message: string, status = 0) {
+  constructor(message: string, status = 0, readonly code?: string) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
@@ -104,6 +104,8 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
         const info = payload.detail;
         if (info.watchlist_saved === true && info.prefetch_registration === 'failed') {
           detail = `Instrument saved to the watchlist, but prefetch registration failed. Retry Add to Watchlist to reconcile it. ${String(info.error ?? '')}`.trim();
+        } else if (typeof info.message === 'string') {
+          throw new ApiError(info.message, response.status, typeof info.code === 'string' ? info.code : undefined);
         } else {
           detail = JSON.stringify(info);
         }

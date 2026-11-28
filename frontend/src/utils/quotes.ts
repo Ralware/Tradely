@@ -10,6 +10,7 @@ const typeLabels: Record<string, string> = {
   previous_close: 'Previous Close',
   end_of_day: 'End-Of-Day',
   historical: 'Historical',
+  execution: 'User-entered execution',
   cached: 'Cached',
   stale: 'Stale',
   unavailable: 'Unavailable',

@@ -66,7 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     create = sub.add_parser("create", help="Create a portable backup.")
     create.add_argument(
-        "--targets", choices=("local", "git", "both"), default="both"
+        "--targets", choices=("local", "git", "both"), default="local"
     )
     create.add_argument("--force", action="store_true", help="Write even if unchanged.")
     create.add_argument("--reason", default="manual")

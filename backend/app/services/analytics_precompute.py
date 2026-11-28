@@ -496,24 +496,35 @@ class AnalyticsPrecompute:
                 "price_metadata": price_metadata,
                 "snapshot_generated_at": now, "data_freshness": "stale" if stale else "fresh"},
         }
+        identity_parts = (instrument_id, interval, fingerprint, source, adjusted, INDICATOR_VERSION,
+                          RATING_DEPENDENCY, RATING_VERSION, SCHEMA_VERSION)
+        identity = hashlib.sha256(json.dumps(identity_parts).encode()).hexdigest()[:32]
+        payload["snapshot_id"] = identity
         blob, checksum = _encode(payload)
-        identity = hashlib.sha256(f"{instrument_id}|{interval}|{fingerprint}|{SCHEMA_VERSION}".encode()).hexdigest()[:32]
+        bar_columns = ["open", "high", "low", "close", "volume"]
+        rows = [
+            (instrument_id, interval, ts.isoformat(), op, high, low, close, volume, source, adjusted, now)
+            for ts, op, high, low, close, volume in frame[bar_columns].astype(float).tz_convert("UTC").itertuples(name=None)
+        ]
         write_started = time.perf_counter()
         with self.db.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            # Bar upserts and snapshot publication share one short transaction.
-            rows = [(instrument_id, interval, pd.Timestamp(ts).tz_convert("UTC").isoformat(),
-                     float(r.open), float(r.high), float(r.low), float(r.close), float(r.volume),
-                     source, adjusted, now) for ts, r in frame.iterrows()]
             conn.executemany(
                 """INSERT INTO market_bars VALUES(?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(instrument_id,interval,timestamp,adjustment_status,source) DO UPDATE SET
                    open=excluded.open,high=excluded.high,low=excluded.low,close=excluded.close,
-                   volume=excluded.volume,updated_at=excluded.updated_at""", rows,
+                   volume=excluded.volume,updated_at=excluded.updated_at
+                   WHERE market_bars.open != excluded.open OR market_bars.high != excluded.high
+                      OR market_bars.low != excluded.low OR market_bars.close != excluded.close
+                      OR market_bars.volume != excluded.volume""", rows,
             )
             conn.execute(
                 """INSERT INTO market_analytics_snapshots VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(instrument_id,interval,ohlcv_fingerprint,schema_version) DO UPDATE SET
+                   snapshot_id=excluded.snapshot_id,indicator_version=excluded.indicator_version,
+                   indicator_dependency_version=excluded.indicator_dependency_version,
+                   rating_version=excluded.rating_version,provider_identity=excluded.provider_identity,
+                   source_identity=excluded.source_identity,adjustment_status=excluded.adjustment_status,
                    generated_at=excluded.generated_at,updated_at=excluded.updated_at,status='READY',
                    payload=excluded.payload,payload_checksum=excluded.payload_checksum""",
                 (identity,instrument_id,interval,fingerprint,INDICATOR_VERSION,RATING_DEPENDENCY,
@@ -587,7 +598,7 @@ class AnalyticsPrecompute:
                     try:
                         payload = _decode(row["payload"], row["payload_checksum"])
                         if self._snapshot_complete(payload, instrument_id, interval, row):
-                            return payload
+                            return {**payload, "snapshot_id": row["snapshot_id"]}
                         logger.warning("[CACHE] incomplete snapshot skipped instrument=%s interval=%s", instrument_id, interval)
                     except (ValueError, OSError, TypeError, KeyError, json.JSONDecodeError):
                         logger.exception("[CACHE] invalid snapshot skipped instrument=%s interval=%s", instrument_id, interval)
@@ -616,7 +627,9 @@ class AnalyticsPrecompute:
                 return False
             if ratings.get("fingerprint") != fingerprint:
                 return False
-            if payload["analysis"].get("fingerprint") != fingerprint:
+            if (payload["analysis"].get("fingerprint") != fingerprint
+                    or payload["indicator_series"].get("fingerprint") != fingerprint
+                    or payload["provenance"].get("ohlcv_fingerprint") != fingerprint):
                 return False
             if ratings.get("summary", {}).get("overall", {}).get("available", 0) <= 0:
                 return False

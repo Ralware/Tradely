@@ -28,6 +28,7 @@ const fingerprint = 'fp-1';
 
 function snapshot(): PreparedSnapshot {
   return {
+    snapshot_id: 'snap-1',
     schema_version: 3,
     interval: '1d',
     fingerprint,
@@ -38,16 +39,9 @@ function snapshot(): PreparedSnapshot {
       candles: [{ close: 12 }],
       as_of: '2026-11-24T10:00:00Z',
     },
-    indicator_series: { series: [{ close: 12 }] },
+    indicator_series: { fingerprint, series: [{ close: 12 }] },
     technical_ratings: { fingerprint, summary: { overall: { available: 1 } } },
-    strategy_variants: Object.fromEntries(
-      [
-        'long_only:NONE', 'long_only:LONG', 'long_only:SHORT',
-        'short_only:NONE', 'short_only:LONG', 'short_only:SHORT',
-        'long_short:NONE', 'long_short:LONG', 'long_short:SHORT',
-      ].map((key) => [key, { state: 'READY' }]),
-    ),
-    provenance: {
+    provenance: { ohlcv_fingerprint: fingerprint,
       instrument_id: identity,
       latest_candle_timestamp: '2026-11-24T10:00:00Z',
     },
@@ -131,6 +125,23 @@ describe('snapshotHydrator', () => {
     expect(snapshotCalls()).toBe(0);
     expect(mocks.put).not.toHaveBeenCalled();
     expect(snapshotStore.getSnapshot(identity, '1d')?.fingerprint).toBe(fingerprint);
+  });
+
+  it('downloads a revised snapshot when candle values stay the same', async () => {
+    await snapshotHydrator.start();
+    mocks.apiRequest.mockImplementation(async (path: string) => path.endsWith('/index')
+      ? { items: [{ ...manifestItem, snapshot_id: 'revised' }] }
+      : { ...snapshot(), snapshot_id: 'revised' });
+    await snapshotHydrator.refresh(false);
+    expect(snapshotCalls()).toBe(2);
+    expect(snapshotStore.getSnapshot(identity, '1d')?.snapshot_id).toBe('revised');
+  });
+
+  it('keeps a verified snapshot in memory when IndexedDB is full', async () => {
+    mocks.put.mockRejectedValue(new Error('Quota exceeded'));
+    await snapshotHydrator.start();
+    expect(snapshotStore.getSnapshot(identity, '1d')?.fingerprint).toBe(fingerprint);
+    expect(snapshotHydrator.getProgress().errors[0]).toContain('Quota exceeded');
   });
 
   it('deduplicates concurrent synchronizations into one manifest and one download', async () => {

@@ -97,12 +97,12 @@ def instrument_payload(row: dict[str, Any]) -> dict[str, Any]:
 class InstrumentResolver:
     """Single source of truth for instrument recognition and provider routing."""
 
-    def __init__(self, settings: Settings, db: Any):
+    def __init__(self, settings: Settings, db: Any, bridge: TradingViewBridge | None = None):
         self.settings = settings
         self.db = db
         self._snapshot: tuple[list[dict[str, Any]], list[dict[str, Any]]] | None = None
         self._snapshot_at = 0.0
-        self._bridge: TradingViewBridge | None = None
+        self._bridge = bridge
 
     def _tradingview(self) -> TradingViewBridge:
         if self._bridge is None:

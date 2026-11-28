@@ -44,6 +44,7 @@ research/**/*.jsonl
 
 # Portable backup transient files (the compressed snapshots themselves are
 # tracked on purpose).
+backups/portable/*.json.gz
 backups/portable/.*.tmp
 backups/portable/*.tmp
 backups/portable/.backup.lock

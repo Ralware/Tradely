@@ -12,14 +12,9 @@ function snapshot(overrides: Record<string, unknown> = {}): PreparedSnapshot {
     fingerprint: fp,
     generated_at: now,
     analysis: { fingerprint: fp, is_stale: false, market: 'global', interval: '1d', as_of: now, candles: [{ close: 12 }] },
-    indicator_series: { series: [{ close: 12 }] },
+    indicator_series: { fingerprint, series: [{ close: 12 }] },
     technical_ratings: { fingerprint: fp, summary: { overall: { available: 1 } } },
-    strategy_variants: Object.fromEntries([
-      'long_only:NONE', 'long_only:LONG', 'long_only:SHORT',
-      'short_only:NONE', 'short_only:LONG', 'short_only:SHORT',
-      'long_short:NONE', 'long_short:LONG', 'long_short:SHORT',
-    ].map((key) => [key, { state: 'READY' }])),
-    provenance: { instrument_id: identity, data_freshness: 'fresh', latest_candle_timestamp: now },
+    provenance: { ohlcv_fingerprint: fingerprint, instrument_id: identity, data_freshness: 'fresh', latest_candle_timestamp: now },
     ...overrides,
   } as PreparedSnapshot;
 }

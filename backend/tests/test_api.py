@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 import numpy as np
 import pandas as pd
 
-client = TestClient(app)
+client = TestClient(app, base_url="http://127.0.0.1")
 
 
 def test_health_reports_private_no_ai_no_paper_trading():
@@ -38,13 +38,13 @@ def test_on_demand_analytics_uses_canonical_identity_and_returns_persisted_bundl
     } if instrument_id == identity else None)
     calls = []
     monkeypatch.setattr(app.state.analytics_precompute, "get_or_compute_snapshot",
-                        lambda instrument_id, interval: calls.append((instrument_id, interval)) or expected)
+                        lambda instrument_id, interval, refresh_latest: calls.append((instrument_id, interval, refresh_latest)) or expected)
 
     response = client.get(f"/api/analytics/on-demand/{identity}/1d")
 
     assert response.status_code == 200
     assert response.json() == expected
-    assert calls == [(identity, "1d")]
+    assert calls == [(identity, "1d", False)]
 
 
 def test_non_watchlisted_search_miss_fetches_persists_and_reuses_complete_analytics(monkeypatch):
@@ -68,8 +68,10 @@ def test_non_watchlisted_search_miss_fetches_persists_and_reuses_complete_analyt
 
     assert first.status_code == 200
     assert second.status_code == 200
+    assert first.headers["content-encoding"] == "gzip"
+    assert int(first.headers["content-length"]) < len(first.content)
     assert len(first.json()["analysis"]["candles"]) == 260
-    assert len(first.json()["strategy_variants"]) == 9
+    assert first.json()["technical_ratings"]["fingerprint"] == first.json()["fingerprint"]
     assert first.json()["fingerprint"] == second.json()["fingerprint"]
     assert len(calls) == 1
     assert all(item.get("instrument_id") != identity for item in app.state.db.get_watchlist())
@@ -127,33 +129,12 @@ def test_client_side_routes_serve_the_spa_and_unknown_api_paths_stay_404():
     assert client.get("/api/unknown-route").status_code == 404
 
 
-def test_risk_endpoint_returns_expected_sizing():
-    response = client.post("/api/risk/position-size", json={
-        "capital": 100000, "risk_fraction": 0.005, "entry": 1000, "stop": 980
-    })
-    assert response.status_code == 200
-    assert response.json()["quantity"] == 25
-    assert response.json()["planned_loss"] == 500
-
-def test_risk_endpoint_accepts_short_direction_and_requires_a_higher_stop():
-    response = client.post("/api/risk/position-size", json={
-        "capital": 100000,
-        "risk_fraction": 0.005,
-        "entry": 100,
-        "stop": 110,
-        "direction": "SHORT",
-    })
-    assert response.status_code == 200
-    assert response.json()["direction"] == "SHORT"
-    assert response.json()["risk_per_unit"] == 10
-    invalid = client.post("/api/risk/position-size", json={
-        "capital": 100000,
-        "risk_fraction": 0.005,
-        "entry": 100,
-        "stop": 90,
-        "direction": "SHORT",
-    })
-    assert invalid.status_code == 422
+def test_backtest_validates_risk_budget_before_fetching_data():
+    for risk in (-0.01, 0, 0.03):
+        response = client.post("/api/backtests/trend-breakout", json={
+            "symbol": "MSFT", "market": "global", "risk_fraction": risk,
+        })
+        assert response.status_code == 422
 
 
 def test_daily_backtest_rejects_intraday_interval():
@@ -187,42 +168,6 @@ def test_market_candles_route_passes_bounded_days_to_provider(monkeypatch):
     assert response.json()["forming_candle"] == forming
 
 
-def test_scanner_reuses_prepared_daily_signal_without_fetching_candles(monkeypatch):
-    instrument = app.state.db.resolve_instrument("AAPL", "global", exchange="NASDAQ")
-    app.state.db.add_watchlist(WatchlistItem(instrument_id=instrument.instrument_id))
-    prepared = {
-        "instrument_id": instrument.instrument_id,
-        "interval": "1d",
-        "fingerprint": "prepared-fingerprint",
-        "latest_close": 123.45,
-        "source": "tradingview",
-        "is_adjusted": None,
-        "adjustment_status": "unknown",
-        "is_stale": False,
-        "strategy": {"state": "BUY", "direction": "LONG"},
-    }
-    monkeypatch.setattr(
-        app.state.analytics_precompute,
-        "get_prepared_daily_signal",
-        lambda *_args, **_kwargs: prepared,
-    )
-
-    def forbidden(*_args, **_kwargs):
-        raise AssertionError("Scanner must reuse the prepared snapshot when it is current")
-
-    monkeypatch.setattr(app.state.market_service, "candles", forbidden)
-    response = client.get("/api/scanner/watchlist")
-    assert response.status_code == 200
-    row = next(
-        item for item in response.json()["items"]
-        if item["instrument_id"] == instrument.instrument_id
-    )
-    assert row["cache"] == "prepared"
-    assert row["strategy"]["state"] == "BUY"
-    assert row["last_close"] == 123.45
-    app.state.db.remove_watchlist_instrument(instrument.instrument_id)
-
-
 def test_batched_sparkline_route_bounds_and_reuses_market_candles(monkeypatch):
     instrument = app.state.db.resolve_instrument("MSFT", "global", exchange="NASDAQ")
     index = pd.date_range(end=pd.Timestamp.now(tz="UTC").floor("h"), periods=3, freq="h")
@@ -250,43 +195,6 @@ def test_batched_sparkline_route_bounds_and_reuses_market_candles(monkeypatch):
     assert calls[0]["days"] == 1
 
 
-def test_scanner_suppresses_prepared_indian_signal_without_verified_adjustment(monkeypatch):
-    instrument = app.state.db.resolve_instrument("RELIANCE", "india", exchange="NSE")
-    app.state.db.add_watchlist(WatchlistItem(instrument_id=instrument.instrument_id))
-    prepared = {
-        "instrument_id": instrument.instrument_id,
-        "interval": "1d",
-        "fingerprint": "prepared-fingerprint",
-        "latest_close": 2900.0,
-        "source": "tradingview",
-        "is_adjusted": None,
-        "adjustment_status": "unknown",
-        "is_stale": False,
-        "strategy": {"state": "BUY", "direction": "LONG", "entry_reference": 2900.0},
-    }
-    monkeypatch.setattr(
-        app.state.analytics_precompute,
-        "get_prepared_daily_signal",
-        lambda *_args, **_kwargs: prepared,
-    )
-
-    def forbidden(*_args, **_kwargs):
-        raise AssertionError("A current prepared snapshot must be reused")
-
-    monkeypatch.setattr(app.state.market_service, "candles", forbidden)
-    response = client.get("/api/scanner/watchlist")
-    assert response.status_code == 200
-    row = next(
-        item for item in response.json()["items"]
-        if item["instrument_id"] == instrument.instrument_id
-    )
-    assert row["cache"] == "prepared"
-    assert row["strategy"]["state"] == "DATA_QUALITY_ERROR"
-    assert row["strategy"]["direction"] is None
-    assert row["strategy"]["entry_reference"] is None
-    app.state.db.remove_watchlist_instrument(instrument.instrument_id)
-
-
 def test_unknown_indian_adjustment_suppresses_analysis_and_refuses_backtest(monkeypatch):
     instrument = app.state.db.resolve_instrument("RELIANCE", "india", exchange="NSE")
     index = pd.date_range(end=pd.Timestamp.now(tz="UTC").floor("D"), periods=260, freq="D")
@@ -301,11 +209,7 @@ def test_unknown_indian_adjustment_suppresses_analysis_and_refuses_backtest(monk
     body = analysis.json()
     assert body["adjustment_status"] == "unknown"
     assert body["is_adjusted"] is None
-    assert body["strategy"]["state"] == "DATA_QUALITY_ERROR"
-    assert body["strategy"]["direction"] is None
-    assert body["strategy"]["entry_reference"] is None
-    assert body["strategy"]["stop_reference"] is None
-    assert body["strategy"]["risk_per_unit"] is None
+    assert any("could not be verified" in warning for warning in body["warnings"])
 
     backtest = client.post("/api/backtests/trend-breakout", json={
         "instrument_id": instrument.instrument_id, "interval": "1d", "days": 365,
@@ -315,6 +219,8 @@ def test_unknown_indian_adjustment_suppresses_analysis_and_refuses_backtest(monk
 
 
 def test_removed_endpoints_return_not_found():
+    assert client.get("/api/scanner/watchlist").status_code == 404
+    assert client.post("/api/risk/position-size", json={}).status_code == 404
     assert client.get("/api/crypto/markets").status_code == 404
     assert client.get("/api/instruments/AAPL/fundamentals?market=global").status_code == 404
     assert client.get("/api/instruments/AAPL/events?market=global").status_code == 404
@@ -442,7 +348,7 @@ def test_indicator_series_is_additive_and_uses_backend_calculations(monkeypatch)
     assert "rsi_14" in body["series"][-1]
 
 
-def test_intraday_analysis_evaluates_signals_instead_of_returning_insufficient_data(monkeypatch):
+def test_intraday_analysis_returns_indicators_for_requested_interval(monkeypatch):
     import numpy as np
     import pandas as pd
     from app.main import app
@@ -466,8 +372,8 @@ def test_intraday_analysis_evaluates_signals_instead_of_returning_insufficient_d
     body = response.json()
     assert body["interval"] == "4h"
     assert len(body["candles"]) == 320
-    assert body["strategy"]["state"] != "INSUFFICIENT_DATA"
-    assert body["strategy"]["conditions"]
+    assert body["indicators"]["sma_200"] is not None
+    assert body["latest"]["close"] == frame.iloc[-1]["close"]
 
 
 def test_completed_weekly_and_monthly_bars_use_interval_aware_freshness():
@@ -502,11 +408,7 @@ def test_technicals_endpoint_classifies_existing_values_without_writing_signals(
     frame.attrs["is_adjusted"] = True
 
     monkeypatch.setattr(app.state.market_service, "candles", lambda *args, **kwargs: (frame, "test"))
-    monkeypatch.setattr(
-        app.state.db,
-        "save_signal",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("technicals must be read-only")),
-    )
+    prior_transactions = app.state.db.list_transactions()
 
     response = client.get("/api/instruments/TEST/technicals?market=india&interval=1d")
 
@@ -514,6 +416,7 @@ def test_technicals_endpoint_classifies_existing_values_without_writing_signals(
     body = response.json()
     assert body["symbol"] == "TEST"
     assert body["source"] == "test"
+    assert app.state.db.list_transactions() == prior_transactions
     assert body["close"] == 220.0
     assert "strategy" not in body
     assert "method" in body

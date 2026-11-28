@@ -13,6 +13,7 @@ export interface UseApiResult<T> extends ApiState<T> {
   /** True when the visible snapshot belongs to the same scope but an older request key. */
   isPreviousData: boolean;
   reload: () => void;
+  revalidate: () => void;
 }
 
 export interface UseApiFetchContext {
@@ -139,7 +140,7 @@ export function useApi<T>(
           : requestKey;
       return {
         data: retained,
-        loading: cached === null,
+        loading: force || cached === null,
         error: null,
         dataKey: retainedKey,
         scopeKey,
@@ -196,5 +197,6 @@ export function useApi<T>(
     setReloadToken((token) => token + 1);
   }, []);
 
-  return { data, loading, error, refreshing: loading && data !== null, isPreviousData, reload };
+  const revalidate = useCallback(() => setReloadToken((token) => token + 1), []);
+  return { revalidate, data, loading, error, refreshing: loading && data !== null, isPreviousData, reload };
 }

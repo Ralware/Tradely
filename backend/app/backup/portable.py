@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import gzip
+import io
 import hashlib
 import hmac
 import json
@@ -218,9 +219,18 @@ def encode_envelope(envelope: dict[str, Any]) -> bytes:
     return gzip.compress(raw, compresslevel=9, mtime=0)
 
 
+MAX_COMPRESSED_BYTES = 100 * 1024 * 1024
+MAX_DOCUMENT_BYTES = 512 * 1024 * 1024
+
+
 def decode_envelope(raw: bytes) -> dict[str, Any]:
+    if len(raw) > MAX_COMPRESSED_BYTES:
+        raise BackupValidationError("Compressed backup exceeds the size limit")
     try:
-        decompressed = gzip.decompress(raw)
+        with gzip.GzipFile(fileobj=io.BytesIO(raw)) as stream:
+            decompressed = stream.read(MAX_DOCUMENT_BYTES + 1)
+        if len(decompressed) > MAX_DOCUMENT_BYTES:
+            raise BackupValidationError("Expanded backup exceeds the size limit")
     except (OSError, EOFError) as exc:
         raise BackupValidationError("Backup is not a valid gzip document") from exc
     try:
@@ -234,7 +244,8 @@ def decode_envelope(raw: bytes) -> dict[str, Any]:
 
 def read_envelope(path: Path | str) -> dict[str, Any]:
     try:
-        raw = Path(path).read_bytes()
+        with Path(path).open("rb") as stream:
+            raw = stream.read(MAX_COMPRESSED_BYTES + 1)
     except OSError as exc:
         raise BackupError(f"Cannot read backup {path}: {exc}") from exc
     return decode_envelope(raw)

@@ -34,8 +34,8 @@ def test_migration_creates_additive_analytics_tables(tmp_path):
         tables = {row["name"] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         indexes = {row["name"] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='index'")}
         version = connection.execute("PRAGMA user_version").fetchone()[0]
-    assert {"market_bars", "market_analytics_snapshots", "strategy_snapshots", "analytics_jobs"} <= tables
-    assert "idx_strategy_snapshots_parent" in indexes
+    assert {"market_bars", "market_analytics_snapshots", "analytics_jobs"} <= tables
+    assert "idx_analytics_latest" in indexes
     assert version >= 4
     assert db.get_watchlist() == []
 
@@ -140,7 +140,7 @@ def test_compressed_snapshot_round_trip_and_checksum_rejection():
         _decode(payload, "invalid")
 
 
-def test_worker_publishes_coherent_market_and_strategy_variants(tmp_path):
+def test_worker_publishes_coherent_market_indicators_and_ratings(tmp_path):
     db = Database(tmp_path / "pipeline.sqlite3")
     instrument = db.resolve_instrument("MSFT", "global", exchange="NASDAQ")
     db.add_watchlist(WatchlistItem(instrument_id=instrument.instrument_id))
@@ -160,10 +160,9 @@ def test_worker_publishes_coherent_market_and_strategy_variants(tmp_path):
     assert market.kwargs["days"] <= 3650
     assert snapshot["fingerprint"] == snapshot["analysis"]["fingerprint"]
     assert len(snapshot["analysis"]["candles"]) == 260
-    assert len(snapshot["strategy_variants"]) == 9
+    assert snapshot["indicator_series"]["fingerprint"] == snapshot["technical_ratings"]["fingerprint"] == snapshot["fingerprint"]
     with db.connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM market_bars").fetchone()[0] == 260
-        assert connection.execute("SELECT COUNT(*) FROM strategy_snapshots WHERE status='READY'").fetchone()[0] == 9
         assert connection.execute("SELECT COUNT(*) FROM market_analytics_snapshots WHERE status='READY'").fetchone()[0] == 1
 
 
@@ -184,7 +183,7 @@ def test_background_refresh_reuses_cached_history_but_full_refresh_bypasses_it(t
     assert market.calls == 2
 
 
-def test_prepared_signal_reuses_the_published_strategy_without_recalculation(tmp_path):
+def test_prepared_read_reuses_published_technicals_without_recalculation(tmp_path):
     db = Database(tmp_path / "prepared-signal.sqlite3")
     instrument = db.resolve_instrument("MSFT", "global", exchange="NASDAQ")
     market = FrameMarket(_valid_frame())
@@ -192,13 +191,13 @@ def test_prepared_signal_reuses_the_published_strategy_without_recalculation(tmp
     engine._compute_and_publish(instrument.instrument_id, "1d")
     calls_after_compute = market.calls
 
-    prepared = engine.get_prepared_daily_signal(instrument.instrument_id, "1d")
+    prepared = engine.get_snapshot(instrument.instrument_id, "1d")
 
     assert prepared is not None
     assert prepared["fingerprint"]
-    assert prepared["latest_close"] is not None
+    assert prepared["analysis"]["latest"]["close"] == market.frame.iloc[-1]["close"]
     assert prepared["adjustment_status"] == "adjusted"
-    assert isinstance(prepared["strategy"], dict)
+    assert prepared["technical_ratings"]["summary"]["overall"]["available"] > 0
     assert market.calls == calls_after_compute
 
 
@@ -239,7 +238,7 @@ def test_search_miss_is_computed_persisted_and_reused_without_a_second_fetch(tmp
     second = engine.get_or_compute_snapshot(instrument.instrument_id, "1d")
 
     assert first["fingerprint"] == second["fingerprint"]
-    assert len(first["strategy_variants"]) == 9
+    assert first["technical_ratings"] == second["technical_ratings"]
     assert market.calls == 1
     assert db.get_watchlist() == []
     assert engine.get_snapshot(instrument.instrument_id, "1d") is not None
@@ -354,12 +353,12 @@ def test_incomplete_snapshot_is_not_ready_and_failed_refresh_preserves_last_good
     assert good is not None
 
     with db.connect() as connection:
-        connection.execute(
-            "DELETE FROM strategy_snapshots WHERE strategy_snapshot_id=("
-            "SELECT strategy_snapshot_id FROM strategy_snapshots WHERE instrument_id=? "
-            "AND interval=? LIMIT 1)", (instrument.instrument_id, "1d"),
-        )
+        incomplete = dict(good)
+        incomplete["indicator_series"] = {**good["indicator_series"], "fingerprint": "other-series"}
+        blob, checksum = _encode(incomplete)
+        connection.execute("UPDATE market_analytics_snapshots SET payload=?,payload_checksum=?", (blob, checksum))
     assert engine.get_snapshot(instrument.instrument_id, "1d") is None
+    engine._compute_and_publish(instrument.instrument_id, "1d")
 
     market.frame = _valid_frame()
     market.frame.loc[market.frame.index[-1], "close"] = np.nan
@@ -369,29 +368,12 @@ def test_incomplete_snapshot_is_not_ready_and_failed_refresh_preserves_last_good
         assert connection.execute("SELECT COUNT(*) FROM market_analytics_snapshots WHERE status='READY'").fetchone()[0] == 1
 
 
-def test_failed_stale_refresh_returns_reference_only_copy_without_mutating_persisted_signals(tmp_path, monkeypatch):
+def test_failed_stale_refresh_returns_reference_only_copy_without_mutating_persisted_analytics(tmp_path, monkeypatch):
     db = Database(tmp_path / "stale-fallback.sqlite3")
     instrument = db.resolve_instrument("MSFT", "global", exchange="NASDAQ")
     engine = AnalyticsPrecompute(db, FrameMarket(_valid_frame()))
     engine._compute_and_publish(instrument.instrument_id, "1d")
-    with db.connect() as connection:
-        rows = connection.execute(
-            "SELECT strategy_snapshot_id,payload,payload_checksum FROM strategy_snapshots WHERE instrument_id=?",
-            (instrument.instrument_id,),
-        ).fetchall()
-        for row in rows:
-            blob, checksum = _encode({
-                "state": "BUY", "direction": "LONG", "entry_reference": 100.0,
-                "stop_reference": 95.0, "risk_per_unit": 5.0,
-            })
-            connection.execute(
-                "UPDATE strategy_snapshots SET payload=?,payload_checksum=? WHERE strategy_snapshot_id=?",
-                (blob, checksum, row["strategy_snapshot_id"]),
-            )
-        before = [tuple(row) for row in connection.execute(
-            "SELECT payload,payload_checksum FROM strategy_snapshots WHERE instrument_id=? ORDER BY strategy_snapshot_id",
-            (instrument.instrument_id,),
-        ).fetchall()]
+    before = engine.get_snapshot(instrument.instrument_id, "1d")
     monkeypatch.setattr(engine, "_snapshot_is_stale", lambda _payload: True)
 
     class FailingMarket:
@@ -405,22 +387,8 @@ def test_failed_stale_refresh_returns_reference_only_copy_without_mutating_persi
     assert stale["technical_ratings"]["is_stale"] is True
     assert stale["indicator_series"]["is_stale"] is True
     assert any("retained for reference only" in item for item in stale["analysis"]["warnings"])
-    assert len(stale["strategy_variants"]) == 9
-    for variant in stale["strategy_variants"].values():
-        assert variant["state"] == "STALE_DATA"
-        assert variant["direction"] is None
-        assert variant["entry_reference"] is None
-        assert variant["stop_reference"] is None
-        assert variant["risk_per_unit"] is None
-    with db.connect() as connection:
-        after = [tuple(row) for row in connection.execute(
-            "SELECT payload,payload_checksum FROM strategy_snapshots WHERE instrument_id=? ORDER BY strategy_snapshot_id",
-            (instrument.instrument_id,),
-        ).fetchall()]
-    assert after == before
-    persisted = engine.get_snapshot(instrument.instrument_id, "1d")
-    assert all(item["state"] == "BUY" and item["entry_reference"] == 100.0
-               for item in persisted["strategy_variants"].values())
+    assert stale["fingerprint"] == before["fingerprint"]
+    assert engine.get_snapshot(instrument.instrument_id, "1d") == before
 
 
 def test_stale_reference_refresh_recovers_after_a_later_successful_fetch(tmp_path, monkeypatch):
@@ -443,7 +411,7 @@ def test_stale_reference_refresh_recovers_after_a_later_successful_fetch(tmp_pat
     refreshed = engine.get_or_compute_snapshot(instrument.instrument_id, "1d")
     assert refreshed["analysis"]["is_stale"] is False
     assert refreshed["provenance"]["data_freshness"] == "fresh"
-    assert all(item["state"] != "STALE_DATA" for item in refreshed["strategy_variants"].values())
+    assert refreshed["technical_ratings"]["is_stale"] is False
 
 
 def test_explicit_unknown_adjustment_status_is_not_promoted_by_legacy_boolean(tmp_path):
@@ -458,7 +426,25 @@ def test_explicit_unknown_adjustment_status_is_not_promoted_by_legacy_boolean(tm
 
     assert snapshot["adjustment_status"] == "unknown"
     assert snapshot["is_adjusted"] is None
-    assert all(item["state"] == "DATA_QUALITY_ERROR" for item in snapshot["strategy_variants"].values())
-    assert all(item["direction"] is None and item["entry_reference"] is None
-               and item["stop_reference"] is None and item["risk_per_unit"] is None
-               for item in snapshot["strategy_variants"].values())
+    assert any("could not be verified" in warning for warning in snapshot["analysis"]["warnings"])
+    assert snapshot["provenance"]["adjustment_status"] == "unknown"
+
+
+def test_snapshot_republication_updates_adjustment_and_preserves_unchanged_bars(tmp_path):
+    db = Database(tmp_path / "revision.sqlite3")
+    instrument = db.resolve_instrument("MSFT", "global", exchange="NASDAQ")
+    market = FrameMarket(_valid_frame())
+    engine = AnalyticsPrecompute(db, market)
+    engine._compute_and_publish(instrument.instrument_id, "1d")
+    original = engine.get_snapshot(instrument.instrument_id, "1d")
+    with db.connect() as conn:
+        conn.execute("UPDATE market_bars SET updated_at='baseline'")
+    engine._compute_and_publish(instrument.instrument_id, "1d")
+    with db.connect() as conn:
+        assert conn.execute("SELECT DISTINCT updated_at FROM market_bars").fetchall()[0][0] == "baseline"
+    market.frame.attrs["adjustment_status"] = "unknown"
+    engine._compute_and_publish(instrument.instrument_id, "1d")
+    updated = engine.get_snapshot(instrument.instrument_id, "1d")
+    assert updated["fingerprint"] == original["fingerprint"]
+    assert updated["adjustment_status"] == "unknown"
+    assert updated["snapshot_id"] != original["snapshot_id"]

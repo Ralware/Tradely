@@ -298,7 +298,7 @@ def instrument_api(tmp_path):
     resolver.ensure_catalogue()
     app.state.db = db
     app.state.instrument_resolver = resolver
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     try:
         yield SimpleNamespace(client=client, db=db, resolver=resolver)
     finally:

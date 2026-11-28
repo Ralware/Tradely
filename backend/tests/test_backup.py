@@ -96,16 +96,6 @@ def _seed(db: Database) -> None:
             ),
         )
         connection.execute(
-            """INSERT INTO signal_audit (
-                   symbol, market, strategy, strategy_version, state, as_of,
-                   payload_json, created_at
-               ) VALUES (?,?,?,?,?,?,?,?)""",
-            (
-                "MSFT", "global", "trend_breakout", "v1", "BUY", NOW,
-                '{"state":"BUY"}', NOW,
-            ),
-        )
-        connection.execute(
             "INSERT INTO catalogue_meta (key, value, updated_at) VALUES (?,?,?)",
             ("version", "2026-11-27", NOW),
         )
@@ -332,31 +322,21 @@ def _insert_snapshot(
                 generated_at, generated_at, 2, "READY", payload, "checksum",
             ),
         )
-        connection.execute(
-            """INSERT INTO strategy_snapshots VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                f"strategy-{snapshot_id}", snapshot_id, "global:NASDAQ:MSFT", "1d",
-                snapshot_id, "v1", "default-v1", "long_only", "LONG",
-                generated_at, "READY", b"strategy", "checksum",
-            ),
-        )
         connection.commit()
     finally:
         connection.close()
 
 
-def test_snapshot_retention_keeps_newest_and_removes_orphans(tmp_path):
+def test_snapshot_retention_keeps_newest_and_reports_released_payload(tmp_path):
     db = Database(tmp_path / "maintenance.sqlite3")
     _insert_snapshot(db, "old", "2026-11-20T10:00:00+00:00")
     _insert_snapshot(db, "new", "2026-11-27T10:00:00+00:00")
     report = prune_analytics_snapshots(db, keep_per_series=1)
     assert report.snapshots_deleted == 1
-    assert report.strategy_snapshots_deleted == 1
+    assert report.payload_bytes_released == 1024
     with db.connect() as connection:
         remaining = [row[0] for row in connection.execute("SELECT snapshot_id FROM market_analytics_snapshots")]
-        strategies = connection.execute("SELECT COUNT(*) FROM strategy_snapshots").fetchone()[0]
     assert remaining == ["new"]
-    assert strategies == 1
     stats = snapshot_storage_stats(db)
     assert stats["total_rows"] == 1
 

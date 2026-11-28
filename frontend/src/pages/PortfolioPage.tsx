@@ -36,19 +36,19 @@ function intentLabel(transaction: Transaction): string {
 
 export function PortfolioPage() {
   const positions = useApi(
-    (signal) => portfolioService.getPositions(signal),
+    (signal, { force }) => portfolioService.getPositions(signal, force),
     [],
     {
       keepPreviousData: true,
       getCachedData: () => portfolioService.getCachedPositions(),
     },
   );
-  const summary = useApi((signal) => portfolioService.getSummary(signal), [], {
+  const summary = useApi((signal, { force }) => portfolioService.getSummary(signal, force), [], {
     keepPreviousData: true,
     getCachedData: () => portfolioService.getCachedSummary(),
   });
   const transactions = useApi(
-    (signal) => portfolioService.getTransactions(signal),
+    (signal, { force }) => portfolioService.getTransactions(signal, force),
     [],
     {
       keepPreviousData: true,
@@ -73,7 +73,7 @@ export function PortfolioPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailsHidden, setDetailsHidden] = useState(false);
   const detail = useApi(
-    (signal) => portfolioService.getPositionDetail(selectedId ?? "", signal),
+    (signal, { force }) => portfolioService.getPositionDetail(selectedId ?? "", signal, { force }),
     [selectedId],
     {
       enabled: Boolean(selectedId),
@@ -107,8 +107,9 @@ export function PortfolioPage() {
       return;
     }
     lastValuationRefresh.current = now;
-    positions.reload();
-    summary.reload();
+    portfolioService.invalidateValuations();
+    positions.revalidate();
+    summary.revalidate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quoteSignature]);
 

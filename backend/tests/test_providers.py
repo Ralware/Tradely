@@ -36,13 +36,13 @@ def candle_row(timestamp, close=104.0, volume=1000):
 def test_tradingview_candle_adapter_uses_exchange_symbol_and_split_adjustment(monkeypatch):
     captured = {}
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(self, url, params=None, timeout=None):
         captured["url"] = url
         captured["params"] = params
         captured["timeout"] = timeout
         return FakeResponse({"candles": [candle_row("2026-11-10T00:00:00Z")]})
 
-    monkeypatch.setattr("app.providers.tradingview.httpx.get", fake_get)
+    monkeypatch.setattr("app.providers.tradingview.httpx.Client.get", fake_get)
     provider = TradingViewProvider(Settings(_env_file=None))
     frame = provider.fetch_candles(
         "RELIANCE", market="india", exchange="NSE", interval="1d",
@@ -71,10 +71,10 @@ def test_tradingview_keeps_forming_intraday_bar_for_chart_without_adding_it_to_c
         candle_row(current_hour, close=101.0),
     ]
 
-    def fake_get(_url, params=None, timeout=None):
+    def fake_get(self, _url, params=None, timeout=None):
         return FakeResponse({"candles": rows})
 
-    monkeypatch.setattr("app.providers.tradingview.httpx.get", fake_get)
+    monkeypatch.setattr("app.providers.tradingview.httpx.Client.get", fake_get)
     frame = TradingViewProvider(Settings(_env_file=None)).fetch_candles(
         "BTCUSDT", market="crypto", exchange="BINANCE", interval="1h",
         start=current_hour.date(), end=current_hour.date(),
@@ -90,11 +90,11 @@ def test_tradingview_keeps_forming_intraday_bar_for_chart_without_adding_it_to_c
 def test_tradingview_candle_adapter_bounds_history_request_when_no_range(monkeypatch):
     captured = {}
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(self, url, params=None, timeout=None):
         captured["params"] = params
         return FakeResponse({"candles": [candle_row("2026-11-10T00:00:00Z")]})
 
-    monkeypatch.setattr("app.providers.tradingview.httpx.get", fake_get)
+    monkeypatch.setattr("app.providers.tradingview.httpx.Client.get", fake_get)
     frame = TradingViewProvider(
         Settings(_env_file=None, tradingview_history_max_bars=20_000)
     ).fetch_candles(
@@ -115,11 +115,11 @@ def test_tradingview_candle_adapter_bounds_history_request_when_no_range(monkeyp
 def test_tradingview_candle_adapter_can_bypass_bridge_cache(monkeypatch):
     captured = {}
 
-    def fake_get(_url, params=None, timeout=None):
+    def fake_get(self, _url, params=None, timeout=None):
         captured["params"] = params
         return FakeResponse({"candles": [candle_row("2026-11-10T00:00:00Z")]})
 
-    monkeypatch.setattr("app.providers.tradingview.httpx.get", fake_get)
+    monkeypatch.setattr("app.providers.tradingview.httpx.Client.get", fake_get)
     TradingViewProvider(Settings(_env_file=None)).fetch_candles(
         "BTCUSDT", market="crypto", exchange="BINANCE", interval="4h",
         start=date(2026, 11, 1), end=date(2026, 11, 10), bypass_cache=True,
@@ -133,7 +133,7 @@ def test_tradingview_reports_truncation_when_provider_returns_a_full_batch(monke
         for offset in range(5)
     ]
     monkeypatch.setattr(
-        "app.providers.tradingview.httpx.get",
+        "app.providers.tradingview.httpx.Client.get",
         lambda *a, **k: FakeResponse({"candles": rows}),
     )
     frame = TradingViewProvider(
@@ -163,13 +163,13 @@ def test_price_metadata_translates_pricescale_to_display_precision():
 def test_tradingview_retries_rate_limited_requests(monkeypatch):
     calls = []
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(self, url, params=None, timeout=None):
         calls.append(1)
         if len(calls) == 1:
             return FakeResponse({"error": "rate limited"}, status_code=429)
         return FakeResponse({"candles": [candle_row("2026-11-10T00:00:00Z")]})
 
-    monkeypatch.setattr("app.providers.tradingview.httpx.get", fake_get)
+    monkeypatch.setattr("app.providers.tradingview.httpx.Client.get", fake_get)
     monkeypatch.setattr("app.providers.tradingview.time.sleep", lambda *_: None)
     frame = TradingViewProvider(
         Settings(
@@ -222,7 +222,7 @@ def test_tradingview_drops_the_still_forming_final_candle(monkeypatch):
         candle_row(now, close=999.0),
     ]
     monkeypatch.setattr(
-        "app.providers.tradingview.httpx.get",
+        "app.providers.tradingview.httpx.Client.get",
         lambda *a, **k: FakeResponse({"candles": rows}),
     )
     today = datetime.now(UTC).date()
@@ -236,7 +236,7 @@ def test_tradingview_drops_the_still_forming_final_candle(monkeypatch):
 
 def test_tradingview_bridge_http_error_is_actionable(monkeypatch):
     monkeypatch.setattr(
-        "app.providers.tradingview.httpx.get",
+        "app.providers.tradingview.httpx.Client.get",
         lambda *a, **k: FakeResponse({"error": {"message": "symbol not found"}}, status_code=404),
     )
     with pytest.raises(ProviderError, match="HTTP 404: symbol not found"):
@@ -244,7 +244,7 @@ def test_tradingview_bridge_http_error_is_actionable(monkeypatch):
 
 
 def test_tradingview_symbol_metadata_and_search(monkeypatch):
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(self, url, params=None, timeout=None):
         if url.endswith("/symbol"):
             assert params == {"symbol": "NSE:RELIANCE"}
             return FakeResponse({"info": {"pricescale": 100, "minmov": 1, "currency_code": "INR"}})
@@ -253,7 +253,7 @@ def test_tradingview_symbol_metadata_and_search(monkeypatch):
             return FakeResponse({"results": [{"symbol": "RELIANCE", "exchange": "NSE"}]})
         raise AssertionError(url)
 
-    monkeypatch.setattr("app.providers.tradingview.httpx.get", fake_get)
+    monkeypatch.setattr("app.providers.tradingview.httpx.Client.get", fake_get)
     provider = TradingViewProvider(Settings(_env_file=None))
     info = provider.symbol_info("NSE:RELIANCE")
     results = provider.search("RELIANCE", limit=5)

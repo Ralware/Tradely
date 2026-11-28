@@ -325,6 +325,7 @@ class BackupManager:
     def _export(self) -> tuple[dict[str, Any], dict[str, int]]:
         connection = self.db.connect()
         try:
+            connection.execute("BEGIN")
             data = export_essential(
                 connection, scope="user", require_all=True, include_optional=True
             )
@@ -464,7 +465,7 @@ class BackupManager:
         self,
         *,
         force: bool = False,
-        targets: str | Iterable[str] = ("local", "git"),
+        targets: str | Iterable[str] = ("local",),
         reason: str = "manual",
     ) -> list[BackupResult]:
         with self._lock():
@@ -599,7 +600,7 @@ class BackupManager:
         self,
         reason: str,
         *,
-        targets: str | Iterable[str] = ("local", "git"),
+        targets: str | Iterable[str] = ("local",),
         force: bool = False,
     ) -> list[BackupResult]:
         """Lifecycle-safe wrapper: never crashes the application."""
@@ -653,7 +654,7 @@ class BackupManager:
         summary["path"] = str(path)
         return summary
 
-    def prune(self, *, targets: str | Iterable[str] = ("local", "git")) -> dict[str, list[str]]:
+    def prune(self, *, targets: str | Iterable[str] = ("local",)) -> dict[str, list[str]]:
         with self._lock():
             removed: dict[str, list[str]] = {}
             for target in self._normalize_targets(targets):
