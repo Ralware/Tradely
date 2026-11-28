@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-const backendTarget = process.env.VITE_DEV_BACKEND ?? 'http://127.0.0.1:8000';
+const backendTarget = process.env.VITE_DEV_BACKEND ?? 'http://127.0.0.1:8001';
 
 // The frontend talks to FastAPI through the /api prefix. In development the
 // Vite server proxies those calls, so no CORS configuration is needed on the

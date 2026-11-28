@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import type { Candle } from '../../types/api';
 import { useSelectedInstrument } from '../../contexts/SelectedInstrumentContext';
 import { apiRequest } from '../../services/api';
 import { analyticsViewStore } from '../../services/analyticsViewStore';
@@ -9,9 +8,11 @@ import { snapshotStore } from '../../services/snapshotStore';
 import { invalidateSnapshotValidation, isCompleteSnapshot, loadAnalyticsSnapshot } from '../../services/analyticsSnapshotLoader';
 import { portfolioService } from '../../services/portfolioService';
 import { marketService } from '../../services/marketService';
+import { createCandlePollController, type PolledCandleState } from '../../services/candlePolling';
 import { changeDigits, cn, formatDate, formatNumber, formatPercent, formatSignedFixed, toneForNumber } from '../../utils/format';
 import { pricePrecisionFor, minMoveFromMetadata } from '../../utils/precision';
-import { defaultDaysFor, intervalLabel, isIntradayInterval } from '../../utils/timeframes';
+import { defaultDaysFor, intervalLabel, isIntradayInterval, pollDaysFor } from '../../utils/timeframes';
+import { resolvePreviousClose } from '../charts/candleReconcile';
 import { Button } from '../common/Button';
 import { Icon } from '../common/Icon';
 import { EmptyState, ErrorState, LoadingPanel, Notice } from '../common/States';
@@ -82,7 +83,7 @@ export function AnalysisWorkspace() {
   );
   const [showRsi, setShowRsi] = useState(() => analyticsViewStore.get().showRsi);
   const [showMacd, setShowMacd] = useState(() => analyticsViewStore.get().showMacd);
-  const [formingCandleState, setFormingCandleState] = useState<{ key: string; candle: Candle | null } | null>(null);
+  const [polledState, setPolledState] = useState<PolledCandleState | null>(null);
   const [, forceSnapshotRender] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -162,7 +163,13 @@ export function AnalysisWorkspace() {
   const currency = selected.currency || (market === 'india' ? 'INR' : market === 'crypto' ? 'USDT' : 'USD');
   const quote = selected.quote;
   const candleKey = `${instrumentId}\u0000${interval}`;
-  const activeFormingCandle = formingCandleState?.key === candleKey ? formingCandleState.candle : null;
+  const activePolledState = polledState?.key === candleKey ? polledState : null;
+  const activeFormingCandle = activePolledState?.formingCandle ?? null;
+  const activePolledCandles = useMemo(
+    () => activePolledState?.candles ?? [],
+    [activePolledState],
+  );
+  const activePollSequence = activePolledState?.sequence ?? 0;
   const activeLiveQuote = quote && !quote.isStale ? quote : null;
   const displayedInterval = data?.interval ?? interval;
   const intraday = isIntradayInterval(displayedInterval);
@@ -172,46 +179,46 @@ export function AnalysisWorkspace() {
   const error = manifest?.last_error ?? null;
 
   // Provider candle data supplies the authoritative open, accumulated high/low,
-  // close, and cumulative volume. Refresh its tail every second independently
-  // of analytics so the active candle does not wait for indicator recalculation.
+  // close, and cumulative volume. One one-second poll feeds both the confirmed
+  // tail and the forming bar through the reconciler; it is aborted on any
+  // instrument/timeframe change and never starts a second loop.
   useEffect(() => {
     if (!instrumentId || !symbol || !exchange) return undefined;
-    let active = true;
-    let inFlight = false;
     const key = `${instrumentId}\u0000${interval}`;
-    const query = {
-      instrumentId,
-      symbol,
-      market,
-      exchange,
-      interval,
-      days: 30,
-      refreshLatest: true,
-    };
-    const reconcile = async () => {
-      if (!active || inFlight || document.hidden) return;
-      inFlight = true;
-      try {
-        const response = await marketService.getCandles(query, undefined, {
-          force: true,
+    const controller = createCandlePollController({
+      key,
+      intervalMs: 1_000,
+      shouldPoll: () => !document.hidden,
+      fetch: (signal) => marketService.getCandles(
+        {
+          instrumentId,
+          symbol,
+          market,
+          exchange,
+          interval,
+          days: pollDaysFor(interval),
           refreshLatest: true,
-        });
-        if (!active) return;
-        setFormingCandleState({ key, candle: response.forming_candle ?? null });
-      } catch {
-        // Retain the cached live candle on temporary provider/API failures.
-      } finally {
-        inFlight = false;
-      }
+        },
+        signal,
+        { force: true, refreshLatest: true, timeoutMs: 8_000 },
+      ),
+      onUpdate: (state) => setPolledState(state),
+      onContractMismatch: (message) => {
+        if (import.meta.env.DEV) {
+          console.warn(`[candle-poll] ${key}: ${message}`);
+        }
+      },
+      // A failed poll keeps the last valid state; the chart never blanks.
+      onError: () => undefined,
+    });
+    controller.start();
+    const onVisibilityChange = () => {
+      if (!document.hidden) void controller.pollOnce();
     };
-    void reconcile();
-    const timer = window.setInterval(() => void reconcile(), 1_000);
-    const onVisibilityChange = () => { if (!document.hidden) void reconcile(); };
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
-      active = false;
-      window.clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisibilityChange);
+      controller.stop();
     };
   }, [instrumentId, symbol, market, exchange, interval]);
 
@@ -256,7 +263,14 @@ export function AnalysisWorkspace() {
     };
   }, [instrumentId, interval, loadAttempt]);
 
-  const last = activeFormingCandle?.close ?? activeLiveQuote?.last ?? data?.latest.close ?? null;
+  const latestPolledCandle = activePolledCandles.length
+    ? activePolledCandles[activePolledCandles.length - 1]
+    : null;
+  const last = activeFormingCandle?.close
+    ?? activeLiveQuote?.last
+    ?? latestPolledCandle?.close
+    ?? data?.latest.close
+    ?? null;
   const priceMetadata =
     data?.price_metadata
     ?? technicals?.price_metadata
@@ -265,8 +279,16 @@ export function AnalysisWorkspace() {
     ?? null;
   const pricePrecision = pricePrecisionFor(last, priceMetadata);
   const priceMinMove = minMoveFromMetadata(priceMetadata);
-  const previousClose =
-    data && data.candles.length > 1 ? data.candles[data.candles.length - 2].close : null;
+  // While a forming bar is active the latest completed close is the prior
+  // close; without one it is the bar before the latest completed candle.
+  const previousClose = useMemo(() => resolvePreviousClose({
+    snapshotCandles: data?.candles ?? [],
+    polledCandles: activePolledCandles,
+    formingCandle: activeFormingCandle,
+    interval: displayedInterval,
+    market,
+    now: Math.floor(Date.now() / 1000),
+  }), [data?.candles, activePolledCandles, activeFormingCandle, displayedInterval, market]);
   const change =
     activeLiveQuote?.change ??
     quote?.change ??
@@ -533,6 +555,9 @@ export function AnalysisWorkspace() {
                 priceMinMove={priceMinMove}
                 intraday={intraday}
                 formingCandle={activeFormingCandle}
+                polledCandles={activePolledCandles}
+                pollSequence={activePollSequence}
+                market={market}
                 livePrice={activeFormingCandle?.close ?? activeLiveQuote?.last ?? null}
                 height={480}
               />

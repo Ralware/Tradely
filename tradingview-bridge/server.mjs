@@ -301,7 +301,7 @@ async function candles(query) {
     maxCount ?? "",
     adjustment,
   );
-  const result = await cached(key, CANDLE_CACHE_MS, () =>
+  const loadCandles = () =>
     withSlot(() =>
       getCandles({
         symbol,
@@ -312,8 +312,13 @@ async function candles(query) {
         timeoutMs: CANDLE_TIMEOUT_MS,
         ...(credentials ? { credentials } : {}),
       }),
-    ),
+    );
+  const bypassCache = ["1", "true", "yes"].includes(
+    String(query.get("bypass_cache") || "").toLowerCase(),
   );
+  const result = bypassCache
+    ? await loadCandles()
+    : await cached(key, CANDLE_CACHE_MS, loadCandles);
   const requested = from !== undefined ? maxCount : count;
   return {
     symbol,

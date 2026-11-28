@@ -350,6 +350,7 @@ class MarketService:
                     interval=interval,
                     start=tail_start,
                     end=None,
+                    bypass_cache=True,
                 )
             )
             tail = normalize_candles(tail)

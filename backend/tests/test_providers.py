@@ -112,6 +112,21 @@ def test_tradingview_candle_adapter_bounds_history_request_when_no_range(monkeyp
     assert frame.attrs["history_truncated"] is False
 
 
+def test_tradingview_candle_adapter_can_bypass_bridge_cache(monkeypatch):
+    captured = {}
+
+    def fake_get(_url, params=None, timeout=None):
+        captured["params"] = params
+        return FakeResponse({"candles": [candle_row("2026-11-10T00:00:00Z")]})
+
+    monkeypatch.setattr("app.providers.tradingview.httpx.get", fake_get)
+    TradingViewProvider(Settings(_env_file=None)).fetch_candles(
+        "BTCUSDT", market="crypto", exchange="BINANCE", interval="4h",
+        start=date(2026, 11, 1), end=date(2026, 11, 10), bypass_cache=True,
+    )
+    assert captured["params"]["bypass_cache"] == "true"
+
+
 def test_tradingview_reports_truncation_when_provider_returns_a_full_batch(monkeypatch):
     rows = [
         candle_row(pd.Timestamp("2026-01-01", tz="UTC") + pd.Timedelta(days=offset))
@@ -343,6 +358,7 @@ def test_market_cache_refreshes_only_the_tail_and_reports_metrics(monkeypatch):
     assert len(calls) == 2
     assert calls[1]["start"] is not None
     assert calls[1]["end"] is None
+    assert calls[1]["bypass_cache"] is True
     assert len(second) == 4
     assert second.index.is_monotonic_increasing
     assert not second.index.has_duplicates

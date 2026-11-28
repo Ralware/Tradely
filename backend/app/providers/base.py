@@ -93,6 +93,7 @@ class MarketDataProvider(ABC):
     def fetch_candles(
         self, symbol: str, *, market: str, exchange: str | None,
         interval: str, start: date | None, end: date | None,
+        bypass_cache: bool = False,
     ) -> pd.DataFrame:
         raise NotImplementedError
 

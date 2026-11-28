@@ -206,12 +206,15 @@ class TradingViewBridge:
         adjustment: str = "splits",
         count: int | None = None,
         max_count: int | None = None,
+        bypass_cache: bool = False,
     ) -> list[dict[str, Any]]:
         params: dict[str, Any] = {
             "symbol": symbol,
             "timeframe": timeframe,
             "adjustment": adjustment,
         }
+        if bypass_cache:
+            params["bypass_cache"] = "true"
         if start is not None or end is not None:
             if start is not None:
                 params["from"] = start
@@ -369,6 +372,7 @@ class TradingViewProvider(MarketDataProvider):
         interval: str,
         start: date | None,
         end: date | None,
+        bypass_cache: bool = False,
     ) -> pd.DataFrame:
         timeframe = INTERVAL_TO_TIMEFRAME.get(interval)
         if timeframe is None:
@@ -392,6 +396,7 @@ class TradingViewProvider(MarketDataProvider):
                 start=start_ts,
                 end=end_ts,
                 max_count=max_bars,
+                bypass_cache=bypass_cache,
             )
         else:
             # Bounded deep history: the library pages in 5,000-bar batches and
@@ -401,6 +406,7 @@ class TradingViewProvider(MarketDataProvider):
                 timeframe=timeframe,
                 count=max_bars,
                 max_count=max_bars,
+                bypass_cache=bypass_cache,
             )
         prepared = [
             {

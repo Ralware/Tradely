@@ -169,7 +169,8 @@ export interface Candle {
   high: number;
   low: number;
   close: number;
-  volume: number;
+  /** `null` means the provider did not report volume; it is unknown, not zero. */
+  volume: number | null;
 }
 
 export interface CandlesResponse {

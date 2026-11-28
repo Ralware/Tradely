@@ -97,6 +97,42 @@ export function defaultDaysFor(interval: string): number {
   }
 }
 
+/**
+ * Mirrors the backend's `_TAIL_LOOKBACK_DAYS`. The one-second poll only needs
+ * the provider tail (latest completed bar + forming bar), not the full chart
+ * history, so it asks for a small, interval-aware window.
+ */
+const POLL_TAIL_LOOKBACK_DAYS: Record<string, number> = {
+  '1m': 2,
+  '3m': 2,
+  '5m': 2,
+  '15m': 3,
+  '30m': 4,
+  '45m': 4,
+  '1h': 5,
+  '2h': 7,
+  '4h': 10,
+  '6h': 14,
+  '8h': 18,
+  '12h': 21,
+  '1d': 10,
+  '3d': 21,
+  '1wk': 42,
+  '1w': 42,
+  '1mo': 90,
+  '1M': 90,
+};
+
+/**
+ * Poll window in days. The backend requires `days >= 1`. Intraday windows get
+ * a five-day floor so a Monday or post-holiday request still reaches the last
+ * trading session instead of asking for an empty weekend range (HTTP 502).
+ */
+export function pollDaysFor(interval: string): number {
+  const tail = POLL_TAIL_LOOKBACK_DAYS[interval] ?? 10;
+  return Math.max(2, Math.min(3650, Math.max(tail, 5)));
+}
+
 export function intervalLabel(interval: string): string {
   const option = [...EQUITY_TIMEFRAMES, ...CRYPTO_TIMEFRAMES].find((item) => item.id === interval);
   return option ? option.label : interval;

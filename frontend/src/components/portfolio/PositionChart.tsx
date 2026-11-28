@@ -12,14 +12,12 @@ import {
   type UTCTimestamp,
 } from 'lightweight-charts';
 import type { Candle, PositionDirection, Transaction } from '../../types/api';
+import { parseTimestampToEpochSeconds } from '../charts/liveCandleUtils';
 import { EmptyState } from '../common/States';
 
 function toSeconds(timestamp: string): UTCTimestamp | null {
-  const millis = Date.parse(timestamp);
-  if (Number.isNaN(millis)) {
-    return null;
-  }
-  return Math.floor(millis / 1000) as UTCTimestamp;
+  const seconds = parseTimestampToEpochSeconds(timestamp);
+  return seconds === null ? null : (seconds as UTCTimestamp);
 }
 
 function snapToCandle(timestamp: string, candleTimes: UTCTimestamp[]): UTCTimestamp | null {

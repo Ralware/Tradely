@@ -15,9 +15,16 @@ import {
   type Time,
   type UTCTimestamp,
 } from 'lightweight-charts';
-import type { Candle, IndicatorSeriesRow } from '../../types/api';
-import { isPlausibleLiveCandle as isPlausibleCandle, replaceFormingCandle } from './liveCandleUtils';
-import { getCachedLiveCandles, setCachedLiveCandles } from './liveCandleStore';
+import type { Candle, IndicatorSeriesRow, Market } from '../../types/api';
+import { parseTimestampToEpochSeconds } from './liveCandleUtils';
+import { reconcileCandles, type LiveCandleEntry } from './candleReconcile';
+import { getCachedLiveCandles, liveEntry, setCachedLiveCandles } from './liveCandleStore';
+import {
+  ensureRangeIncludesLatest,
+  syncChartSeries,
+  type CandlePointColors,
+  type ChartSyncState,
+} from './chartSeriesSync';
 import { analyticsViewStore } from '../../services/analyticsViewStore';
 import { formatNumber } from '../../utils/format';
 import { EmptyState } from '../common/States';
@@ -42,6 +49,11 @@ interface PriceChartProps {
   priceMinMove?: number | null;
   /** Provider's current in-progress candle, kept separate from completed analytics bars. */
   formingCandle?: Candle | null;
+  /** Confirmed candles from the independent one-second poll. */
+  polledCandles?: Candle[];
+  /** Monotonic sequence of the polled response. */
+  pollSequence?: number;
+  market?: Market;
   /** Current-price marker only; never merged into candle OHLCV. */
   livePrice?: number | null;
   height?: number;
@@ -59,6 +71,15 @@ const CHART_COLORS = {
   candleNeutral: '#929292',
   sell: '#F04452',
 } as const;
+
+const CHART_POINT_COLORS: CandlePointColors = {
+  up: CHART_COLORS.candleUp,
+  down: CHART_COLORS.candleDown,
+  neutral: CHART_COLORS.candleNeutral,
+  volumeUp: 'rgba(38, 139, 255, 0.28)',
+  volumeDown: 'rgba(242, 242, 242, 0.28)',
+  volumeNeutral: 'rgba(146, 146, 146, 0.28)',
+};
 
 const overlayGroups: Array<{
   key: keyof OverlayToggles;
@@ -93,62 +114,12 @@ const overlayGroups: Array<{
 ];
 
 function toSeconds(timestamp: string): UTCTimestamp | null {
-  const millis = Date.parse(timestamp);
-  if (Number.isNaN(millis)) {
-    return null;
-  }
-  return Math.floor(millis / 1000) as UTCTimestamp;
+  const seconds = parseTimestampToEpochSeconds(timestamp);
+  return seconds === null ? null : (seconds as UTCTimestamp);
 }
 
 function numeric(value: number | string | null | undefined): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
-function candlePoints(candles: Candle[]) {
-  return candles.flatMap((candle) => {
-    const time = toSeconds(candle.timestamp);
-    if (time === null) {
-      return [];
-    }
-    const color = candle.close > candle.open
-      ? CHART_COLORS.candleUp
-      : candle.close < candle.open
-        ? CHART_COLORS.candleDown
-        : CHART_COLORS.candleNeutral;
-    return [
-      {
-        time,
-        open: candle.open,
-        high: candle.high,
-        low: candle.low,
-        close: candle.close,
-        color,
-        borderColor: color,
-        wickColor: color,
-      },
-    ];
-  });
-}
-
-function volumePoints(candles: Candle[]) {
-  return candles.flatMap((candle) => {
-    const time = toSeconds(candle.timestamp);
-    if (time === null) {
-      return [];
-    }
-    return [
-      {
-        time,
-        value: candle.volume,
-        color:
-          candle.close > candle.open
-            ? 'rgba(38, 139, 255, 0.28)'
-            : candle.close < candle.open
-              ? 'rgba(242, 242, 242, 0.28)'
-              : 'rgba(146, 146, 146, 0.28)',
-      },
-    ];
-  });
 }
 
 function seriesPoints(
@@ -243,9 +214,9 @@ function istTimeLabel(time: Time): string {
 }
 
 function candleStamp(timestamp: string): string {
-  const parsed = Date.parse(timestamp);
-  if (Number.isNaN(parsed)) return timestamp;
-  return `${IST_STAMP_FORMAT.format(new Date(parsed))} IST`;
+  const seconds = parseTimestampToEpochSeconds(timestamp);
+  if (seconds === null) return timestamp;
+  return `${IST_STAMP_FORMAT.format(new Date(seconds * 1000))} IST`;
 }
 
 function indicatorValueAt(series: IndicatorSeriesRow[] | null, field: string, timestamp: string | null): number | null {
@@ -276,6 +247,9 @@ export function PriceChart({
   pricePrecision = null,
   priceMinMove = null,
   formingCandle = null,
+  polledCandles = [],
+  pollSequence = 0,
+  market,
   livePrice = null,
   height = 380,
 }: PriceChartProps) {
@@ -289,6 +263,8 @@ export function PriceChart({
   const activeTimeframeRef = useRef<string | null>(null);
   const activeSymbolRef = useRef<string | null>(null);
   const timeRangeAnimationRef = useRef<number | null>(null);
+  const chartSyncRef = useRef<ChartSyncState | null>(null);
+  const diagnosticsSignatureRef = useRef('');
   const identityRef = useRef<string>('');
   identityRef.current = instrumentId || symbol;
   const timeframeRef = useRef(timeframe);
@@ -297,80 +273,92 @@ export function PriceChart({
   // crosshair movement; the values themselves always come from `candles`.
   const [hoveredTime, setHoveredTime] = useState<UTCTimestamp | null>(null);
   const chartIdentity = `${instrumentId || symbol}\u0000${timeframe}`;
-  const [liveCandleState, setLiveCandleState] = useState<{ key: string; candles: Candle[] } | null>(() => {
+  const [cachedLiveState, setCachedLiveState] = useState<{
+    key: string;
+    entries: LiveCandleEntry[];
+  } | null>(() => {
     const cached = getCachedLiveCandles(chartIdentity);
-    return cached ? { key: chartIdentity, candles: cached } : null;
+    return cached ? { key: chartIdentity, entries: cached } : null;
   });
 
   useEffect(() => {
     const cached = getCachedLiveCandles(chartIdentity);
-    setLiveCandleState(cached ? { key: chartIdentity, candles: cached } : null);
+    setCachedLiveState(cached ? { key: chartIdentity, entries: cached } : null);
   }, [chartIdentity]);
 
-  useEffect(() => {
-    if (!liveCandleState || !liveCandleState.candles.length) return;
-    setCachedLiveCandles(liveCandleState.key, liveCandleState.candles);
-  }, [liveCandleState]);
+  const cachedLive = useMemo(
+    () => (cachedLiveState?.key === chartIdentity ? cachedLiveState.entries : []),
+    [cachedLiveState, chartIdentity],
+  );
 
-  useEffect(() => {
-    const referenceClose = candles[candles.length - 1]?.close;
-    const validProviderCandle = formingCandle && isPlausibleCandle(formingCandle, referenceClose)
-      ? formingCandle
-      : null;
-    if (!validProviderCandle) return;
-    const timestampSeconds = toSeconds(validProviderCandle.timestamp);
-    if (timestampSeconds === null) return;
-    const latestCompletedSeconds = candles.length
-      ? toSeconds(candles[candles.length - 1].timestamp)
-      : null;
-    // Some analytics snapshots include a bar at the same opening time as the
-    // provider's forming candle. In that case the API snapshot is authoritative
-    // and must replace it; only an older timestamp is stale.
-    if (latestCompletedSeconds !== null && timestampSeconds < latestCompletedSeconds) return;
+  // One pure reconciler decides which finalized and forming candles are real.
+  // Cached live state is only a fallback while a poll is failing.
+  const reconciled = useMemo(() => reconcileCandles({
+    snapshotCandles: candles,
+    polledCandles,
+    formingCandle,
+    cachedLive,
+    interval: timeframe,
+    market,
+    now: Math.floor(Date.now() / 1000),
+    pollSequence,
+  }), [candles, polledCandles, formingCandle, cachedLive, timeframe, market, pollSequence]);
+  const chartCandles = reconciled.candles;
 
-    setLiveCandleState((previousState) => {
-      const liveBars = previousState?.key === chartIdentity ? previousState.candles : [];
-      const newestCachedSeconds = liveBars.length ? toSeconds(liveBars[liveBars.length - 1].timestamp) : null;
-      if (newestCachedSeconds !== null && timestampSeconds < newestCachedSeconds) return previousState;
-      const nextBars = replaceFormingCandle(liveBars, validProviderCandle);
-      if (nextBars.length === liveBars.length
-        && nextBars.every((bar, index) => bar === liveBars[index])) return previousState;
-      return { key: chartIdentity, candles: nextBars };
+  // Persist only the live tail. The next mount restores the forming bar until
+  // the first poll/snapshot arrives; finalized history always comes from data.
+  useEffect(() => {
+    const entries: LiveCandleEntry[] = reconciled.candles.slice(-3).map((candle) => liveEntry(
+      {
+        timestamp: candle.timestamp,
+        open: candle.open,
+        high: candle.high,
+        low: candle.low,
+        close: candle.close,
+        volume: candle.volume,
+      },
+      candle.time,
+      candle.status,
+      timeframe,
+      pollSequence,
+    ));
+    setCachedLiveCandles(chartIdentity, entries);
+  }, [reconciled, chartIdentity, timeframe, pollSequence]);
+
+  // Change-based, dev-only diagnostics. Never logs prices or user data.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const diagnostics = reconciled.diagnostics;
+    const signature = JSON.stringify([
+      diagnostics.snapshotCount,
+      diagnostics.polledCount,
+      diagnostics.latestFinalizedTime,
+      diagnostics.formingTime,
+      diagnostics.acceptedFinal,
+      diagnostics.acceptedForming,
+      diagnostics.rejected.length,
+      diagnostics.replaced,
+      diagnostics.discarded,
+      diagnostics.retained,
+      chartCandles.length,
+    ]);
+    if (signature === diagnosticsSignatureRef.current) return;
+    diagnosticsSignatureRef.current = signature;
+    console.debug('[candle-reconcile]', {
+      instrument: instrumentId || symbol,
+      timeframe,
+      snapshotCount: diagnostics.snapshotCount,
+      polledCount: diagnostics.polledCount,
+      latestFinalized: diagnostics.latestFinalizedTime,
+      forming: diagnostics.formingTime,
+      accepted: { final: diagnostics.acceptedFinal, forming: diagnostics.acceptedForming },
+      rejected: diagnostics.rejected.slice(-5),
+      replaced: diagnostics.replaced,
+      discarded: diagnostics.discarded,
+      retained: diagnostics.retained,
+      chartCount: chartCandles.length,
     });
-  }, [candles, chartIdentity, formingCandle]);
-
-  // The current in-progress bar is replaced by each provider OHLCV snapshot;
-  // quote ticks are never used to synthesize or mutate its candle values.
-  const chartCandles = useMemo(() => {
-    const byTime = new Map<number, Candle>();
-    for (const candle of candles) {
-      const time = toSeconds(candle.timestamp);
-      if (time !== null) byTime.set(time, candle);
-    }
-    const liveBars = liveCandleState?.key === chartIdentity ? liveCandleState.candles : [];
-    const referenceClose = candles[candles.length - 1]?.close;
-    const validFormingCandle = formingCandle && isPlausibleCandle(formingCandle, referenceClose)
-      ? formingCandle
-      : null;
-    const displayBars = [...liveBars];
-    let activeBarTime = liveBars.length ? toSeconds(liveBars[liveBars.length - 1].timestamp) : null;
-    if (validFormingCandle) {
-      const formingTime = toSeconds(validFormingCandle.timestamp);
-      const latestCompletedTime = candles.length ? toSeconds(candles[candles.length - 1].timestamp) : null;
-      if (formingTime !== null && (latestCompletedTime === null || formingTime >= latestCompletedTime)) {
-        displayBars.push(validFormingCandle);
-        activeBarTime = formingTime;
-      }
-    }
-    for (const candle of displayBars) {
-      const time = toSeconds(candle.timestamp);
-      const isActiveBar = time !== null && time === activeBarTime;
-      if (time !== null && Number.isFinite(candle.close) && (isActiveBar || !byTime.has(time))) {
-        byTime.set(time, candle);
-      }
-    }
-    return [...byTime.entries()].sort(([left], [right]) => left - right).map(([, candle]) => candle);
-  }, [candles, formingCandle, liveCandleState, chartIdentity]);
+  }, [reconciled, chartCandles.length, instrumentId, symbol, timeframe]);
 
   const digits =
     typeof pricePrecision === 'number' && Number.isFinite(pricePrecision)
@@ -386,7 +374,7 @@ export function PriceChart({
   const hoveredCandle =
     hoveredTime === null
       ? null
-      : chartCandles.find((candle) => toSeconds(candle.timestamp) === hoveredTime) ?? null;
+      : chartCandles.find((candle) => candle.time === hoveredTime) ?? null;
   const displayCandle = hoveredCandle ?? latestCandle;
 
   // The chart is created once and kept alive across data changes. Timeframe
@@ -492,6 +480,7 @@ export function PriceChart({
       chart.unsubscribeCrosshairMove(handleCrosshair);
       chart.remove();
       chartRef.current = null;
+      chartSyncRef.current = null;
       candleSeriesRef.current = null;
       livePriceLineRef.current = null;
       volumeSeriesRef.current = null;
@@ -567,23 +556,40 @@ export function PriceChart({
     const timeScale = chart.timeScale();
     const previousRange = timeScale.getVisibleLogicalRange();
     const storedRange = analyticsViewStore.getRange(instrumentId || symbol, timeframe);
+    const previousCount = chartSyncRef.current?.candles.length ?? 0;
 
-    candleSeries.setData(candlePoints(chartCandles));
-    volumeSeries.setData(volumePoints(chartCandles));
+    chartSyncRef.current = syncChartSeries({
+      key: chartIdentity,
+      candles: chartCandles,
+      previous: chartSyncRef.current,
+      candleSeries,
+      volumeSeries,
+      colors: CHART_POINT_COLORS,
+    });
 
     // A routine refresh appends bars at the same logical indices, so keep the
     // user's zoom and scroll position instead of snapping back to fitContent.
+    // If the user was parked on the right edge, shift the window by the number
+    // of appended bars so the newest completed/forming bars stay visible.
     if (!firstLoad && !timeframeChanged && !symbolChanged) {
       if (previousRange) {
-        timeScale.setVisibleLogicalRange(previousRange);
+        const appended = chartCandles.length > previousCount;
+        const wasAtRightEdge = previousCount > 0 && previousRange.to >= previousCount - 1;
+        timeScale.setVisibleLogicalRange(
+          appended && wasAtRightEdge
+            ? ensureRangeIncludesLatest(previousRange, chartCandles.length - 1)
+            : previousRange,
+        );
       }
       return;
     }
 
     // Returning to a previously-viewed instrument/timeframe restores the exact
-    // viewport the user left instead of zooming all the way out.
+    // viewport the user left, but never hides the newest completed/forming bar.
     if (storedRange) {
-      timeScale.setVisibleLogicalRange(storedRange);
+      timeScale.setVisibleLogicalRange(
+        ensureRangeIncludesLatest(storedRange, chartCandles.length - 1),
+      );
       return;
     }
 

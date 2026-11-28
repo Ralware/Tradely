@@ -147,22 +147,28 @@ if not exist "frontend\node_modules" (
 )
 
 rem ---------------------------------------------------------------------------
-rem 7. Start FastAPI on 127.0.0.1:8000 unless a healthy instance is already up.
+rem 7. Start FastAPI on a clean port unless an API with forming-candle refresh is already up.
 rem ---------------------------------------------------------------------------
+set "API_PORT=8001"
 set "API_ALREADY=0"
-powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8000/api/health' -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode -eq 200) { exit 0 } } catch {}; exit 1" >nul 2>&1
+powershell -NoProfile -Command "try { $o = Invoke-RestMethod -Uri 'http://127.0.0.1:%API_PORT%/openapi.json' -TimeoutSec 3; $p = $o.paths.'/api/market/candles'.get.parameters; if ($p.name -contains 'refresh_latest') { exit 0 } } catch {}; exit 1" >nul 2>&1
 if not errorlevel 1 set "API_ALREADY=1"
 
 if "%API_ALREADY%"=="1" (
-    echo [Tradely] FastAPI is already running on http://127.0.0.1:8000 - reusing it.
+    echo [Tradely] Current FastAPI is already running on http://127.0.0.1:%API_PORT% - reusing it.
 ) else (
-    echo [Tradely] Starting FastAPI on http://127.0.0.1:8000 ...
-    start "Tradely API" /d "%~dp0" cmd /k ""%VENV_PY%" -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000 --reload"
-    call :wait_for "http://127.0.0.1:8000/api/health" 40
+    echo [Tradely] Starting FastAPI on http://127.0.0.1:%API_PORT% ...
+    start "Tradely API" /d "%~dp0" cmd /k ""%VENV_PY%" -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port %API_PORT% --reload"
+    call :wait_for "http://127.0.0.1:%API_PORT%/api/health" 40
     if errorlevel 1 (
-        echo [Tradely] ERROR: FastAPI did not become ready on port 8000.
+        echo [Tradely] ERROR: FastAPI did not become ready on port %API_PORT%.
         echo [Tradely] Open the "Tradely API" window to read the traceback.
-        echo [Tradely] A common cause is port 8000 already being used by another program.
+        echo [Tradely] A common cause is port %API_PORT% already being used by another program.
+        goto :fail
+    )
+    powershell -NoProfile -Command "try { $o = Invoke-RestMethod -Uri 'http://127.0.0.1:%API_PORT%/openapi.json' -TimeoutSec 3; $p = $o.paths.'/api/market/candles'.get.parameters; if ($p.name -contains 'refresh_latest') { exit 0 } } catch {}; exit 1" >nul 2>&1
+    if errorlevel 1 (
+        echo [Tradely] ERROR: the API started without the forming-candle refresh endpoint.
         goto :fail
     )
     echo [Tradely] FastAPI is ready.
@@ -194,7 +200,7 @@ rem 9. Open the app.
 rem ---------------------------------------------------------------------------
 echo.
 echo [Tradely] Application ready: http://localhost:5173
-echo [Tradely] API docs:         http://127.0.0.1:8000/docs
+echo [Tradely] API docs:         http://127.0.0.1:%API_PORT%/docs
 echo [Tradely] Close the "Tradely Bridge", "Tradely API" and "Tradely UI" windows to stop.
 echo.
 start "" "http://localhost:5173"

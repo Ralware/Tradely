@@ -18,6 +18,37 @@ export interface CandleQuery {
 
 const LONG_TIMEOUT = 120_000;
 
+export interface CandleRequestOptions {
+  force?: boolean;
+  refreshLatest?: boolean;
+  /** Per-request override; the one-second poll uses a short bound. */
+  timeoutMs?: number;
+}
+
+function abortError(): DOMException {
+  return new DOMException('The operation was aborted.', 'AbortError');
+}
+
+function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  const abortSignal = signal;
+  if (abortSignal.aborted) return Promise.reject(abortError());
+  return new Promise<T>((resolve, reject) => {
+    function cleanup(): void {
+      abortSignal.removeEventListener('abort', onAbort);
+    }
+    function onAbort(): void {
+      cleanup();
+      reject(abortError());
+    }
+    abortSignal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => { cleanup(); resolve(value); },
+      (error) => { cleanup(); reject(error); },
+    );
+  });
+}
+
 interface CandleCacheEntry {
   data: CandlesResponse;
   fetchedAt: number;
@@ -93,9 +124,11 @@ export const marketService = {
   getCandles(
     query: CandleQuery,
     signal?: AbortSignal,
-    options: { force?: boolean; refreshLatest?: boolean } = {},
+    options: CandleRequestOptions = {},
   ): Promise<CandlesResponse> {
-    void signal;
+    if (signal?.aborted) {
+      return Promise.reject(abortError());
+    }
     const requestQuery = { ...query, refreshLatest: options.refreshLatest ?? query.refreshLatest };
     const key = candleKey(requestQuery);
     const interval = requestQuery.interval ?? '1d';
@@ -107,7 +140,7 @@ export const marketService = {
     const pending = candleInFlight.get(key);
     if (pending) {
       cacheEvent('dedupe', { kind: 'candles', key });
-      return pending;
+      return withAbort(pending, signal);
     }
 
     const generation = candleGeneration;
@@ -115,7 +148,8 @@ export const marketService = {
     let request: Promise<CandlesResponse>;
     request = apiRequest<CandlesResponse>('/api/market/candles', {
       query: normalizeQuery(requestQuery),
-      timeoutMs: LONG_TIMEOUT,
+      timeoutMs: options.timeoutMs ?? LONG_TIMEOUT,
+      signal,
     }).then((data) => {
       if (generation === candleGeneration) {
         candleCache.set(key, { data, fetchedAt: Date.now() });
